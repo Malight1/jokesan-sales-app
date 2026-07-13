@@ -1,0 +1,124 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.sales-page {
+  .text-danger { color: $danger; font-weight: 600; }
+
+  .badge-success { @include badge($success-light, $success); }
+  .badge-warning { @include badge($warning-light, $warning); }
+  .badge-danger  { @include badge($danger-light, $danger); }
+
+  .section-title {
+    font-size: $font-size-sm;
+    font-weight: 600;
+    color: $gray-600;
+    margin: 1rem 0 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid $gray-200;
+  }
+
+  .item-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr auto;
+    gap: 0.5rem;
+    align-items: flex-end;
+    margin-bottom: 0.5rem;
+
+    .amount-col .amount-display {
+      padding: 0.5rem 0.75rem;
+      background: $gray-100;
+      border-radius: $border-radius;
+      font-size: $font-size-sm;
+      font-weight: 600;
+      color: $gray-700;
+    }
+
+    .remove-item {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: $danger;
+      padding: 0.5rem;
+      border-radius: $border-radius;
+      margin-bottom: 1rem;
+      &:hover { background: $danger-light; }
+    }
+  }
+
+  .add-item-btn { margin-bottom: 1rem; }
+
+  .stock-error {
+    display: block;
+    color: $danger;
+    font-size: $font-size-xs;
+    margin-top: 0.25rem;
+    font-weight: 500;
+  }
+
+  .stock-hint {
+    font-weight: 400;
+    color: $gray-400;
+    font-size: $font-size-xs;
+  }
+
+  .total-row {
+    text-align: right;
+    font-size: $font-size-base;
+    padding: 0.75rem 0;
+    border-top: 2px solid $gray-200;
+    margin-bottom: 1rem;
+    color: $gray-800;
+  }
+
+  // View modal
+  .view-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: $gray-50;
+    border-radius: $border-radius;
+
+    div {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      span:first-child { font-size: $font-size-xs; color: $gray-500; text-transform: uppercase; letter-spacing: 0.04em; }
+      strong { font-size: $font-size-sm; color: $gray-800; }
+    }
+
+    .badge-success { @include badge($success-light, $success); }
+    .badge-warning { @include badge($warning-light, $warning); }
+    .badge-danger  { @include badge($danger-light, $danger); }
+  }
+
+  .view-table { @include table-style; margin-bottom: 1rem; }
+
+  .view-summary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.4rem;
+    padding: 0.75rem 0;
+    border-top: 1px solid $gray-200;
+
+    div {
+      @include flex(center, flex-end, 1rem);
+      font-size: $font-size-sm;
+      span   { color: $gray-500; min-width: 60px; text-align: right; }
+      strong { font-weight: 600; min-width: 100px; text-align: right; }
+      &.text-danger strong { color: $danger; }
+    }
+  }
+
+  .notes {
+    margin-top: 0.75rem;
+    font-size: $font-size-sm;
+    color: $gray-600;
+    background: $gray-50;
+    padding: 0.75rem;
+    border-radius: $border-radius;
+    border-left: 3px solid $gray-300;
+  }
+}

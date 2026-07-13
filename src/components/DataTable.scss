@@ -1,0 +1,108 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.data-table {
+  .dt-toolbar {
+    @include flex(center, space-between, 0.75rem);
+    margin-bottom: 0.85rem;
+    flex-wrap: wrap;
+
+    .dt-search {
+      @include flex(center, flex-start, 0.5rem);
+      background: $white;
+      border: 1px solid $gray-300;
+      border-radius: $border-radius;
+      padding: 0 0.7rem;
+      min-width: 240px;
+      color: $gray-400;
+
+      &:focus-within { border-color: $primary; box-shadow: 0 0 0 3px rgba($primary, 0.1); }
+
+      input {
+        border: none; outline: none; padding: 0.5rem 0; font-size: $font-size-sm;
+        width: 100%; color: $gray-800; background: transparent;
+      }
+    }
+
+    .dt-toolbar-right { @include flex(center, flex-end, 0.5rem); }
+
+    .dt-export {
+      position: relative;
+
+      .dt-export-menu {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 4px);
+        background: $white;
+        border: 1px solid $gray-200;
+        border-radius: $border-radius;
+        box-shadow: $shadow-lg;
+        z-index: 50;
+        min-width: 170px;
+        padding: 0.3rem;
+
+        button {
+          @include flex(center, flex-start, 0.55rem);
+          width: 100%;
+          padding: 0.5rem 0.6rem;
+          border: none;
+          background: none;
+          cursor: pointer;
+          font-size: $font-size-sm;
+          color: $gray-700;
+          border-radius: 6px;
+          &:hover { background: $gray-100; }
+        }
+      }
+    }
+  }
+
+  table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    &:hover { color: $gray-700; }
+    .th-inner { @include flex(center, flex-start, 0.25rem); }
+  }
+
+  th.align-right, td.align-right { text-align: right; }
+  th.align-center, td.align-center { text-align: center; }
+  th.align-right .th-inner { justify-content: flex-end; }
+
+  .dt-actions {
+    white-space: nowrap;
+    .dt-action {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: $gray-500;
+      padding: 0.3rem;
+      border-radius: 6px;
+      transition: $transition;
+      &:hover { background: $gray-100; color: $primary; }
+      &.danger:hover { background: $danger-light; color: $danger; }
+      & + .dt-action { margin-left: 0.15rem; }
+    }
+  }
+
+  .dt-footer {
+    @include flex(center, space-between);
+    margin-top: 0.85rem;
+
+    .dt-count { font-size: $font-size-xs; color: $gray-500; }
+
+    .dt-pager {
+      @include flex(center, flex-end, 0.35rem);
+      button {
+        @include flex(center, center);
+        width: 30px; height: 30px;
+        border: 1px solid $gray-300;
+        background: $white;
+        border-radius: 6px;
+        cursor: pointer;
+        color: $gray-600;
+        &:hover:not(:disabled) { background: $gray-100; border-color: $gray-400; }
+        &:disabled { opacity: 0.4; cursor: not-allowed; }
+      }
+    }
+  }
+}

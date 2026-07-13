@@ -1,0 +1,262 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; }
+
+body {
+  font-family: $font-family;
+  color: $gray-800;
+  background: $gray-50;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 { font-size: $font-size-2xl; font-weight: 700; color: $gray-900; }
+h2 { font-size: $font-size-xl; font-weight: 600; color: $gray-900; }
+h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; }
+
+// Buttons
+.btn {
+  @include btn-base;
+
+  &-primary {
+    @include btn-base;
+    background: $primary;
+    color: $white;
+    &:hover { background: $primary-dark; }
+  }
+
+  &-secondary {
+    @include btn-base;
+    background: $white;
+    color: $gray-700;
+    border: 1px solid $gray-300;
+    &:hover { background: $gray-50; }
+  }
+
+  &-danger {
+    @include btn-base;
+    background: $danger;
+    color: $white;
+    &:hover { background: darken($danger, 8%); }
+  }
+
+  &-ghost {
+    @include btn-base;
+    background: transparent;
+    color: $gray-600;
+    &:hover { background: $gray-100; color: $gray-800; }
+  }
+
+  &-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: $font-size-xs;
+  }
+}
+
+// Badges
+.badge {
+  &-success { @include badge($success-light, $success); }
+  &-warning { @include badge($warning-light, $warning); }
+  &-danger  { @include badge($danger-light, $danger); }
+  &-gray    { @include badge($gray-100, $gray-600); }
+  &-primary { @include badge($primary-light, $primary); }
+}
+
+// Form elements
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+
+  label {
+    font-size: $font-size-sm;
+    font-weight: 500;
+    color: $gray-700;
+  }
+
+  input, select, textarea { @include input-base; }
+  textarea { resize: vertical; min-height: 80px; }
+}
+
+// Card
+.card {
+  @include card;
+}
+
+// Table wrapper
+.table-wrapper {
+  overflow-x: auto;
+  border-radius: $border-radius-lg;
+  border: 1px solid $gray-200;
+  background: $white;
+
+  table { @include table-style; }
+}
+
+// Page header
+.page-header {
+  @include flex(center, space-between);
+  margin-bottom: 1.5rem;
+
+  .page-title {
+    h1 { font-size: $font-size-2xl; }
+    p  { font-size: $font-size-sm; color: $gray-500; margin-top: 0.2rem; }
+  }
+}
+
+// Empty state
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: $gray-400;
+
+  svg { margin-bottom: 0.75rem; opacity: 0.4; }
+  p   { font-size: $font-size-sm; }
+}
+
+// Divider
+.divider { border: none; border-top: 1px solid $gray-200; margin: 1rem 0; }
+
+// Modal overlay
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+
+  .modal {
+    background: $white;
+    border-radius: $border-radius-lg;
+    box-shadow: $shadow-lg;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+
+    &-header {
+      @include flex(center, space-between);
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid $gray-200;
+
+      h2 { font-size: $font-size-lg; }
+
+      .close-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: $gray-400;
+        padding: 0.25rem;
+        border-radius: $border-radius;
+        &:hover { color: $gray-700; background: $gray-100; }
+      }
+    }
+
+    &-body { padding: 1.5rem; }
+
+    &-footer {
+      @include flex(center, flex-end, 0.75rem);
+      padding: 1rem 1.5rem;
+      border-top: 1px solid $gray-200;
+      background: $gray-50;
+      border-radius: 0 0 $border-radius-lg $border-radius-lg;
+    }
+  }
+}
+
+// Alert
+.alert {
+  @include flex(flex-start, flex-start, 0.75rem);
+  padding: 0.875rem 1rem;
+  border-radius: $border-radius;
+  font-size: $font-size-sm;
+  margin-bottom: 1rem;
+
+  &-warning { background: $warning-light; color: darken($warning, 10%); border: 1px solid lighten($warning, 20%); }
+  &-success { background: $success-light; color: darken($success, 10%); border: 1px solid lighten($success, 20%); }
+  &-danger  { background: $danger-light;  color: darken($danger, 10%);  border: 1px solid lighten($danger, 20%);  }
+  &-info    { background: $primary-light; color: $primary-dark; border: 1px solid lighten($primary, 30%); }
+}
+
+// Stat cards row
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  @include card;
+  padding: 1.25rem 1.5rem;
+
+  .stat-label {
+    font-size: $font-size-xs;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: $gray-500;
+    margin-bottom: 0.5rem;
+  }
+
+  .stat-value {
+    font-size: $font-size-2xl;
+    font-weight: 700;
+    color: $gray-900;
+  }
+
+  .stat-sub {
+    font-size: $font-size-xs;
+    color: $gray-500;
+    margin-top: 0.25rem;
+  }
+
+  .stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: $border-radius;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.75rem;
+
+    &.blue   { background: $primary-light; color: $primary; }
+    &.green  { background: $success-light; color: $success; }
+    &.yellow { background: $warning-light; color: $warning; }
+    &.red    { background: $danger-light;  color: $danger;  }
+  }
+}
+
+// Search / filter row
+.filters {
+  @include flex(center, flex-start, 0.75rem);
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+
+  input, select {
+    @include input-base;
+    width: auto;
+    min-width: 200px;
+  }
+}
+
+// Spinner
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+// Responsive grid
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+
+@media (max-width: 768px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}

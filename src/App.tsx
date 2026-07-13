@@ -1,26 +1,59 @@
 import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './lib/AuthContext';
+import { ToastProvider } from './lib/ToastContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Layout from './components/Layout';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import Sales from './pages/Sales';
+import Purchases from './pages/Purchases';
+import Inventory from './pages/Inventory';
+import Production from './pages/Production';
+import FinishedGoods from './pages/FinishedGoods';
+import Expenses from './pages/Expenses';
+import Customers from './pages/Customers';
+import Suppliers from './pages/Suppliers';
+import StockMovement from './pages/StockMovement';
+import Reports from './pages/Reports';
+import StockAlerts from './pages/StockAlerts';
+import Settings from './pages/Settings';
+import './styles/global.scss';
 
-function App() {
+export default function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <ToastProvider>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/sales" element={<Sales />} />
+                    <Route path="/purchases" element={<Purchases />} />
+                    <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/production" element={<Production />} />
+                    <Route path="/finished-goods" element={<FinishedGoods />} />
+                    <Route path="/expenses" element={<Expenses />} />
+                    <Route path="/customers" element={<Customers />} />
+                    <Route path="/suppliers" element={<Suppliers />} />
+                    <Route path="/stock-movement" element={<StockMovement />} />
+                    <Route path="/reports" element={<Reports />} />
+                    <Route path="/stock-alerts" element={<StockAlerts />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+    </ToastProvider>
   );
 }
-
-export default App;

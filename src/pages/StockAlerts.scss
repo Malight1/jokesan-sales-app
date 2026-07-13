@@ -1,0 +1,103 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.stock-alerts-page {
+
+  .all-clear {
+    text-align: center;
+    padding: 4rem 1rem;
+
+    .all-clear-icon { font-size: 3rem; margin-bottom: 0.75rem; }
+    h2 { font-size: $font-size-xl; margin-bottom: 0.4rem; color: $success; }
+    p  { color: $gray-500; font-size: $font-size-sm; }
+  }
+
+  .alert-section {
+    margin-bottom: 2rem;
+
+    .section-header {
+      @include flex(center, flex-start, 0.5rem);
+      margin-bottom: 0.75rem;
+      padding: 0.6rem 0.9rem;
+      border-radius: $border-radius;
+      font-weight: 600;
+      font-size: $font-size-sm;
+
+      &.danger  { background: $danger-light;  color: darken($danger, 5%);  svg { color: $danger; } }
+      &.warning { background: $warning-light; color: darken($warning, 10%); svg { color: $warning; } }
+
+      h3 { font-size: $font-size-sm; font-weight: 600; }
+    }
+  }
+
+  .alert-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.85rem;
+  }
+
+  .alert-card {
+    background: $white;
+    border-radius: $border-radius-lg;
+    padding: 1rem 1.1rem;
+    box-shadow: $shadow-sm;
+    border: 1px solid $gray-200;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+
+    &.out-of-stock { border-left: 4px solid $danger; }
+    &.low-stock    { border-left: 4px solid $warning; }
+
+    .alert-card-top {
+      @include flex(flex-start, space-between);
+
+      .item-name {
+        font-weight: 600;
+        font-size: $font-size-sm;
+        color: $gray-900;
+        margin-bottom: 0.2rem;
+      }
+      .item-meta {
+        font-size: $font-size-xs;
+        color: $gray-400;
+      }
+
+      .badge-danger  { @include badge($danger-light, $danger); }
+      .badge-warning { @include badge($warning-light, darken($warning, 5%)); }
+    }
+
+    .stock-bar-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+
+      .stock-bar-track {
+        width: 100%;
+        height: 6px;
+        background: $gray-100;
+        border-radius: 100px;
+        overflow: hidden;
+
+        .stock-bar-fill {
+          height: 100%;
+          border-radius: 100px;
+          transition: width 0.3s ease;
+          &.danger  { background: $danger; }
+          &.warning { background: $warning; }
+        }
+      }
+
+      .stock-qty {
+        font-size: $font-size-xs;
+        color: $gray-500;
+        font-weight: 500;
+      }
+    }
+
+    .alert-actions {
+      @include flex(center, flex-start, 0.5rem);
+      flex-wrap: wrap;
+    }
+  }
+}

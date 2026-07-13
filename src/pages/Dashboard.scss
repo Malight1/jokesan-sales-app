@@ -1,0 +1,49 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.dashboard {
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+
+    @media (max-width: 900px) { grid-template-columns: 1fr; }
+  }
+
+  .chart-card h3 { margin-bottom: 1rem; }
+
+  .dash-table {
+    @include table-style;
+    margin-top: 0.75rem;
+
+    .badge-success { @include badge($success-light, $success); }
+    .badge-warning { @include badge($warning-light, $warning); }
+    .badge-danger  { @include badge($danger-light, $danger); }
+  }
+
+  .alert-row {
+    @include flex(flex-start, flex-start, 0.5rem);
+    padding: 0.6rem 0.75rem;
+    border-radius: $border-radius;
+    background: $warning-light;
+    color: darken($warning, 10%);
+    margin-top: 0.5rem;
+    font-size: $font-size-sm;
+
+    svg { flex-shrink: 0; margin-top: 2px; }
+
+    div {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      strong { font-weight: 600; }
+      span   { font-size: $font-size-xs; opacity: 0.8; }
+    }
+  }
+
+  .no-alerts {
+    font-size: $font-size-sm;
+    color: $gray-400;
+    margin-top: 0.5rem;
+  }
+}

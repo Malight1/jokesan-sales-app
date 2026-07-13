@@ -1,0 +1,99 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, $gray-900 0%, #1e3a8a 100%);
+  padding: 1.5rem;
+
+  .auth-card {
+    background: $white;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+    width: 100%;
+    max-width: 420px;
+    padding: 2rem;
+
+    .auth-brand {
+      text-align: center;
+      margin-bottom: 1.5rem;
+
+      .auth-logo {
+        width: 52px;
+        height: 52px;
+        background: $primary;
+        color: $white;
+        border-radius: 14px;
+        @include flex(center, center);
+        margin: 0 auto 0.75rem;
+      }
+
+      h1 { font-size: $font-size-2xl; color: $gray-900; }
+      p  { font-size: $font-size-sm; color: $gray-500; margin-top: 0.2rem; }
+    }
+
+    .auth-tabs {
+      display: flex;
+      background: $gray-100;
+      border-radius: $border-radius;
+      padding: 0.25rem;
+      margin-bottom: 1.25rem;
+
+      button {
+        flex: 1;
+        padding: 0.5rem;
+        border: none;
+        background: transparent;
+        border-radius: 6px;
+        font-size: $font-size-sm;
+        font-weight: 500;
+        color: $gray-500;
+        cursor: pointer;
+        transition: $transition;
+
+        &.active { background: $white; color: $gray-900; box-shadow: $shadow-sm; }
+      }
+    }
+
+    .auth-alert {
+      padding: 0.7rem 0.9rem;
+      border-radius: $border-radius;
+      font-size: $font-size-sm;
+      margin-bottom: 1rem;
+
+      &.error   { background: $danger-light; color: darken($danger, 8%); }
+      &.success { background: $success-light; color: darken($success, 8%); }
+    }
+
+    .auth-submit {
+      width: 100%;
+      justify-content: center;
+      padding: 0.65rem;
+      margin-top: 0.5rem;
+      font-size: $font-size-base;
+    }
+
+    .auth-foot {
+      text-align: center;
+      font-size: $font-size-sm;
+      color: $gray-500;
+      margin-top: 1.25rem;
+
+      .link-btn {
+        background: none;
+        border: none;
+        color: $primary;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: $font-size-sm;
+        &:hover { text-decoration: underline; }
+      }
+    }
+  }
+}
+
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
