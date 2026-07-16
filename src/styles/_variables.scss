@@ -1,7 +1,15 @@
-// Colors
+// ============================================================
+// StockFlow design tokens
+// Palette: professional navy + locked blue accent. One accent only.
+// ============================================================
+
+// Accent (LOCKED — the only accent color in the product)
 $primary: #2563eb;
 $primary-dark: #1d4ed8;
+$primary-darker: #1e40af;
 $primary-light: #eff6ff;
+$primary-100: #dbeafe;
+
 $secondary: #64748b;
 $success: #16a34a;
 $success-light: #f0fdf4;
@@ -10,7 +18,7 @@ $warning-light: #fffbeb;
 $danger: #dc2626;
 $danger-light: #fef2f2;
 
-// Neutrals
+// Neutrals (slate ramp)
 $white: #ffffff;
 $gray-50: #f8fafc;
 $gray-100: #f1f5f9;
@@ -22,21 +30,38 @@ $gray-600: #475569;
 $gray-700: #334155;
 $gray-800: #1e293b;
 $gray-900: #0f172a;
+$gray-950: #020617;
+
+// Sidebar surface (deep navy with subtle warmth)
+$sidebar-bg: #0b1220;
+$sidebar-hover: rgba(255, 255, 255, 0.06);
 
 // Layout
-$sidebar-width: 240px;
-$header-height: 60px;
-$border-radius: 8px;
-$border-radius-lg: 12px;
+$sidebar-width: 244px;
+$header-height: 62px;
 
-// Shadows
-$shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-$shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-$shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
-$shadow-lg: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
+// Radius scale (SHAPE LOCK — use these, nothing else)
+$radius-sm: 6px;   // inputs, small controls, badges' host chips
+$radius: 8px;      // buttons
+$radius-lg: 12px;  // cards, modals, tiles
+$radius-full: 999px; // pills, avatars, icon buttons
+// legacy aliases (kept so existing references keep working)
+$border-radius: $radius;
+$border-radius-lg: $radius-lg;
 
-// Typography
-$font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+// Shadows — tinted to slate (never pure black on light surfaces), layered
+$shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+$shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+$shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 4px 8px rgba(15, 23, 42, 0.05);
+$shadow-md: 0 4px 10px rgba(15, 23, 42, 0.07), 0 2px 6px rgba(15, 23, 42, 0.05);
+$shadow-lg: 0 12px 24px rgba(15, 23, 42, 0.10), 0 4px 10px rgba(15, 23, 42, 0.06);
+$shadow-xl: 0 24px 48px rgba(15, 23, 42, 0.16), 0 8px 20px rgba(15, 23, 42, 0.08);
+// focus ring
+$ring: 0 0 0 3px rgba(37, 99, 235, 0.28);
+
+// Typography — Plus Jakarta Sans (modern, professional SaaS)
+$font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-mono: 'Plus Jakarta Sans', ui-monospace, 'SF Mono', Menlo, monospace;
 $font-size-xs: 0.75rem;
 $font-size-sm: 0.875rem;
 $font-size-base: 1rem;
@@ -45,5 +70,14 @@ $font-size-xl: 1.25rem;
 $font-size-2xl: 1.5rem;
 $font-size-3xl: 1.875rem;
 
-// Transitions
-$transition: all 0.2s ease;
+// Motion — premium ease; honor reduced-motion at usage sites
+$ease: cubic-bezier(0.16, 1, 0.3, 1);
+$transition: all 0.18s $ease;
+$transition-fast: all 0.12s $ease;
+
+// z-index scale
+$z-sticky: 50;
+$z-dropdown: 100;
+$z-sidebar: 200;
+$z-modal: 1000;
+$z-toast: 2000;

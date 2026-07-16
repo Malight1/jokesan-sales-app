@@ -9,7 +9,7 @@
 // ── Sidebar ──────────────────────────────────────────
 .sidebar {
   width: $sidebar-width;
-  background: $gray-900;
+  background: $sidebar-bg;
   color: $white;
   display: flex;
   flex-direction: column;
@@ -17,71 +17,96 @@
   top: 0;
   left: 0;
   height: 100vh;
-  z-index: 100;
+  z-index: $z-sidebar;
   overflow-y: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+
+  // slim scrollbar
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
 
   &-logo {
-    @include flex(center, flex-start, 0.75rem);
-    padding: 1.25rem 1.25rem 1rem;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    @include flex(center, flex-start, 0.7rem);
+    padding: 1.15rem 1.15rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 
     .logo-icon {
-      width: 36px;
-      height: 36px;
-      background: $primary;
-      border-radius: $border-radius;
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, $primary, $primary-darker);
+      border-radius: $radius;
       @include flex(center, center);
-      font-weight: 700;
-      font-size: $font-size-sm;
+      font-weight: 800;
+      font-size: $font-size-base;
       flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
     }
 
     .logo-text {
-      .name  { font-weight: 700; font-size: $font-size-sm; line-height: 1.2; }
-      .tagline { font-size: $font-size-xs; color: $gray-400; }
+      .name { font-weight: 700; font-size: $font-size-base; line-height: 1.15; letter-spacing: -0.01em; }
+      .tagline { font-size: $font-size-xs; color: $gray-500; }
     }
   }
 
   &-nav {
     flex: 1;
-    padding: 0.75rem 0.75rem;
+    padding: 0.75rem 0.7rem;
 
     .nav-section {
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.35rem;
 
       .nav-label {
         font-size: 0.65rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: $gray-500;
-        padding: 0 0.5rem;
-        margin-bottom: 0.35rem;
+        letter-spacing: 0.09em;
+        color: $gray-600;
+        padding: 0 0.6rem;
+        margin-bottom: 0.4rem;
       }
     }
 
     .nav-item {
-      @include flex(center, flex-start, 0.65rem);
-      padding: 0.6rem 0.75rem;
-      border-radius: $border-radius;
+      @include flex(center, flex-start, 0.7rem);
+      position: relative;
+      padding: 0.55rem 0.75rem;
+      border-radius: $radius;
       font-size: $font-size-sm;
+      font-weight: 500;
       color: $gray-400;
       text-decoration: none;
       transition: $transition;
-      margin-bottom: 1px;
+      margin-bottom: 2px;
       cursor: pointer;
 
-      svg { flex-shrink: 0; width: 16px; height: 16px; }
+      svg { flex-shrink: 0; width: 17px; height: 17px; transition: $transition; }
 
       &:hover {
-        background: rgba(255,255,255,0.07);
+        background: $sidebar-hover;
         color: $white;
       }
 
       &.active {
-        background: $primary;
+        background: linear-gradient(90deg, rgba(37, 99, 235, 0.22), rgba(37, 99, 235, 0.10));
         color: $white;
+        font-weight: 600;
+
+        // accent bar on the left
+        &::before {
+          content: '';
+          position: absolute;
+          left: -0.7rem;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 3px;
+          height: 20px;
+          background: $primary;
+          border-radius: 0 3px 3px 0;
+        }
+        svg { color: #93c5fd; }
       }
+
+      &:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.6); }
 
       .nav-badge {
         margin-left: auto;
@@ -89,29 +114,31 @@
         color: $white;
         font-size: 0.6rem;
         font-weight: 700;
-        padding: 0.1rem 0.45rem;
-        border-radius: 100px;
+        padding: 0.08rem 0.4rem;
+        border-radius: $radius-full;
         min-width: 18px;
         text-align: center;
-        line-height: 1.6;
+        line-height: 1.55;
       }
     }
   }
 
   &-footer {
-    padding: 0.75rem;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    padding: 0.7rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
 
     .user-info {
-      @include flex(center, flex-start, 0.65rem);
-      padding: 0.5rem 0.6rem;
-      border-radius: $border-radius;
+      @include flex(center, flex-start, 0.6rem);
+      padding: 0.5rem 0.55rem;
+      border-radius: $radius;
+      transition: $transition;
+      &:hover { background: $sidebar-hover; }
 
       .avatar {
-        width: 32px;
-        height: 32px;
-        background: $primary;
-        border-radius: 50%;
+        width: 34px;
+        height: 34px;
+        background: linear-gradient(135deg, $primary, $primary-darker);
+        border-radius: $radius-full;
         @include flex(center, center);
         font-size: $font-size-xs;
         font-weight: 700;
@@ -124,31 +151,27 @@
 
         .user-name {
           font-size: $font-size-sm;
-          font-weight: 500;
-          color: $gray-200;
+          font-weight: 600;
+          color: $gray-100;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
-
-        .user-role {
-          font-size: $font-size-xs;
-          color: $gray-500;
-        }
+        .user-role { font-size: $font-size-xs; color: $gray-500; }
       }
 
       .signout-btn {
+        @include flex(center, center);
         background: none;
         border: none;
         color: $gray-400;
         cursor: pointer;
-        padding: 0.35rem;
-        border-radius: $border-radius;
+        padding: 0.4rem;
+        border-radius: $radius-sm;
         flex-shrink: 0;
         transition: $transition;
-        @include flex(center, center);
-
-        &:hover { background: rgba(255,255,255,0.08); color: $white; }
+        &:hover { background: rgba(255, 255, 255, 0.1); color: $white; }
+        &:focus-visible { box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.6); }
       }
     }
   }
@@ -165,32 +188,164 @@
 
 .topbar {
   height: $header-height;
-  background: $white;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: saturate(180%) blur(8px);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
   border-bottom: 1px solid $gray-200;
   @include flex(center, space-between);
-  padding: 0 1.5rem;
+  padding: 0 1.4rem;
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: $z-sticky;
 
   .topbar-left {
-    h2 { font-size: $font-size-lg; color: $gray-800; }
+    h2 { font-size: $font-size-lg; font-weight: 700; color: $gray-900; letter-spacing: -0.01em; }
   }
 
   .topbar-right {
-    @include flex(center, flex-end, 0.75rem);
+    @include flex(center, flex-end, 0.5rem);
 
     .date-badge {
       font-size: $font-size-xs;
+      font-weight: 500;
       color: $gray-500;
       background: $gray-100;
-      padding: 0.3rem 0.75rem;
-      border-radius: 100px;
+      padding: 0.35rem 0.75rem;
+      border-radius: $radius-full;
+      white-space: nowrap;
     }
+  }
+}
+
+// Topbar icon buttons (notifications, settings)
+.icon-btn {
+  @include flex(center, center);
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: $radius-sm;
+  border: 1px solid transparent;
+  background: transparent;
+  color: $gray-500;
+  cursor: pointer;
+  transition: $transition;
+
+  &:hover { background: $gray-100; color: $gray-800; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &.active-surface { background: $gray-100; color: $gray-800; }
+
+  .icon-btn-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    background: $danger;
+    color: $white;
+    font-size: 0.6rem;
+    font-weight: 700;
+    border-radius: $radius-full;
+    @include flex(center, center);
+    border: 2px solid $white;
+    line-height: 1;
+  }
+}
+
+// Notification dropdown
+.notif-wrap { position: relative; }
+
+.notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-width: calc(100vw - 2rem);
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-xl;
+  z-index: $z-dropdown;
+  overflow: hidden;
+  animation: modal-in 0.16s $ease;
+
+  .notif-head {
+    @include flex(center, space-between);
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid $gray-100;
+    h3 { font-size: $font-size-sm; font-weight: 700; }
+    a { font-size: $font-size-xs; color: $primary; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+  }
+
+  .notif-list { max-height: 360px; overflow-y: auto; }
+
+  .notif-item {
+    @include flex(flex-start, flex-start, 0.65rem);
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid $gray-100;
+    text-decoration: none;
+    transition: background 0.12s $ease;
+    &:hover { background: $gray-50; }
+    &:last-child { border-bottom: none; }
+
+    .notif-dot {
+      @include flex(center, center);
+      width: 30px; height: 30px;
+      border-radius: $radius-sm;
+      flex-shrink: 0;
+      &.warn { background: $warning-light; color: $warning; }
+      &.crit { background: $danger-light; color: $danger; }
+    }
+    .notif-body {
+      flex: 1; min-width: 0;
+      .notif-title { font-size: $font-size-sm; font-weight: 600; color: $gray-800; }
+      .notif-sub { font-size: $font-size-xs; color: $gray-500; }
+    }
+  }
+
+  .notif-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: $gray-400;
+    font-size: $font-size-sm;
   }
 }
 
 .page-content {
   padding: 1.5rem;
   flex: 1;
+}
+
+// ── Mobile: collapse sidebar to an off-canvas drawer ──
+.sidebar-scrim { display: none; }
+
+@media (max-width: 900px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.22s $ease;
+    box-shadow: $shadow-xl;
+    &.open { transform: translateX(0); }
+  }
+  .main-content { margin-left: 0; }
+  .sidebar-scrim {
+    &.show {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      z-index: calc(#{$z-sidebar} - 1);
+    }
+  }
+  .topbar { padding: 0 1rem; }
+  .page-content { padding: 1rem; }
+}
+
+.topbar-menu-btn {
+  @include flex(center, center);
+  display: none;
+  width: 38px; height: 38px;
+  border: none; background: transparent; color: $gray-600;
+  border-radius: $radius-sm; cursor: pointer;
+  &:hover { background: $gray-100; }
+  @media (max-width: 900px) { display: flex; }
 }

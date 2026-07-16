@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle } from 'lucide-react';
 import {
-  sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups,
+  sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding,
   SalesOrder, Customer, FinishedGood, Lookup,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -11,6 +11,7 @@ import { generateInvoicePdf, whatsappLink } from '../lib/invoice';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import OfflineBanner from '../components/OfflineBanner';
 import NumberInput from '../components/NumberInput';
 import './Sales.scss';
 
@@ -27,8 +28,8 @@ interface LineItem { finished_good_id: string; quantity: number; unit_price: num
 export default function Sales() {
   const toast = useToast();
   const { tenant } = useAuth();
-  const { data: rows, loading, error, refetch } = useQuery<SalesOrder[]>(() => salesApi.list(), []);
-  const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), []);
+  const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
+  const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
   const { data: goods, refetch: refetchGoods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
 
@@ -76,6 +77,9 @@ export default function Sales() {
     return i.quantity <= 0 || i.quantity > productStock(i.finished_good_id);
   });
   const validItems = form.items.filter(i => i.finished_good_id && i.quantity > 0);
+  const vatRate = tenant?.vat_enabled ? tenant.vat_rate : 0;
+  const vatAmt = total * vatRate / 100;
+  const grandTotal = total + vatAmt;
   const canSubmit = validItems.length > 0 && total > 0 && !stockError;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -87,6 +91,7 @@ export default function Sales() {
       paymentTypeId: form.paymentTypeId || null,
       amountPaid: Number(form.amountPaid) || 0,
       items: validItems.map(i => ({ finished_good_id: i.finished_good_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
+      vatRate,
     });
     if (res) {
       toast.success('Sale recorded — stock deducted, COGS calculated.');
@@ -124,6 +129,8 @@ export default function Sales() {
     try {
       const detail = await salesApi.detail(s.id);
       const cust = customers?.find(c => c.id === s.customer_id);
+      let logo: string | null = null;
+      if (tenant?.logo_url) { try { logo = await branding.toDataUrl(tenant.logo_url); } catch { /* skip logo */ } }
       generateInvoicePdf({
         companyName: tenant?.name ?? 'My Business',
         invoiceNo: invoiceNo(s),
@@ -135,6 +142,8 @@ export default function Sales() {
           name: productName(i.finished_good_id), qty: i.quantity, unitPrice: i.unit_price, amount: i.amount,
         })),
         total: s.total_amount, paid: s.amount_paid, balance: s.balance,
+        subtotal: s.subtotal, vatAmount: s.vat_amount, vatRate: s.vat_rate,
+        tin: tenant?.tin, logoDataUrl: logo,
       });
       toast.success('Invoice downloaded.');
     } catch (e: any) {
@@ -203,6 +212,7 @@ export default function Sales() {
         <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Sale</button>
       </div>
 
+      {isOffline && <OfflineBanner label="sales list" />}
       <DataTable
         columns={columns}
         rows={rows}
@@ -285,7 +295,14 @@ export default function Sales() {
                 })}
                 <button type="button" className="btn-ghost btn-sm add-item-btn" onClick={addItem}><Plus size={14} /> Add item</button>
 
-                <div className="total-row"><strong>Total: {fmt(total)}</strong></div>
+                <div className="total-row">
+                  {vatRate > 0 && (
+                    <div style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 400, marginBottom: 4 }}>
+                      Subtotal: {fmt(total)} &nbsp;·&nbsp; VAT ({vatRate}%): {fmt(vatAmt)}
+                    </div>
+                  )}
+                  <strong>Total: {fmt(grandTotal)}</strong>
+                </div>
 
                 <div className="grid-2">
                   <div className="form-group">

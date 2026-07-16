@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { clearAllCache } from './offlineCache';
+import { clearQueue } from './offlineQueue';
 
 export type Role = 'admin' | 'sales' | 'inventory' | 'accounts';
 
@@ -21,6 +23,11 @@ export interface Tenant {
   plan: string;
   currency: string;
   logo_url: string | null;
+  vat_enabled: boolean;
+  vat_rate: number;
+  tin: string | null;
+  trial_ends_at: string | null;
+  plan_expires_at: string | null;
 }
 
 interface AuthState {
@@ -62,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (prof?.tenant_id) {
       const { data: ten } = await supabase
         .from('tenants')
-        .select('id, name, type, plan, currency, logo_url')
+        .select('id, name, type, plan, currency, logo_url, vat_enabled, vat_rate, tin, trial_ends_at, plan_expires_at')
         .eq('id', prof.tenant_id)
         .single();
       setTenant(ten as Tenant | null);
@@ -76,11 +83,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session, loadProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session?.user) await loadProfile(data.session.user.id);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(async ({ data }) => {
+        setSession(data.session);
+        if (data.session?.user) await loadProfile(data.session.user.id);
+      })
+      .catch((err) => {
+        console.error('Failed to load session', err);
+        setSession(null);
+      })
+      .finally(() => setLoading(false));
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, sess) => {
       setSession(sess);
@@ -115,6 +127,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setProfile(null);
     setTenant(null);
+    clearAllCache();
+    // A still-pending offline sale must never replay under a different
+    // tenant's session if someone else signs into this device next.
+    clearQueue();
   };
 
   return (

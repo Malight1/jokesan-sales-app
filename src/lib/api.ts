@@ -11,7 +11,7 @@ import { supabase } from './supabase';
 export interface Customer {
   id: string; first_name: string | null; last_name: string | null;
   company_store: string | null; address: string | null; phone: string | null;
-  email: string | null; customer_type_id: string | null;
+  email: string | null; customer_type_id: string | null; last_reminded_at: string | null;
 }
 export interface Supplier {
   id: string; first_name: string | null; last_name: string | null;
@@ -19,17 +19,18 @@ export interface Supplier {
 }
 export interface Material {
   id: string; name: string; unit: string | null; type_of_material: string;
-  qty_balance: number; min_stock_level: number;
+  qty_balance: number; min_stock_level: number; barcode: string | null;
 }
 export interface FinishedGood {
   id: string; name: string; unit: string | null; qty_balance: number;
-  min_stock_level: number; default_markup: number; selling_price: number;
+  min_stock_level: number; default_markup: number; selling_price: number; barcode: string | null;
 }
 export interface SalesOrder {
   id: string; transaction_date: string; customer_id: string | null;
   total_amount: number; amount_paid: number; balance: number; cogs: number;
   gross_profit: number; payment_status: string; reference: string | null;
   notes: string | null; created_at: string; voided: boolean;
+  subtotal: number; vat_amount: number; vat_rate: number;
 }
 export interface PurchaseOrder {
   id: string; purchase_date: string; supplier_id: string | null;
@@ -91,6 +92,7 @@ export const customers = {
   create: (c: Partial<Customer>) => run<Customer>(supabase.from('customers').insert(c).select().single()),
   update: (id: string, c: Partial<Customer>) => run<Customer>(supabase.from('customers').update(c).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('customers').delete().eq('id', id)),
+  markReminded: (id: string) => del(supabase.from('customers').update({ last_reminded_at: new Date().toISOString() }).eq('id', id)),
 };
 
 // ============================================================
@@ -112,6 +114,11 @@ export const materials = {
   update: (id: string, m: Partial<Material>) => run<Material>(supabase.from('materials').update(m).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('materials').delete().eq('id', id)),
   setMinLevel: (id: string, min_stock_level: number) => del(supabase.from('materials').update({ min_stock_level }).eq('id', id)),
+  findByBarcode: async (code: string): Promise<Material | null> => {
+    const r = await supabase.from('materials').select('*').eq('barcode', code).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return r.data as Material | null;
+  },
 };
 
 // ============================================================
@@ -123,6 +130,11 @@ export const finishedGoods = {
   update: (id: string, g: Partial<FinishedGood>) => run<FinishedGood>(supabase.from('finished_goods').update(g).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('finished_goods').delete().eq('id', id)),
   setMinLevel: (id: string, min_stock_level: number) => del(supabase.from('finished_goods').update({ min_stock_level }).eq('id', id)),
+  findByBarcode: async (code: string): Promise<FinishedGood | null> => {
+    const r = await supabase.from('finished_goods').select('*').eq('barcode', code).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return r.data as FinishedGood | null;
+  },
 };
 
 // ============================================================
@@ -159,10 +171,12 @@ export const sales = {
   create: (params: {
     customerId: string | null; date: string; paymentTypeId: string | null;
     amountPaid: number; items: { finished_good_id: string; quantity: number; unit_price: number }[];
+    vatRate?: number;
   }) =>
     rpc<string>('create_sale', {
       p_customer: params.customerId, p_date: params.date,
       p_payment_type: params.paymentTypeId, p_amount_paid: params.amountPaid, p_items: params.items,
+      p_vat_rate: params.vatRate ?? 0,
     }),
   addPayment: (saleId: string, amount: number, paymentTypeId: string | null, reference?: string, notes?: string) =>
     rpcVoid('record_sale_payment', {
@@ -243,24 +257,37 @@ export const reports = {
 // ============================================================
 export interface TeamMember {
   id: string; full_name: string | null; email: string | null;
-  role: string; is_active: boolean;
+  role: string; is_active: boolean; branch_id: string | null;
 }
 export interface StaffInvite {
-  id: string; email: string; role: string; status: string; created_at: string;
+  id: string; email: string; role: string; status: string; created_at: string; branch_id: string | null;
 }
 
 export const team = {
-  members: () => run<TeamMember[]>(supabase.from('profiles').select('id, full_name, email, role, is_active').order('created_at')),
+  members: () => run<TeamMember[]>(supabase.from('profiles').select('id, full_name, email, role, is_active, branch_id').order('created_at')),
   setRole: (id: string, role: string) => del(supabase.from('profiles').update({ role }).eq('id', id)),
   setActive: (id: string, is_active: boolean) => del(supabase.from('profiles').update({ is_active }).eq('id', id)),
-  invites: () => run<StaffInvite[]>(supabase.from('staff_invites').select('id, email, role, status, created_at').eq('status', 'pending').order('created_at', { ascending: false })),
-  invite: (email: string, role: string) => del(supabase.from('staff_invites').insert({ email: email.trim().toLowerCase(), role })),
+  setBranch: (id: string, branch_id: string | null) => del(supabase.from('profiles').update({ branch_id }).eq('id', id)),
+  invites: () => run<StaffInvite[]>(supabase.from('staff_invites').select('id, email, role, status, created_at, branch_id').eq('status', 'pending').order('created_at', { ascending: false })),
+  invite: (email: string, role: string, branch_id?: string | null) =>
+    del(supabase.from('staff_invites').insert({ email: email.trim().toLowerCase(), role, branch_id: branch_id ?? null })),
   revokeInvite: (id: string) => del(supabase.from('staff_invites').delete().eq('id', id)),
 };
 
 export const tenantApi = {
-  update: (id: string, patch: { name?: string; currency?: string }) =>
+  update: (id: string, patch: { name?: string; currency?: string; vat_enabled?: boolean; vat_rate?: number; tin?: string | null; logo_url?: string | null }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
+};
+
+// ============================================================
+// BRANCHES (multi_branch tenants only)
+// ============================================================
+export interface Branch { id: string; name: string; address: string | null; is_active: boolean; }
+export const branches = {
+  list: () => run<Branch[]>(supabase.from('branches').select('*').order('name')),
+  create: (b: { name: string; address?: string | null }) => run<Branch>(supabase.from('branches').insert(b).select().single()),
+  update: (id: string, b: Partial<Branch>) => run<Branch>(supabase.from('branches').update(b).eq('id', id).select().single()),
+  setActive: (id: string, is_active: boolean) => del(supabase.from('branches').update({ is_active }).eq('id', id)),
 };
 
 // Generic CRUD over the three lookup tables (payment/expense/customer types)
@@ -275,6 +302,60 @@ export const profileApi = {
   changePassword: async (password: string) => {
     const r = await supabase.auth.updateUser({ password });
     if (r.error) throw new Error(r.error.message);
+  },
+};
+
+// ---- Logo upload → Supabase Storage, returns public data URL ----
+export const branding = {
+  uploadLogo: async (tenantId: string, file: File): Promise<string> => {
+    const ext = file.name.split('.').pop()?.toLowerCase() === 'jpg' ? 'jpeg' : (file.name.split('.').pop()?.toLowerCase() || 'png');
+    const path = `${tenantId}/logo.${ext}`;
+    const up = await supabase.storage.from('logos').upload(path, file, { upsert: true, contentType: file.type });
+    if (up.error) throw new Error(up.error.message);
+    const { data } = supabase.storage.from('logos').getPublicUrl(path);
+    return data.publicUrl;
+  },
+  // Fetch an image URL and return a data URL (jsPDF needs base64, not a URL).
+  toDataUrl: async (url: string): Promise<string> => {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(r.result as string);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  },
+};
+
+// ============================================================
+// SUPER ADMIN (platform owner)
+// ============================================================
+export interface PlatformTenant {
+  id: string; name: string; plan: string; is_active: boolean;
+  created_at: string; users: number; sales_count: number; revenue: number;
+}
+export const platform = {
+  isAdmin: () => rpc<boolean>('is_platform_admin'),
+  tenants: () => rpc<PlatformTenant[]>('platform_tenants'),
+  setActive: (tenantId: string, active: boolean) => rpcVoid('platform_set_active', { p_tenant: tenantId, p_active: active }),
+};
+
+// ============================================================
+// BILLING (Paystack) — public key in the browser, secret key in the
+// Edge Function. After Popup success we verify server-side.
+// ============================================================
+export const PLANS = [
+  { id: 'starter',  name: 'Starter',  price: 7500,  users: 1,  blurb: 'Solo owner', features: ['Full ERP + invoices', 'WhatsApp receipts', 'CSV import', 'VAT', '1 user'] },
+  { id: 'growth',   name: 'Growth',   price: 20000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'POS mode', 'Smart Insights', 'Debtor reminders', '5 users'] },
+  { id: 'business', name: 'Business',  price: 45000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Branches', 'Bank reconciliation', 'Priority support', '15 users'] },
+] as const;
+
+export const billing = {
+  verify: async (reference: string, plan: string): Promise<{ success?: boolean; error?: string; expires?: string }> => {
+    const { data, error } = await supabase.functions.invoke('paystack-verify', { body: { reference, plan } });
+    if (error) return { error: error.message };
+    return data;
   },
 };
 

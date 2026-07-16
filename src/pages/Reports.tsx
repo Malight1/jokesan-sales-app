@@ -82,11 +82,11 @@ export default function Reports() {
     const c = custQ.data?.find(x => x.id === id);
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Unknown' : 'Walk-in';
   };
-  const debtorMap: Record<string, { name: string; phone: string | null; total: number; paid: number; balance: number; count: number }> = {};
+  const debtorMap: Record<string, { id: string | null; name: string; phone: string | null; total: number; paid: number; balance: number; count: number }> = {};
   sales.filter(s => s.balance > 0).forEach(s => {
     const key = s.customer_id ?? 'walkin';
     const phone = custQ.data?.find(c => c.id === s.customer_id)?.phone ?? null;
-    debtorMap[key] = debtorMap[key] || { name: custName(s.customer_id), phone, total: 0, paid: 0, balance: 0, count: 0 };
+    debtorMap[key] = debtorMap[key] || { id: s.customer_id, name: custName(s.customer_id), phone, total: 0, paid: 0, balance: 0, count: 0 };
     debtorMap[key].total += s.total_amount;
     debtorMap[key].paid += s.amount_paid;
     debtorMap[key].balance += s.balance;
@@ -94,7 +94,7 @@ export default function Reports() {
   });
   const debtors = Object.values(debtorMap).sort((a, b) => b.balance - a.balance);
 
-  const remindDebtor = (d: { name: string; phone: string | null; balance: number }) => {
+  const remindDebtor = async (d: { id: string | null; name: string; phone: string | null; balance: number }) => {
     const lines = [
       `Dear ${d.name},`,
       ``,
@@ -104,6 +104,7 @@ export default function Reports() {
       `Kindly settle at your earliest convenience. Thank you for your patronage! 🙏`,
     ];
     window.open(whatsappLink(d.phone, lines.join('\n')), '_blank');
+    if (d.id) await customersApi.markReminded(d.id);
   };
 
   const rangeLabel = from || to ? ` (${from || 'start'} → ${to || 'today'})` : '';

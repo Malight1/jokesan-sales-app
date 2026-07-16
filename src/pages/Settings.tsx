@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
-  team, tenantApi, lookupsAdmin, profileApi, lookups, boms,
+  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi,
   materials as materialsApi, finishedGoods as goodsApi,
-  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood,
+  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -12,11 +12,13 @@ import { Loading, ErrorState, Empty } from '../components/DataStates';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
 
-type Tab = 'business' | 'team' | 'types' | 'recipes';
+type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'recipes';
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'business', label: 'Business & Profile', icon: <Building2 size={15} /> },
   { id: 'team', label: 'Team', icon: <Users size={15} /> },
+  { id: 'branches', label: 'Branches', icon: <MapPin size={15} /> },
+  { id: 'billing', label: 'Billing', icon: <CreditCard size={15} /> },
   { id: 'types', label: 'Types', icon: <Tags size={15} /> },
   { id: 'recipes', label: 'Recipes (BOM)', icon: <FlaskConical size={15} /> },
 ];
@@ -29,6 +31,9 @@ const roleOptions = [
 ];
 
 export default function Settings() {
+  const { tenant } = useAuth();
+  const isMultiBranch = tenant?.type === 'multi_branch';
+  const TABS = ALL_TABS.filter(t => t.id !== 'branches' || isMultiBranch);
   const [tab, setTab] = useState<Tab>('business');
 
   return (
@@ -50,9 +55,202 @@ export default function Settings() {
       </div>
 
       {tab === 'business' && <BusinessTab />}
-      {tab === 'team' && <TeamTab />}
+      {tab === 'team' && <TeamTab isMultiBranch={isMultiBranch} />}
+      {tab === 'branches' && isMultiBranch && <BranchesTab />}
+      {tab === 'billing' && <BillingTab />}
       {tab === 'types' && <TypesTab />}
       {tab === 'recipes' && <RecipesTab />}
+    </div>
+  );
+}
+
+// ============================================================
+// Branches — multi_branch tenants only
+// ============================================================
+function BranchesTab() {
+  const toast = useToast();
+  const branchesQ = useQuery<Branch[]>(() => branchesApi.list(), []);
+  const createMut = useMutation((b: { name: string; address?: string | null }) => branchesApi.create(b));
+  const updateMut = useMutation((id: string, b: Partial<Branch>) => branchesApi.update(id, b));
+  const activeMut = useMutation((id: string, on: boolean) => branchesApi.setActive(id, on));
+
+  const [showModal, setShowModal] = useState(false);
+  const [editRow, setEditRow] = useState<Branch | null>(null);
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+
+  const openCreate = () => { setEditRow(null); setName(''); setAddress(''); setShowModal(true); };
+  const openEdit = (b: Branch) => { setEditRow(b); setName(b.name); setAddress(b.address ?? ''); setShowModal(true); };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = editRow
+      ? await updateMut.mutate(editRow.id, { name: name.trim(), address: address.trim() || null })
+      : await createMut.mutate({ name: name.trim(), address: address.trim() || null });
+    if (res) {
+      toast.success(editRow ? 'Branch updated.' : 'Branch created.');
+      setShowModal(false);
+      branchesQ.refetch();
+    } else {
+      toast.error((editRow ? updateMut.error : createMut.error) ?? 'Failed.');
+    }
+  };
+
+  const toggle = async (b: Branch) => {
+    const res = await activeMut.mutate(b.id, !b.is_active);
+    if (res !== null) { toast.success(`${b.name} ${b.is_active ? 'deactivated' : 'reactivated'}.`); branchesQ.refetch(); }
+    else toast.error(activeMut.error ?? 'Failed.');
+  };
+
+  if (branchesQ.loading) return <Loading label="Loading branches…" />;
+  if (branchesQ.error) return <ErrorState message={branchesQ.error} onRetry={branchesQ.refetch} />;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>{branchesQ.data?.length ?? 0} branch{(branchesQ.data?.length ?? 0) !== 1 ? 'es' : ''}</p>
+        <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Branch</button>
+      </div>
+
+      <div className="alert alert-info" style={{ fontSize: '0.8rem', marginBottom: '1rem' }}>
+        New sales/purchases/production are recorded under the branch each staff member is assigned to (see the Team tab). Assign staff to a branch so their records land in the right place.
+      </div>
+
+      {(branchesQ.data?.length ?? 0) === 0 ? <Empty message="No branches yet." /> : (
+        <div className="table-wrapper">
+          <table>
+            <thead><tr><th>Name</th><th>Address</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+            <tbody>
+              {branchesQ.data?.map(b => (
+                <tr key={b.id}>
+                  <td><strong>{b.name}</strong></td>
+                  <td>{b.address || '—'}</td>
+                  <td>{b.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Inactive</span>}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn-ghost btn-sm" onClick={() => openEdit(b)}><Pencil size={13} /></button>
+                    <button className="btn-ghost btn-sm" style={{ color: b.is_active ? '#dc2626' : '#16a34a' }} onClick={() => toggle(b)}>
+                      {b.is_active ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2>{editRow ? 'Edit Branch' : 'Add Branch'}</h2>
+              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+            </div>
+            <form onSubmit={submit}>
+              <div className="modal-body">
+                <div className="form-group"><label>Branch Name</label><input value={name} onChange={e => setName(e.target.value)} required placeholder="e.g. Lagos, Abuja Warehouse…" /></div>
+                <div className="form-group"><label>Address</label><input value={address} onChange={e => setAddress(e.target.value)} /></div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={createMut.pending || updateMut.pending}>
+                  {createMut.pending || updateMut.pending ? 'Saving…' : editRow ? 'Update' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Billing — Paystack subscription
+// ============================================================
+declare global { interface Window { PaystackPop?: any; } }
+
+function BillingTab() {
+  const toast = useToast();
+  const { tenant, profile, refresh } = useAuth();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const currentPlan = tenant?.plan ?? 'trial';
+  const trialEnds = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null;
+  const planExpires = tenant?.plan_expires_at ? new Date(tenant.plan_expires_at) : null;
+  const trialDaysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86400000)) : 0;
+
+  const subscribe = (planId: string, price: number) => {
+    const pubKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+    if (!pubKey) { toast.error('Paystack key not configured.'); return; }
+    if (!window.PaystackPop) { toast.error('Payment library still loading — try again in a second.'); return; }
+    if (!profile?.email) { toast.error('No email on your account.'); return; }
+
+    setBusy(planId);
+    const handler = window.PaystackPop.setup({
+      key: pubKey,
+      email: profile.email,
+      amount: price * 100, // kobo
+      currency: 'NGN',
+      ref: `SF-${planId}-${Date.now()}`,
+      metadata: { plan: planId, tenant: tenant?.id },
+      callback: (resp: any) => {
+        // verify server-side, then activate
+        billing.verify(resp.reference, planId).then(r => {
+          if (r.success) { toast.success('Subscription active! 🎉'); refresh(); }
+          else toast.error(r.error ?? 'Verification failed.');
+          setBusy(null);
+        });
+      },
+      onClose: () => { setBusy(null); toast.info('Payment cancelled.'); },
+    });
+    handler.openIframe();
+  };
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <h3 style={{ marginBottom: '0.5rem' }}>Current Plan</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <span className="badge-primary" style={{ fontSize: '0.9rem', padding: '0.35rem 0.8rem', textTransform: 'capitalize' }}>{currentPlan}</span>
+          {currentPlan === 'trial' && trialEnds && (
+            <span style={{ fontSize: '0.875rem', color: trialDaysLeft <= 3 ? '#dc2626' : '#64748b' }}>
+              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired — subscribe to keep using StockFlow'}
+            </span>
+          )}
+          {planExpires && currentPlan !== 'trial' && (
+            <span style={{ fontSize: '0.875rem', color: '#64748b' }}>Renews {planExpires.toLocaleDateString('en-GB')}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid-3" style={{ alignItems: 'stretch' }}>
+        {PLANS.map(p => {
+          const active = currentPlan === p.id;
+          return (
+            <div key={p.id} className="card" style={{ display: 'flex', flexDirection: 'column', border: active ? '2px solid #2563eb' : undefined }}>
+              <h3 style={{ marginBottom: '0.15rem' }}>{p.name}</h3>
+              <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{p.blurb}</p>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#0f172a' }}>₦{p.price.toLocaleString()}<span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+              <ul style={{ listStyle: 'none', margin: '0.9rem 0', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
+                {p.features.map(f => (
+                  <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: '0.82rem', color: '#475569' }}>
+                    <Check size={14} color="#16a34a" style={{ marginTop: 2, flexShrink: 0 }} /> {f}
+                  </li>
+                ))}
+              </ul>
+              <button className={active ? 'btn-secondary' : 'btn-primary'} disabled={active || busy !== null}
+                onClick={() => subscribe(p.id, p.price)}>
+                {active ? 'Current Plan' : busy === p.id ? 'Opening…' : `Subscribe ₦${p.price.toLocaleString()}`}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '1rem', textAlign: 'center' }}>
+        Secure payment by Paystack. You can cancel anytime. Test mode — use card 4084 0840 8408 4081, any future date, CVV 408.
+      </p>
     </div>
   );
 }
@@ -65,6 +263,9 @@ function BusinessTab() {
   const { tenant, profile, refresh } = useAuth();
   const [name, setName] = useState(tenant?.name ?? '');
   const [currency, setCurrency] = useState(tenant?.currency ?? 'NGN');
+  const [vatEnabled, setVatEnabled] = useState(tenant?.vat_enabled ?? false);
+  const [vatRate, setVatRate] = useState(tenant?.vat_rate ?? 7.5);
+  const [tin, setTin] = useState(tenant?.tin ?? '');
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -72,11 +273,27 @@ function BusinessTab() {
   const saveBiz = useMutation((id: string, patch: any) => tenantApi.update(id, patch));
   const saveName = useMutation((id: string, n: string) => profileApi.updateName(id, n));
   const savePw = useMutation(profileApi.changePassword);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  const uploadLogo = async (file: File) => {
+    if (!tenant) return;
+    setUploadingLogo(true);
+    try {
+      const url = await branding.uploadLogo(tenant.id, file);
+      await tenantApi.update(tenant.id, { logo_url: url });
+      toast.success('Logo uploaded — it will appear on your invoices.');
+      refresh();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Logo upload failed.');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
 
   const submitBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-    const res = await saveBiz.mutate(tenant.id, { name: name.trim(), currency });
+    const res = await saveBiz.mutate(tenant.id, { name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null });
     if (res !== null) { toast.success('Business updated.'); refresh(); }
     else toast.error(saveBiz.error ?? 'Update failed.');
   };
@@ -102,6 +319,24 @@ function BusinessTab() {
     <div className="grid-2" style={{ alignItems: 'start' }}>
       <div className="card">
         <h3 style={{ marginBottom: '1rem' }}>Business</h3>
+
+        <div className="form-group">
+          <label>Logo (appears on invoices)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ width: 56, height: 56, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+              {tenant?.logo_url
+                ? <img src={tenant.logo_url} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                : <span style={{ color: '#cbd5e1', fontSize: '0.7rem' }}>No logo</span>}
+            </div>
+            <label className="btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+              {uploadingLogo ? 'Uploading…' : 'Upload Logo'}
+              <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }}
+                disabled={uploadingLogo}
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); }} />
+            </label>
+          </div>
+        </div>
+
         <form onSubmit={submitBusiness}>
           <div className="form-group">
             <label>Business Name (appears on invoices)</label>
@@ -116,6 +351,25 @@ function BusinessTab() {
               <option value="USD">$ US Dollar (USD)</option>
             </select>
           </div>
+
+          <hr className="divider" />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', marginBottom: '0.75rem' }}>
+            <input type="checkbox" checked={vatEnabled} onChange={e => setVatEnabled(e.target.checked)} style={{ width: 'auto' }} />
+            Charge VAT on sales
+          </label>
+          {vatEnabled && (
+            <div className="grid-2">
+              <div className="form-group">
+                <label>VAT Rate (%)</label>
+                <NumberInput value={vatRate} onChange={setVatRate} />
+              </div>
+              <div className="form-group">
+                <label>TIN (Tax ID — shown on invoices)</label>
+                <input value={tin} onChange={e => setTin(e.target.value)} placeholder="e.g. 01234567-0001" />
+              </div>
+            </div>
+          )}
+
           <button className="btn-primary" type="submit" disabled={saveBiz.pending}>
             {saveBiz.pending ? 'Saving…' : 'Save Business'}
           </button>
@@ -166,26 +420,37 @@ function BusinessTab() {
 // ============================================================
 // Team — members, roles, invites
 // ============================================================
-function TeamTab() {
+function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
   const toast = useToast();
   const { profile } = useAuth();
   const membersQ = useQuery<TeamMember[]>(() => team.members(), []);
   const invitesQ = useQuery<StaffInvite[]>(() => team.invites(), []);
+  const branchesQ = useQuery<Branch[]>(() => branchesApi.list(), [], { cacheKey: 'settings-branches' });
 
   const roleMut = useMutation((id: string, role: string) => team.setRole(id, role));
   const activeMut = useMutation((id: string, on: boolean) => team.setActive(id, on));
-  const inviteMut = useMutation((email: string, role: string) => team.invite(email, role));
+  const branchMut = useMutation((id: string, branchId: string | null) => team.setBranch(id, branchId));
+  const inviteMut = useMutation((email: string, role: string, branchId: string | null) => team.invite(email, role, branchId));
   const revokeMut = useMutation(team.revokeInvite);
 
   const [showInvite, setShowInvite] = useState(false);
   const [invEmail, setInvEmail] = useState('');
   const [invRole, setInvRole] = useState('sales');
+  const [invBranch, setInvBranch] = useState('');
   const [deactivating, setDeactivating] = useState<TeamMember | null>(null);
+
+  const branchName = (id: string | null) => branchesQ.data?.find(b => b.id === id)?.name ?? '—';
 
   const changeRole = async (m: TeamMember, role: string) => {
     const res = await roleMut.mutate(m.id, role);
     if (res !== null) { toast.success(`${m.full_name ?? m.email} is now ${role}.`); membersQ.refetch(); }
     else toast.error(roleMut.error ?? 'Role change failed.');
+  };
+
+  const changeBranch = async (m: TeamMember, branchId: string) => {
+    const res = await branchMut.mutate(m.id, branchId || null);
+    if (res !== null) { toast.success(`${m.full_name ?? m.email} moved to ${branchName(branchId)}.`); membersQ.refetch(); }
+    else toast.error(branchMut.error ?? 'Failed.');
   };
 
   const confirmDeactivate = async () => {
@@ -204,10 +469,10 @@ function TeamTab() {
 
   const sendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await inviteMut.mutate(invEmail, invRole);
+    const res = await inviteMut.mutate(invEmail, invRole, invBranch || null);
     if (res !== null) {
       toast.success(`Invite created for ${invEmail}. Ask them to sign up with that exact email.`);
-      setShowInvite(false); setInvEmail(''); setInvRole('sales');
+      setShowInvite(false); setInvEmail(''); setInvRole('sales'); setInvBranch('');
       invitesQ.refetch();
     } else {
       toast.error(inviteMut.error ?? 'Invite failed.');
@@ -234,7 +499,7 @@ function TeamTab() {
 
       <div className="table-wrapper" style={{ marginBottom: '1.5rem' }}>
         <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th>{isMultiBranch && <th>Branch</th>}<th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
           <tbody>
             {membersQ.data?.map(m => {
               const isSelf = m.id === profile?.id;
@@ -248,6 +513,15 @@ function TeamTab() {
                       {roleOptions.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
                     </select>
                   </td>
+                  {isMultiBranch && (
+                    <td>
+                      <select value={m.branch_id ?? ''} onChange={e => changeBranch(m, e.target.value)}
+                        style={{ padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
+                        <option value="">— none —</option>
+                        {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </td>
+                  )}
                   <td>{m.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Deactivated</span>}</td>
                   <td style={{ textAlign: 'right' }}>
                     {!isSelf && (m.is_active
@@ -304,6 +578,15 @@ function TeamTab() {
                     {roleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 </div>
+                {isMultiBranch && (
+                  <div className="form-group">
+                    <label>Branch</label>
+                    <select value={invBranch} onChange={e => setInvBranch(e.target.value)}>
+                      <option value="">— none yet —</option>
+                      {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
                   Share the app link with them. When they <strong>sign up using this exact email</strong>, they'll automatically join your company with this role — no new company gets created.
                 </div>

@@ -17,7 +17,12 @@ import Suppliers from './pages/Suppliers';
 import StockMovement from './pages/StockMovement';
 import Reports from './pages/Reports';
 import StockAlerts from './pages/StockAlerts';
+import Insights from './pages/Insights';
 import Settings from './pages/Settings';
+import POS from './pages/POS';
+import ImportData from './pages/ImportData';
+import SuperAdmin from './pages/SuperAdmin';
+import MatchPayment from './pages/MatchPayment';
 import './styles/global.scss';
 
 export default function App() {
@@ -45,6 +50,11 @@ export default function App() {
                     <Route path="/stock-movement" element={<StockMovement />} />
                     <Route path="/reports" element={<Reports />} />
                     <Route path="/stock-alerts" element={<StockAlerts />} />
+                    <Route path="/insights" element={<Insights />} />
+                    <Route path="/pos" element={<POS />} />
+                    <Route path="/import" element={<ImportData />} />
+                    <Route path="/platform" element={<SuperAdmin />} />
+                    <Route path="/match-payment" element={<MatchPayment />} />
                     <Route path="/settings" element={<Settings />} />
                   </Routes>
                 </Layout>

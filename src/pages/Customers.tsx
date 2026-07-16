@@ -6,12 +6,13 @@ import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import OfflineBanner from '../components/OfflineBanner';
 
 const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '' };
 
 export default function Customers() {
   const toast = useToast();
-  const { data: rows, loading, error, refetch } = useQuery<Customer[]>(() => customersApi.list(), []);
+  const { data: rows, loading, error, refetch, isOffline } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'customers-list' });
   const { data: types } = useQuery(() => lookups.customerTypes(), []);
   const createMut = useMutation(customersApi.create);
   const updateMut = useMutation((id: string, c: Partial<Customer>) => customersApi.update(id, c));
@@ -92,6 +93,7 @@ export default function Customers() {
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Customer</button>
       </div>
 
+      {isOffline && <OfflineBanner label="customer list" />}
       <DataTable
         columns={columns}
         rows={rows}

@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { Plus, X, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, ScanLine, Wand2, Printer } from 'lucide-react';
 import { finishedGoods as goodsApi, FinishedGood } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
+import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
-const emptyForm = { name: '', unit: 'pcs', selling_price: 0, qty_balance: 0, min_stock_level: 10, default_markup: 1.5 };
+const emptyForm = { name: '', unit: 'pcs', selling_price: 0, qty_balance: 0, min_stock_level: 10, default_markup: 1.5, barcode: '' };
 
 export default function FinishedGoods() {
   const toast = useToast();
@@ -22,19 +24,21 @@ export default function FinishedGoods() {
   const [editRow, setEditRow] = useState<FinishedGood | null>(null);
   const [deleteRow, setDeleteRow] = useState<FinishedGood | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [showScanner, setShowScanner] = useState(false);
 
   const openCreate = () => { setEditRow(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (g: FinishedGood) => {
     setEditRow(g);
-    setForm({ name: g.name, unit: g.unit ?? 'pcs', selling_price: g.selling_price, qty_balance: g.qty_balance, min_stock_level: g.min_stock_level, default_markup: g.default_markup });
+    setForm({ name: g.name, unit: g.unit ?? 'pcs', selling_price: g.selling_price, qty_balance: g.qty_balance, min_stock_level: g.min_stock_level, default_markup: g.default_markup, barcode: g.barcode ?? '' });
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // On edit, exclude qty_balance — stock only moves via production & sales.
-    const { qty_balance, ...editable } = form;
-    const res = editRow ? await updateMut.mutate(editRow.id, editable) : await createMut.mutate(form);
+    const { qty_balance, barcode, ...editable } = form;
+    const payload = { ...editable, barcode: barcode.trim() || null };
+    const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate({ ...payload, qty_balance });
     if (res) {
       toast.success(editRow ? 'Product updated.' : 'Product added.');
       setShowModal(false);
@@ -82,6 +86,12 @@ export default function FinishedGoods() {
   const pending = createMut.pending || updateMut.pending;
   const formError = editRow ? updateMut.error : createMut.error;
 
+  const printLabels = () => {
+    const withCodes = (rows ?? []).filter(g => g.barcode);
+    if (withCodes.length === 0) { toast.error('No products have a barcode yet. Add one via Edit first.'); return; }
+    printBarcodeLabels(withCodes.map(g => ({ name: g.name, barcode: g.barcode!, priceLabel: fmt(g.selling_price) })), 'Finished Goods Labels');
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -101,6 +111,7 @@ export default function FinishedGoods() {
         exportName="finished-goods"
         exportTitle="Finished Goods"
         rowActions={rowActions}
+        toolbarExtra={<button className="btn-secondary btn-sm" onClick={printLabels}><Printer size={14} /> Print Labels</button>}
         emptyMessage="No products yet. Add one, or load sample data from Raw Materials."
       />
 
@@ -128,6 +139,14 @@ export default function FinishedGoods() {
                   <div className="form-group"><label>Min Stock Level (alert)</label><NumberInput value={form.min_stock_level} onChange={v => setForm(f => ({ ...f, min_stock_level: v }))} /></div>
                 </div>
                 <div className="form-group"><label>Default Markup (× unit cost → auto price)</label><NumberInput value={form.default_markup} onChange={v => setForm(f => ({ ...f, default_markup: v }))} /></div>
+                <div className="form-group">
+                  <label>Barcode</label>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <input value={form.barcode} onChange={e => setForm(f => ({ ...f, barcode: e.target.value }))} placeholder="Scan, type, or generate…" style={{ flex: 1 }} />
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setShowScanner(true)} title="Scan with camera"><ScanLine size={14} /></button>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, barcode: generateBarcode() }))} title="Generate a code"><Wand2 size={14} /></button>
+                  </div>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -148,6 +167,13 @@ export default function FinishedGoods() {
           pending={removeMut.pending}
           onConfirm={handleDelete}
           onCancel={() => setDeleteRow(null)}
+        />
+      )}
+
+      {showScanner && (
+        <BarcodeScanner
+          onScan={code => setForm(f => ({ ...f, barcode: code }))}
+          onClose={() => setShowScanner(false)}
         />
       )}
     </div>

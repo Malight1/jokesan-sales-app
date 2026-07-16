@@ -16,17 +16,35 @@ export interface InvoiceData {
   total: number;
   paid: number;
   balance: number;
+  subtotal?: number;
+  vatAmount?: number;
+  vatRate?: number;
+  tin?: string | null;
+  logoDataUrl?: string | null;
 }
 
 export function generateInvoicePdf(d: InvoiceData) {
   const doc = new jsPDF();
   const pageW = doc.internal.pageSize.getWidth();
 
-  // Header
-  doc.setFontSize(19);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(30, 41, 59);
-  doc.text(d.companyName, 14, 20);
+  // Optional logo (data URL). Falls back to text name if absent/invalid.
+  if (d.logoDataUrl) {
+    try {
+      const fmtType = d.logoDataUrl.includes('png') ? 'PNG' : 'JPEG';
+      doc.addImage(d.logoDataUrl, fmtType, 14, 12, 22, 22);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(d.companyName, 40, 22);
+      if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 40, 28); }
+    } catch { /* ignore bad image */ }
+  } else {
+    doc.setFontSize(19);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(d.companyName, 14, 20);
+    if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 14, 26); }
+  }
 
   doc.setFontSize(22);
   doc.setTextColor(37, 99, 235);
@@ -34,33 +52,33 @@ export function generateInvoicePdf(d: InvoiceData) {
 
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.5);
-  doc.line(14, 26, pageW - 14, 26);
+  doc.line(14, 31, pageW - 14, 31);
 
   // Meta (right)
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`Invoice No: ${d.invoiceNo}`, pageW - 14, 34, { align: 'right' });
-  doc.text(`Date: ${d.date}`, pageW - 14, 40, { align: 'right' });
+  doc.text(`Invoice No: ${d.invoiceNo}`, pageW - 14, 38, { align: 'right' });
+  doc.text(`Date: ${d.date}`, pageW - 14, 44, { align: 'right' });
 
   const status = d.balance <= 0 ? 'PAID' : d.paid > 0 ? 'PART PAYMENT' : 'UNPAID';
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(d.balance <= 0 ? 22 : 220, d.balance <= 0 ? 163 : 38, d.balance <= 0 ? 74 : 38);
-  doc.text(status, pageW - 14, 46, { align: 'right' });
+  doc.text(status, pageW - 14, 50, { align: 'right' });
 
   // Bill to (left)
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(148, 163, 184);
-  doc.text('BILL TO', 14, 34);
+  doc.text('BILL TO', 14, 40);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 41, 59);
-  doc.text(d.customerName, 14, 40);
+  doc.text(d.customerName, 14, 46);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  let y = 45;
+  let y = 51;
   if (d.customerPhone) { doc.text(d.customerPhone, 14, y); y += 5; }
   if (d.customerAddress) { doc.text(d.customerAddress, 14, y); y += 5; }
 
@@ -77,11 +95,14 @@ export function generateInvoicePdf(d: InvoiceData) {
 
   // Totals
   const afterTable = (doc as any).lastAutoTable.finalY + 8;
-  const rows: [string, string, boolean][] = [
-    ['Total', money(d.total), false],
-    ['Amount Paid', money(d.paid), false],
-    ['Balance Due', money(d.balance), true],
-  ];
+  const rows: [string, string, boolean][] = [];
+  if (d.vatAmount && d.vatAmount > 0) {
+    rows.push(['Subtotal', money(d.subtotal ?? d.total - d.vatAmount), false]);
+    rows.push([`VAT (${d.vatRate ?? 7.5}%)`, money(d.vatAmount), false]);
+  }
+  rows.push(['Total', money(d.total), false]);
+  rows.push(['Amount Paid', money(d.paid), false]);
+  rows.push(['Balance Due', money(d.balance), true]);
   let ty = afterTable;
   rows.forEach(([label, value, strong]) => {
     doc.setFontSize(strong ? 12 : 10);

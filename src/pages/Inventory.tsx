@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { Plus, X, Sparkles, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Sparkles, Pencil, Trash2, ScanLine, Wand2, Printer } from 'lucide-react';
 import { materials as materialsApi, demo, Material } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
+import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 
-const emptyForm = { name: '', unit: '', type_of_material: 'Raw Material', qty_balance: 0, min_stock_level: 10 };
+const emptyForm = { name: '', unit: '', type_of_material: 'Raw Material', qty_balance: 0, min_stock_level: 10, barcode: '' };
 
 export default function Inventory() {
   const toast = useToast();
@@ -23,19 +25,21 @@ export default function Inventory() {
   const [deleteRow, setDeleteRow] = useState<Material | null>(null);
   const [filter, setFilter] = useState('All');
   const [form, setForm] = useState(emptyForm);
+  const [showScanner, setShowScanner] = useState(false);
 
   const openCreate = () => { setEditRow(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (m: Material) => {
     setEditRow(m);
-    setForm({ name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material, qty_balance: m.qty_balance, min_stock_level: m.min_stock_level });
+    setForm({ name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material, qty_balance: m.qty_balance, min_stock_level: m.min_stock_level, barcode: m.barcode ?? '' });
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // On edit, exclude qty_balance — stock only moves via purchases/production/sales.
-    const { qty_balance, ...editable } = form;
-    const res = editRow ? await updateMut.mutate(editRow.id, editable) : await createMut.mutate(form);
+    const { qty_balance, barcode, ...editable } = form;
+    const payload = { ...editable, barcode: barcode.trim() || null };
+    const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate({ ...payload, qty_balance });
     if (res) {
       toast.success(editRow ? 'Material updated.' : 'Material added.');
       setShowModal(false);
@@ -73,6 +77,12 @@ export default function Inventory() {
   const stockLabel = (m: Material) => m.qty_balance === 0 ? 'Out of stock' : m.qty_balance <= m.min_stock_level ? 'Low stock' : 'In stock';
 
   const filtered = (rows ?? []).filter(m => filter === 'All' || m.type_of_material === filter);
+
+  const printLabels = () => {
+    const withCodes = filtered.filter(m => m.barcode);
+    if (withCodes.length === 0) { toast.error('No materials have a barcode yet. Add one via Edit first.'); return; }
+    printBarcodeLabels(withCodes.map(m => ({ name: m.name, barcode: m.barcode! })), 'Raw Material Labels');
+  };
 
   const columns: Column<Material>[] = [
     { key: 'name', header: 'Material', value: m => m.name, render: m => <strong>{m.name}</strong> },
@@ -126,12 +136,15 @@ export default function Inventory() {
           exportTitle="Raw Materials"
           rowActions={rowActions}
           toolbarExtra={
-            <select value={filter} onChange={e => setFilter(e.target.value)}
-              style={{ padding: '0.45rem 0.6rem', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: '0.875rem' }}>
-              <option value="All">All Types</option>
-              <option value="Raw Material">Raw Material</option>
-              <option value="Packaging Material">Packaging Material</option>
-            </select>
+            <>
+              <select value={filter} onChange={e => setFilter(e.target.value)}
+                style={{ padding: '0.45rem 0.6rem', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: '0.875rem' }}>
+                <option value="All">All Types</option>
+                <option value="Raw Material">Raw Material</option>
+                <option value="Packaging Material">Packaging Material</option>
+              </select>
+              <button className="btn-secondary btn-sm" onClick={printLabels}><Printer size={14} /> Print Labels</button>
+            </>
           }
         />
       )}
@@ -163,6 +176,14 @@ export default function Inventory() {
                   </div>
                   <div className="form-group"><label>Min Stock Level (alert)</label><NumberInput value={form.min_stock_level} onChange={v => setForm(f => ({ ...f, min_stock_level: v }))} /></div>
                 </div>
+                <div className="form-group">
+                  <label>Barcode</label>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <input value={form.barcode} onChange={e => setForm(f => ({ ...f, barcode: e.target.value }))} placeholder="Scan, type, or generate…" style={{ flex: 1 }} />
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setShowScanner(true)} title="Scan with camera"><ScanLine size={14} /></button>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, barcode: generateBarcode() }))} title="Generate a code"><Wand2 size={14} /></button>
+                  </div>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -183,6 +204,13 @@ export default function Inventory() {
           pending={removeMut.pending}
           onConfirm={handleDelete}
           onCancel={() => setDeleteRow(null)}
+        />
+      )}
+
+      {showScanner && (
+        <BarcodeScanner
+          onScan={code => setForm(f => ({ ...f, barcode: code }))}
+          onClose={() => setShowScanner(false)}
         />
       )}
     </div>

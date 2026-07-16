@@ -1,21 +1,30 @@
 import React from 'react';
-import { ShoppingCart, Truck, DollarSign, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShoppingCart, Truck, DollarSign, AlertTriangle, TrendingUp, Sparkles, MessageCircle, BellRing } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { reports, sales as salesApi, materials as materialsApi, finishedGoods as goodsApi, expenses as expensesApi } from '../lib/api';
-import { useQuery } from '../lib/hooks';
+import { reports, sales as salesApi, materials as materialsApi, finishedGoods as goodsApi, expenses as expensesApi, customers as customersApi } from '../lib/api';
+import { useQuery, useMutation } from '../lib/hooks';
+import { useAuth } from '../lib/AuthContext';
+import { whatsappLink } from '../lib/invoice';
+import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
+import OfflineBanner from '../components/OfflineBanner';
 import './Dashboard.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 export default function Dashboard() {
-  const salesQ = useQuery(() => reports.salesSummary(), []);
-  const expQ = useQuery(() => reports.expenseSummary(), []);
-  const purQ = useQuery(() => reports.purchaseSummary(), []);
-  const ordersQ = useQuery(() => salesApi.list(), []);
-  const matQ = useQuery(() => materialsApi.list(), []);
-  const goodQ = useQuery(() => goodsApi.list(), []);
-  const expListQ = useQuery(() => expensesApi.list(), []);
+  const toast = useToast();
+  const { tenant, profile } = useAuth();
+  const salesQ = useQuery(() => reports.salesSummary(), [], { cacheKey: 'dash-sales-summary' });
+  const expQ = useQuery(() => reports.expenseSummary(), [], { cacheKey: 'dash-expense-summary' });
+  const purQ = useQuery(() => reports.purchaseSummary(), [], { cacheKey: 'dash-purchase-summary' });
+  const ordersQ = useQuery(() => salesApi.list(), [], { cacheKey: 'dash-orders' });
+  const matQ = useQuery(() => materialsApi.list(), [], { cacheKey: 'dash-materials' });
+  const goodQ = useQuery(() => goodsApi.list(), [], { cacheKey: 'dash-goods' });
+  const expListQ = useQuery(() => expensesApi.list(), [], { cacheKey: 'dash-expenses' });
+  const custQ = useQuery(() => customersApi.list(), [], { cacheKey: 'dash-customers' });
+  const remindMut = useMutation(customersApi.markReminded);
 
   const loading = salesQ.loading || expQ.loading || purQ.loading;
   const error = salesQ.error || expQ.error || purQ.error;
@@ -44,11 +53,67 @@ export default function Dashboard() {
   const statusBadge = (s: string) => s === 'full' ? 'success' : s === 'unpaid' ? 'danger' : 'warning';
   const statusLabel = (s: string) => s === 'full' ? 'Full' : s === 'unpaid' ? 'Unpaid' : 'Part';
 
+  // ---- daily reminder queue: debtors overdue 14+ days, not reminded in the last 3 days ----
+  const daysSince = (d: string) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  const custName = (id: string | null) => {
+    const c = custQ.data?.find(x => x.id === id);
+    return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Customer' : 'Walk-in';
+  };
+  const debtorMap: Record<string, { name: string; phone: string | null; balance: number; oldestDays: number; lastRemindedAt: string | null }> = {};
+  (ordersQ.data ?? []).filter(s => !s.voided && s.balance > 0 && s.customer_id).forEach(s => {
+    const key = s.customer_id!;
+    const cust = custQ.data?.find(c => c.id === key);
+    const age = daysSince(s.transaction_date);
+    if (!debtorMap[key]) {
+      debtorMap[key] = { name: custName(key), phone: cust?.phone ?? null, balance: 0, oldestDays: age, lastRemindedAt: cust?.last_reminded_at ?? null };
+    }
+    debtorMap[key].balance += s.balance;
+    debtorMap[key].oldestDays = Math.max(debtorMap[key].oldestDays, age);
+  });
+  const reminderQueue = Object.entries(debtorMap)
+    .filter(([, d]) => d.oldestDays >= 14 && (!d.lastRemindedAt || daysSince(d.lastRemindedAt) >= 3))
+    .map(([id, d]) => ({ id, ...d }))
+    .sort((a, b) => b.balance - a.balance)
+    .slice(0, 8);
+
+  const sendReminder = async (d: { id: string; name: string; phone: string | null; balance: number }) => {
+    const lines = [
+      `Dear ${d.name},`, '',
+      `This is a friendly payment reminder from *${tenant?.name ?? 'us'}*.`,
+      `Your outstanding balance is *₦${d.balance.toLocaleString()}*.`,
+      '', `Kindly settle at your earliest convenience. Thank you! 🙏`,
+    ];
+    window.open(whatsappLink(d.phone, lines.join('\n')), '_blank');
+    const res = await remindMut.mutate(d.id);
+    if (res !== null) { toast.success(`Marked ${d.name} as reminded.`); custQ.refetch(); }
+  };
+
+  const showReminders = profile?.role !== 'inventory';
+
   if (loading) return <Loading label="Loading dashboard…" />;
   if (error) return <ErrorState message={error} onRetry={() => { salesQ.refetch(); expQ.refetch(); purQ.refetch(); }} />;
 
+  const trialEnds = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null;
+  const trialDaysLeft = trialEnds ? Math.ceil((trialEnds.getTime() - Date.now()) / 86400000) : null;
+  const showTrial = tenant?.plan === 'trial' && trialDaysLeft !== null;
+
+  const isOffline = salesQ.isOffline || expQ.isOffline || purQ.isOffline || ordersQ.isOffline;
+
   return (
     <div className="dashboard">
+      {isOffline && <OfflineBanner label="dashboard data" />}
+      {showTrial && (
+        <div className="alert alert-info" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Sparkles size={16} />
+            {trialDaysLeft! > 0
+              ? `You have ${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left on your free trial.`
+              : 'Your free trial has ended — subscribe to keep your data flowing.'}
+          </span>
+          <Link className="btn-primary btn-sm" to="/settings">Choose a plan</Link>
+        </div>
+      )}
+
       <div className="stat-cards">
         <div className="stat-card">
           <div className="stat-icon blue"><ShoppingCart size={18} /></div>
@@ -123,6 +188,29 @@ export default function Dashboard() {
             </table>
           )}
         </div>
+
+        {showReminders && (
+          <div className="card">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 6 }}><BellRing size={16} /> Debtor Reminders Due Today</h3>
+            {reminderQueue.length === 0 ? (
+              <p className="no-alerts">No reminders due — you're all caught up.</p>
+            ) : (
+              <>
+                {reminderQueue.map(d => (
+                  <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 0', borderBottom: '1px solid #f1f5f9' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{d.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{fmt(d.balance)} · {d.oldestDays} days overdue</div>
+                    </div>
+                    <button className="btn-secondary btn-sm" onClick={() => sendReminder(d)} disabled={remindMut.pending}>
+                      <MessageCircle size={13} /> Remind
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
 
         <div className="card">
           <h3>Low Stock Alerts</h3>

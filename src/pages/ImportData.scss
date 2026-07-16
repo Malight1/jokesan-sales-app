@@ -1,0 +1,96 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.import-page {
+  .import-steps {
+    @include flex(center, flex-start, 0.5rem);
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+
+    .step-pill {
+      @include flex(center, center, 0.4rem);
+      padding: 0.4rem 0.85rem;
+      border-radius: 100px;
+      font-size: $font-size-xs;
+      font-weight: 600;
+      background: $gray-100;
+      color: $gray-500;
+
+      .step-num {
+        @include flex(center, center);
+        width: 18px; height: 18px;
+        border-radius: 50%;
+        background: $gray-300;
+        color: $white;
+        font-size: 0.65rem;
+      }
+
+      &.active { background: $primary-light; color: $primary; .step-num { background: $primary; } }
+      &.done   { background: $success-light; color: $success; .step-num { background: $success; } }
+    }
+  }
+
+  .entity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .entity-tile {
+    @include flex(center, center, 0.5rem);
+    flex-direction: column;
+    padding: 1.5rem 1rem;
+    border: 2px solid $gray-200;
+    border-radius: $border-radius-lg;
+    background: $white;
+    cursor: pointer;
+    transition: $transition;
+    color: $gray-600;
+    font-size: $font-size-sm;
+    font-weight: 500;
+
+    svg { color: $gray-400; transition: $transition; }
+    &:hover { border-color: $gray-300; }
+    &.selected { border-color: $primary; background: $primary-light; color: $primary; svg { color: $primary; } }
+  }
+
+  .dropzone {
+    @include flex(center, center, 0.35rem);
+    flex-direction: column;
+    padding: 2.5rem 1rem;
+    border: 2px dashed $gray-300;
+    border-radius: $border-radius-lg;
+    cursor: pointer;
+    color: $gray-500;
+    transition: $transition;
+    text-align: center;
+
+    svg { color: $primary; margin-bottom: 0.35rem; }
+    strong { color: $gray-800; font-size: $font-size-base; }
+    span { font-size: $font-size-sm; }
+    &:hover { border-color: $primary; background: $primary-light; }
+  }
+
+  .map-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 560px;
+  }
+
+  .map-row {
+    @include flex(center, flex-start, 0.75rem);
+
+    .map-target { flex: 0 0 160px; font-size: $font-size-sm; font-weight: 500; color: $gray-700; }
+    select { @include input-base; flex: 1; }
+  }
+
+  .progress-wrap {
+    margin-top: 1.25rem;
+    .progress-bar {
+      width: 100%; height: 8px; background: $gray-100; border-radius: 100px; overflow: hidden;
+      .progress-fill { height: 100%; background: $primary; transition: width 0.2s; }
+    }
+    span { display: block; margin-top: 0.4rem; font-size: $font-size-xs; color: $gray-500; }
+  }
+}
