@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi,
@@ -11,6 +11,7 @@ import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState, Empty } from '../components/DataStates';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
+import './Settings.scss';
 
 type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'recipes';
 
@@ -420,9 +421,20 @@ function BusinessTab() {
 // ============================================================
 // Team — members, roles, invites
 // ============================================================
+function inviteMessage(email: string, role: string, tenantName: string): string {
+  const appUrl = window.location.origin;
+  return `You've been invited to join ${tenantName} on StockFlow as ${role}.\n\n` +
+    `Sign up here with this exact email (${email}):\n${appUrl}\n\n` +
+    `Once you sign up, you'll land straight in the company — no extra setup needed.`;
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
+
 function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   const membersQ = useQuery<TeamMember[]>(() => team.members(), []);
   const invitesQ = useQuery<StaffInvite[]>(() => team.invites(), []);
   const branchesQ = useQuery<Branch[]>(() => branchesApi.list(), [], { cacheKey: 'settings-branches' });
@@ -438,6 +450,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
   const [invRole, setInvRole] = useState('sales');
   const [invBranch, setInvBranch] = useState('');
   const [deactivating, setDeactivating] = useState<TeamMember | null>(null);
+  const [revoking, setRevoking] = useState<StaffInvite | null>(null);
 
   const branchName = (id: string | null) => branchesQ.data?.find(b => b.id === id)?.name ?? '—';
 
@@ -469,20 +482,50 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
 
   const sendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await inviteMut.mutate(invEmail, invRole, invBranch || null);
+    const email = invEmail.trim().toLowerCase();
+    if (!email) return;
+
+    const alreadyMember = membersQ.data?.some(m => (m.email ?? '').toLowerCase() === email);
+    if (alreadyMember) { toast.error('That email already belongs to someone on your team.'); return; }
+
+    const alreadyInvited = invitesQ.data?.some(i => i.email.toLowerCase() === email);
+    if (alreadyInvited) { toast.error('There is already a pending invite for that email.'); return; }
+
+    const res = await inviteMut.mutate(email, invRole, invBranch || null);
     if (res !== null) {
-      toast.success(`Invite created for ${invEmail}. Ask them to sign up with that exact email.`);
       setShowInvite(false); setInvEmail(''); setInvRole('sales'); setInvBranch('');
       invitesQ.refetch();
+
+      const copied = await copyToClipboard(inviteMessage(email, invRole, tenant?.name ?? 'your company'));
+
+      // Best-effort real email — the invite row already exists either way,
+      // so a failure here (rate limit, etc.) never loses the invite.
+      const emailRes = await team.sendInviteEmail(email, `${window.location.origin}/accept-invite`, invRole, tenant?.name ?? 'your company');
+      if (emailRes.ok) {
+        toast.success(`Invite email sent to ${email}.${copied ? ' A backup message was also copied to your clipboard.' : ''}`);
+      } else {
+        toast.info(copied
+          ? `Couldn't send an email automatically — an invite message was copied to your clipboard instead. Paste it to them on WhatsApp/SMS.`
+          : `Invite created for ${email}. Ask them to sign up with that exact email.`);
+      }
     } else {
-      toast.error(inviteMut.error ?? 'Invite failed.');
+      const msg = inviteMut.error ?? '';
+      toast.error(msg.includes('duplicate key') || msg.includes('idx_invites_unique_pending')
+        ? 'There is already a pending invite for that email.' : msg || 'Invite failed.');
     }
   };
 
-  const revoke = async (id: string) => {
-    const res = await revokeMut.mutate(id);
+  const copyInvite = async (inv: StaffInvite) => {
+    const ok = await copyToClipboard(inviteMessage(inv.email, inv.role, tenant?.name ?? 'your company'));
+    toast[ok ? 'success' : 'error'](ok ? 'Invite message copied — paste it to them.' : 'Could not access clipboard.');
+  };
+
+  const confirmRevoke = async () => {
+    if (!revoking) return;
+    const res = await revokeMut.mutate(revoking.id);
     if (res !== null) { toast.success('Invite revoked.'); invitesQ.refetch(); }
     else toast.error(revokeMut.error ?? 'Failed.');
+    setRevoking(null);
   };
 
   if (membersQ.loading) return <Loading label="Loading team…" />;
@@ -549,7 +592,8 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                   <td><span className="badge-gray">{inv.role}</span></td>
                   <td>{new Date(inv.created_at).toLocaleDateString('en-GB')}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => revoke(inv.id)}><Trash2 size={14} /> Revoke</button>
+                    <button className="btn-ghost btn-sm" onClick={() => copyInvite(inv)} title="Copy invite message"><Copy size={13} /> Copy</button>{' '}
+                    <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setRevoking(inv)}><Trash2 size={14} /> Revoke</button>
                   </td>
                 </tr>
               ))}
@@ -612,6 +656,17 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
           onCancel={() => setDeactivating(null)}
         />
       )}
+
+      {revoking && (
+        <ConfirmDialog
+          title="Revoke Invite"
+          message={<>Revoke the invite for <strong>{revoking.email}</strong>? They won't be able to sign up with that email into your company unless you invite them again.</>}
+          confirmLabel="Revoke"
+          pending={revokeMut.pending}
+          onConfirm={confirmRevoke}
+          onCancel={() => setRevoking(null)}
+        />
+      )}
     </div>
   );
 }
@@ -621,20 +676,96 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
 // ============================================================
 function TypesTab() {
   return (
-    <div className="grid-3" style={{ alignItems: 'start' }}>
-      <LookupCard title="Payment Types" table="payment_types" fetcher={lookups.paymentTypes} />
-      <LookupCard title="Expense Types" table="expense_types" fetcher={lookups.expenseTypes} />
-      <LookupCard title="Customer Types" table="customer_types" fetcher={lookups.customerTypes} />
+    <div className="grid-3 lookup-grid" style={{ alignItems: 'start' }}>
+      <LookupCard
+        title="Payment Types" noun="payment" hint="How customers pay you"
+        icon={<CreditCard size={16} />} table="payment_types" fetcher={lookups.paymentTypes}
+      />
+      <LookupCard
+        title="Expense Types" noun="expense" hint="Categories for money going out"
+        icon={<Receipt size={16} />} table="expense_types" fetcher={lookups.expenseTypes}
+      />
+      <LookupCard
+        title="Customer Types" noun="customer" hint="Segments for your customer base"
+        icon={<Users size={16} />} table="customer_types" fetcher={lookups.customerTypes}
+      />
     </div>
   );
 }
 
-function LookupCard({ title, table, fetcher }: { title: string; table: LookupTable; fetcher: () => Promise<Lookup[]> }) {
+function LookupRow({ row, onRename, onDelete }: {
+  row: Lookup; onRename: (id: string, newName: string) => Promise<boolean>; onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(row.name);
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => { setValue(row.name); setEditing(true); };
+  const cancel = () => { setValue(row.name); setEditing(false); };
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === row.name) { cancel(); return; }
+    setSaving(true);
+    const ok = await onRename(row.id, trimmed);
+    setSaving(false);
+    if (ok) setEditing(false); else setValue(row.name);
+  };
+
+  if (editing) {
+    return (
+      <div className="lookup-row editing">
+        <input
+          autoFocus
+          value={value}
+          disabled={saving}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
+        />
+        <div className="lookup-row-actions">
+          <button className="lookup-action save" onClick={save} disabled={saving} title="Save" aria-label={`Save ${row.name}`}>
+            <Check size={14} />
+          </button>
+          <button className="lookup-action" onClick={cancel} disabled={saving} title="Cancel" aria-label="Cancel">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="lookup-row">
+      <span>{row.name}</span>
+      <div className="lookup-row-actions">
+        <button className="lookup-action" onClick={startEdit} title="Rename" aria-label={`Rename ${row.name}`}>
+          <Pencil size={13} />
+        </button>
+        <button className="lookup-action danger" onClick={onDelete} title="Remove" aria-label={`Remove ${row.name}`}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LookupCard({ title, noun, hint, icon, table, fetcher }: {
+  title: string; noun: string; hint: string; icon: React.ReactNode; table: LookupTable; fetcher: () => Promise<Lookup[]>;
+}) {
   const toast = useToast();
   const q = useQuery<Lookup[]>(fetcher, []);
   const addMut = useMutation((name: string) => lookupsAdmin.add(table, name));
+  const editMut = useMutation((id: string, newName: string) => lookupsAdmin.rename(table, id, newName));
   const delMut = useMutation((id: string) => lookupsAdmin.remove(table, id));
   const [name, setName] = useState('');
+  const [toDelete, setToDelete] = useState<Lookup | null>(null);
+
+  const rename = async (id: string, newName: string) => {
+    const res = await editMut.mutate(id, newName);
+    if (res !== null) { toast.success('Renamed.'); q.refetch(); return true; }
+    toast.error(editMut.error ?? 'Rename failed.');
+    return false;
+  };
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -644,33 +775,58 @@ function LookupCard({ title, table, fetcher }: { title: string; table: LookupTab
     else toast.error(addMut.error ?? 'Add failed.');
   };
 
-  const remove = async (row: Lookup) => {
-    const res = await delMut.mutate(row.id);
-    if (res !== null) { toast.success(`${row.name} removed.`); q.refetch(); }
+  const confirmRemove = async () => {
+    if (!toDelete) return;
+    const res = await delMut.mutate(toDelete.id);
+    if (res !== null) { toast.success(`${toDelete.name} removed.`); q.refetch(); }
     else {
       const msg = delMut.error ?? '';
       toast.error(msg.includes('violates') || msg.includes('foreign key')
-        ? `Cannot remove — "${row.name}" is used by existing records.` : msg || 'Remove failed.');
+        ? `Cannot remove — "${toDelete.name}" is used by existing records.` : msg || 'Remove failed.');
     }
+    setToDelete(null);
   };
 
+  const rows = q.data ?? [];
+
   return (
-    <div className="card">
-      <h3 style={{ marginBottom: '0.75rem' }}>{title}</h3>
+    <div className="card lookup-card">
+      <div className="lookup-head">
+        <div className="lookup-icon">{icon}</div>
+        <div className="lookup-heading">
+          <h3>{title}</h3>
+          <p>{hint}</p>
+        </div>
+        {!q.loading && <span className="lookup-count">{rows.length}</span>}
+      </div>
+
       {q.loading ? <Loading /> : (
         <>
-          {q.data?.map(row => (
-            <div key={row.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid #f1f5f9', fontSize: '0.875rem' }}>
-              <span>{row.name}</span>
-              <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => remove(row)} title="Remove"><Trash2 size={13} /></button>
-            </div>
-          ))}
-          <form onSubmit={add} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="New type…"
-              style={{ flex: 1, padding: '0.45rem 0.6rem', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: '0.85rem' }} />
-            <button className="btn-secondary btn-sm" type="submit" disabled={addMut.pending}><Plus size={14} /></button>
+          <div className="lookup-list">
+            {rows.length === 0 ? (
+              <div className="lookup-empty">No {noun} types yet — add your first below.</div>
+            ) : rows.map(row => (
+              <LookupRow key={row.id} row={row} onRename={rename} onDelete={() => setToDelete(row)} />
+            ))}
+          </div>
+          <form onSubmit={add} className="lookup-add">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder={`Add a ${noun} type…`} />
+            <button className="btn-primary" type="submit" disabled={addMut.pending || !name.trim()} aria-label={`Add ${noun} type`}>
+              <Plus size={15} />
+            </button>
           </form>
         </>
+      )}
+
+      {toDelete && (
+        <ConfirmDialog
+          title="Remove type"
+          message={<>Remove <strong>{toDelete.name}</strong>? This can't be undone.</>}
+          confirmLabel="Remove"
+          pending={delMut.pending}
+          onConfirm={confirmRemove}
+          onCancel={() => setToDelete(null)}
+        />
       )}
     </div>
   );

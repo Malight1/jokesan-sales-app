@@ -1,0 +1,88 @@
+<!--
+  StockFlow — "Invite user" email template
+
+  Where this goes: Supabase Dashboard → Authentication → Email Templates
+  → "Invite user" → paste this into the HTML body → Save.
+
+  Variables Supabase fills in automatically:
+    {{ .ConfirmationURL }} — the accept-invite link
+    {{ .Data.tenant_name }} — passed from invite-teammate Edge Function
+    {{ .Data.role }}        — passed from invite-teammate Edge Function
+
+  Table-based layout + inline styles on purpose — this is email HTML,
+  most clients (Outlook, Gmail) ignore <style> blocks and flexbox/grid.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9; padding:32px 16px; font-family:'Segoe UI', Arial, sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(15,23,42,0.08);">
+
+        <!-- header -->
+        <tr>
+          <td style="background:#0b1220; padding:28px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="width:34px; height:34px; background:linear-gradient(135deg,#2563eb,#1e40af); border-radius:8px; text-align:center; vertical-align:middle;">
+                  <span style="color:#ffffff; font-size:16px; font-weight:700; line-height:34px;">S</span>
+                </td>
+                <td style="padding-left:10px;">
+                  <span style="color:#ffffff; font-size:17px; font-weight:700; letter-spacing:-0.01em;">StockFlow</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- body -->
+        <tr>
+          <td style="padding:36px 32px 8px;">
+            <h1 style="margin:0 0 12px; font-size:20px; font-weight:700; color:#0f172a; letter-spacing:-0.01em;">
+              You're invited to join {{ .Data.tenant_name }}
+            </h1>
+            <p style="margin:0 0 20px; font-size:14px; line-height:1.6; color:#475569;">
+              You've been invited to join <strong style="color:#0f172a;">{{ .Data.tenant_name }}</strong>
+              on StockFlow as a <strong style="color:#0f172a;">{{ .Data.role }}</strong>.
+              Set a password to finish joining — you'll land straight in the company, no extra setup needed.
+            </p>
+          </td>
+        </tr>
+
+        <!-- CTA -->
+        <tr>
+          <td style="padding:0 32px 28px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#2563eb; border-radius:8px;">
+                  <a href="{{ .ConfirmationURL }}"
+                     style="display:inline-block; padding:12px 28px; font-size:14px; font-weight:600; color:#ffffff; text-decoration:none;">
+                    Accept Invite &amp; Set Password
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- fallback link -->
+        <tr>
+          <td style="padding:0 32px 28px;">
+            <p style="margin:0; font-size:12px; line-height:1.6; color:#94a3b8;">
+              Button not working? Copy and paste this link into your browser:<br>
+              <a href="{{ .ConfirmationURL }}" style="color:#2563eb; word-break:break-all;">{{ .ConfirmationURL }}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- footer -->
+        <tr>
+          <td style="padding:20px 32px; border-top:1px solid #f1f5f9;">
+            <p style="margin:0; font-size:12px; color:#94a3b8;">
+              If you weren't expecting this invite, you can safely ignore this email.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>

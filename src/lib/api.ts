@@ -272,6 +272,14 @@ export const team = {
   invite: (email: string, role: string, branch_id?: string | null) =>
     del(supabase.from('staff_invites').insert({ email: email.trim().toLowerCase(), role, branch_id: branch_id ?? null })),
   revokeInvite: (id: string) => del(supabase.from('staff_invites').delete().eq('id', id)),
+  // Best-effort real invite email via the invite-teammate Edge Function.
+  // Never throws — the caller falls back to "Copy Invite Message" on failure.
+  sendInviteEmail: async (email: string, redirectTo: string, role: string, tenantName: string): Promise<{ ok: boolean; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('invite-teammate', { body: { email, redirectTo, role, tenantName } });
+    if (error) return { ok: false, error: error.message };
+    if (data?.error) return { ok: false, error: data.error };
+    return { ok: true };
+  },
 };
 
 export const tenantApi = {
@@ -294,6 +302,7 @@ export const branches = {
 export type LookupTable = 'payment_types' | 'expense_types' | 'customer_types';
 export const lookupsAdmin = {
   add: (table: LookupTable, name: string) => del(supabase.from(table).insert({ name })),
+  rename: (table: LookupTable, id: string, name: string) => del(supabase.from(table).update({ name }).eq('id', id)),
   remove: (table: LookupTable, id: string) => del(supabase.from(table).delete().eq('id', id)),
 };
 
