@@ -181,6 +181,11 @@
 .main-content {
   margin-left: $sidebar-width;
   flex: 1;
+  // Without this, wide content (a table or the settings tab row) forces
+  // this flex child past the viewport instead of staying at 100% and
+  // letting its children scroll/wrap. This is what makes pages overflow
+  // horizontally on mobile.
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 100vh;

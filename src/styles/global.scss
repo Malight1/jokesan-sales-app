@@ -107,6 +107,77 @@ h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; letter-spacin
   box-shadow: $shadow-xs;
 
   table { @include table-style; }
+
+  // ── Mobile: each row becomes a labeled card instead of a
+  // horizontally-scrolling strip. Cells expose their column name via a
+  // `data-label` attribute (set on every DataTable cell, and on the raw
+  // Settings/Reports tables) which is shown on the left of each line.
+  @media (max-width: 640px) {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    overflow-x: visible;
+
+    table {
+      display: block;
+
+      thead {
+        position: absolute;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        border: 0;
+      }
+
+      tbody { display: block; }
+
+      tr {
+        display: block;
+        background: $white;
+        border: 1px solid $gray-200;
+        border-radius: $radius-lg;
+        box-shadow: $shadow-xs;
+        padding: 0.35rem 0.95rem;
+        margin-bottom: 0.7rem;
+        &:hover { background: $white; }
+      }
+
+      td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.55rem 0 !important;
+        text-align: right !important;
+        border-bottom: 1px solid $gray-100;
+        white-space: normal;
+        // Long unbreakable values (emails, barcodes, long product names)
+        // must wrap instead of forcing the card wider than the screen.
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+
+        &::before {
+          content: attr(data-label);
+          flex-shrink: 0;
+          min-width: 0;
+          font-size: $font-size-xs;
+          font-weight: 700;
+          color: $gray-500;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          text-align: left;
+          white-space: nowrap;
+        }
+
+        &:last-child { border-bottom: none; }
+        // A cell with no label (e.g. an actions-only column) shouldn't
+        // reserve space for an empty tag.
+        &[data-label=""]::before, &:not([data-label])::before { content: none; }
+      }
+    }
+  }
 }
 
 // Page header
@@ -293,6 +364,55 @@ h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; letter-spacin
 
 @media (max-width: 768px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+
+// ── Mobile refinements (phones ≤640px) ───────────────
+// The shell (sidebar drawer, grid collapse) already adapts; this pass
+// fixes the content chrome — headers, filters, modals, stat cards —
+// so pages are usable on a phone instead of overflowing.
+@media (max-width: 640px) {
+  // Page title + action button stack; button spans full width for easy tapping.
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+
+    .page-title h1 { font-size: $font-size-xl; }
+
+    > .btn-primary,
+    > .btn-secondary,
+    > button {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  // Filter/search inputs go full width instead of a cramped 200px min.
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+    input, select { width: 100%; min-width: 0; }
+  }
+
+  // Stat cards to a single column so numbers stay legible.
+  .stat-cards { grid-template-columns: 1fr; }
+
+  // Cards a touch tighter to reclaim horizontal space.
+  .card { padding: 1rem; }
+
+  // Modals: less viewport padding, footer buttons stack full width.
+  .modal-overlay {
+    padding: 0.5rem;
+
+    .modal-footer {
+      flex-direction: column;
+      align-items: stretch;
+      button { width: 100%; justify-content: center; }
+    }
+  }
+
+  // Scrolling tables read better at the small font size.
+  .table-wrapper table { font-size: $font-size-sm; }
 }
 
 // Respect reduced-motion — collapse all animation/transition to instant.

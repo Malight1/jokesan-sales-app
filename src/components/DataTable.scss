@@ -105,4 +105,20 @@
       }
     }
   }
+
+  // ── Mobile: search fills the row, export sits below, pager centers ──
+  @media (max-width: 640px) {
+    .dt-toolbar {
+      .dt-search { min-width: 0; width: 100%; }
+      .dt-toolbar-right { width: 100%; justify-content: flex-start; }
+    }
+
+    .dt-footer {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.6rem;
+      .dt-count { text-align: center; }
+      .dt-pager { justify-content: center; }
+    }
+  }
 }

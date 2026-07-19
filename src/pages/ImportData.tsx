@@ -160,7 +160,7 @@ export default function ImportData() {
               <tbody>
                 {rows.slice(0, 3).map((r, i) => {
                   const m = mappedRow(r);
-                  return <tr key={i}>{entity.fields.map(f => <td key={f.key}>{m[f.key] || <span style={{ color: '#cbd5e1' }}>—</span>}</td>)}</tr>;
+                  return <tr key={i}>{entity.fields.map(f => <td key={f.key} data-label={f.label}>{m[f.key] || <span style={{ color: '#cbd5e1' }}>—</span>}</td>)}</tr>;
                 })}
               </tbody>
             </table>
@@ -195,7 +195,7 @@ export default function ImportData() {
             <div className="table-wrapper" style={{ marginTop: '1.25rem', textAlign: 'left', maxWidth: 480, marginLeft: 'auto', marginRight: 'auto' }}>
               <table>
                 <thead><tr><th>Row</th><th>Reason</th></tr></thead>
-                <tbody>{result.errors.slice(0, 50).map((e, i) => <tr key={i}><td>{e.row}</td><td>{e.reason}</td></tr>)}</tbody>
+                <tbody>{result.errors.slice(0, 50).map((e, i) => <tr key={i}><td data-label="Row">{e.row}</td><td data-label="Reason">{e.reason}</td></tr>)}</tbody>
               </table>
             </div>
           )}

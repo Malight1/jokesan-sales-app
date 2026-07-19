@@ -159,12 +159,12 @@ export default function DataTable<T>({
                 {pageRows.map(row => (
                   <tr key={getRowKey(row)}>
                     {columns.map(col => (
-                      <td key={col.key} className={col.align ? 'align-' + col.align : ''}>
+                      <td key={col.key} data-label={col.header} className={col.align ? 'align-' + col.align : ''}>
                         {col.render ? col.render(row) : String(val(col, row) ?? '—')}
                       </td>
                     ))}
                     {rowActions?.length ? (
-                      <td className="align-right dt-actions">
+                      <td data-label="Actions" className="align-right dt-actions">
                         {rowActions.filter(a => !a.show || a.show(row)).map((a, i) => (
                           <button key={i} className={`dt-action ${a.variant === 'danger' ? 'danger' : ''}`}
                             title={a.label} onClick={() => a.onClick(row)}>

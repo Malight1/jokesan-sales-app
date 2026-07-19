@@ -43,7 +43,7 @@ export default function Settings() {
         <div className="page-title"><h1>Settings</h1><p>Manage your business, team, and configuration</p></div>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+      <div className="settings-tabs">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.6rem 1.1rem', background: 'none', border: 'none', cursor: 'pointer',
@@ -108,8 +108,8 @@ function BranchesTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>{branchesQ.data?.length ?? 0} branch{(branchesQ.data?.length ?? 0) !== 1 ? 'es' : ''}</p>
+      <div className="section-toolbar">
+        <p className="section-toolbar-count">{branchesQ.data?.length ?? 0} branch{(branchesQ.data?.length ?? 0) !== 1 ? 'es' : ''}</p>
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Branch</button>
       </div>
 
@@ -533,8 +533,8 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+      <div className="section-toolbar">
+        <p className="section-toolbar-count">
           {membersQ.data?.length ?? 0} member{(membersQ.data?.length ?? 0) !== 1 ? 's' : ''}
         </p>
         <button className="btn-primary" onClick={() => setShowInvite(true)}><Plus size={16} /> Invite User</button>
@@ -548,16 +548,16 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
               const isSelf = m.id === profile?.id;
               return (
                 <tr key={m.id}>
-                  <td><strong>{m.full_name ?? '—'}</strong>{isSelf && <span className="badge-primary" style={{ marginLeft: 8 }}>You</span>}</td>
-                  <td>{m.email ?? '—'}</td>
-                  <td>
+                  <td data-label="Name"><strong>{m.full_name ?? '—'}</strong>{isSelf && <span className="badge-primary" style={{ marginLeft: 8 }}>You</span>}</td>
+                  <td data-label="Email">{m.email ?? '—'}</td>
+                  <td data-label="Role">
                     <select value={m.role} disabled={isSelf} onChange={e => changeRole(m, e.target.value)}
                       style={{ padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
                       {roleOptions.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
                     </select>
                   </td>
                   {isMultiBranch && (
-                    <td>
+                    <td data-label="Branch">
                       <select value={m.branch_id ?? ''} onChange={e => changeBranch(m, e.target.value)}
                         style={{ padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
                         <option value="">— none —</option>
@@ -565,8 +565,8 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                       </select>
                     </td>
                   )}
-                  <td>{m.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Deactivated</span>}</td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td data-label="Status">{m.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Deactivated</span>}</td>
+                  <td data-label="Actions" style={{ textAlign: 'right' }}>
                     {!isSelf && (m.is_active
                       ? <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setDeactivating(m)}>Deactivate</button>
                       : <button className="btn-ghost btn-sm" onClick={() => reactivate(m)}>Reactivate</button>)}
@@ -588,10 +588,10 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
             <tbody>
               {invitesQ.data?.map(inv => (
                 <tr key={inv.id}>
-                  <td><strong>{inv.email}</strong></td>
-                  <td><span className="badge-gray">{inv.role}</span></td>
-                  <td>{new Date(inv.created_at).toLocaleDateString('en-GB')}</td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td data-label="Email"><strong>{inv.email}</strong></td>
+                  <td data-label="Role"><span className="badge-gray">{inv.role}</span></td>
+                  <td data-label="Invited">{new Date(inv.created_at).toLocaleDateString('en-GB')}</td>
+                  <td data-label="Actions" style={{ textAlign: 'right' }}>
                     <button className="btn-ghost btn-sm" onClick={() => copyInvite(inv)} title="Copy invite message"><Copy size={13} /> Copy</button>{' '}
                     <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setRevoking(inv)}><Trash2 size={14} /> Revoke</button>
                   </td>

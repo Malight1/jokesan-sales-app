@@ -262,12 +262,12 @@ export default function Reports() {
               <tbody>
                 {sales.map(s => (
                   <tr key={s.id}>
-                    <td>{s.transaction_date}</td>
-                    <td>{custName(s.customer_id)}</td>
-                    <td style={{ fontWeight: 600 }}>{fmt(s.total_amount)}</td>
-                    <td>{fmt(s.amount_paid)}</td>
-                    <td style={{ color: s.balance > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(s.balance)}</td>
-                    <td style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</td>
+                    <td data-label="Date">{s.transaction_date}</td>
+                    <td data-label="Customer">{custName(s.customer_id)}</td>
+                    <td data-label="Total" style={{ fontWeight: 600 }}>{fmt(s.total_amount)}</td>
+                    <td data-label="Paid">{fmt(s.amount_paid)}</td>
+                    <td data-label="Balance" style={{ color: s.balance > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(s.balance)}</td>
+                    <td data-label="Profit" style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -319,10 +319,10 @@ export default function Reports() {
               <tbody>
                 {goods.map(g => (
                   <tr key={g.id}>
-                    <td style={{ fontWeight: 600 }}>{g.name}</td>
-                    <td>{g.qty_balance.toLocaleString()}</td>
-                    <td>{fmt(g.selling_price)}</td>
-                    <td style={{ fontWeight: 700 }}>{fmt(g.selling_price * g.qty_balance)}</td>
+                    <td data-label="Product" style={{ fontWeight: 600 }}>{g.name}</td>
+                    <td data-label="Qty">{g.qty_balance.toLocaleString()}</td>
+                    <td data-label="Unit Price">{fmt(g.selling_price)}</td>
+                    <td data-label="Stock Value" style={{ fontWeight: 700 }}>{fmt(g.selling_price * g.qty_balance)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -341,12 +341,12 @@ export default function Reports() {
                 <tbody>
                   {debtors.map(d => (
                     <tr key={d.name}>
-                      <td style={{ fontWeight: 600 }}>{d.name}</td>
-                      <td>{d.count}</td>
-                      <td>{fmt(d.total)}</td>
-                      <td>{fmt(d.paid)}</td>
-                      <td style={{ color: '#dc2626', fontWeight: 700 }}>{fmt(d.balance)}</td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td data-label="Customer" style={{ fontWeight: 600 }}>{d.name}</td>
+                      <td data-label="Invoices">{d.count}</td>
+                      <td data-label="Total">{fmt(d.total)}</td>
+                      <td data-label="Paid">{fmt(d.paid)}</td>
+                      <td data-label="Outstanding" style={{ color: '#dc2626', fontWeight: 700 }}>{fmt(d.balance)}</td>
+                      <td data-label="" style={{ textAlign: 'right' }}>
                         <button className="btn-secondary btn-sm" onClick={() => remindDebtor(d)} title="Send WhatsApp payment reminder">
                           <MessageCircle size={14} /> Remind
                         </button>
