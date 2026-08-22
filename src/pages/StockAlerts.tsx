@@ -7,6 +7,7 @@ import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import NumberInput from '../components/NumberInput';
 import './StockAlerts.scss';
+import Modal from '../components/Modal';
 
 type EditTarget = { kind: 'material' | 'good'; id: string; value: number };
 
@@ -171,8 +172,7 @@ export default function StockAlerts() {
 
       {/* Edit Min Level Modal */}
       {editItem && (
-        <div className="modal-overlay" onClick={() => setEditItem(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+        <Modal onClose={() => setEditItem(null)} maxWidth={360}>
             <div className="modal-header">
               <h2>Set Minimum Stock Level</h2>
               <button className="close-btn" onClick={() => setEditItem(null)}><X size={18} /></button>
@@ -192,8 +192,7 @@ export default function StockAlerts() {
                 {(saveMat.pending || saveGood.pending) ? 'Saving…' : 'Save'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

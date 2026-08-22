@@ -62,8 +62,15 @@ export function rankMatches(
       else if (parsed.amount > 0 && parsed.amount <= s.totalAmount) score += 50; // plausible part payment
     }
     if (parsed.senderName && nameOverlap(parsed.senderName, s.customerName)) score += 40;
-    const daysOld = Math.floor((Date.now() - new Date(s.date).getTime()) / 86400000);
-    score += Math.min(daysOld / 10, 5); // slight nudge toward older unpaid invoices
+    // The age nudge is a tie-breaker between real matches, so it only applies
+    // once something has actually matched. Applied unconditionally it scored
+    // every open invoice above zero, which defeated the `score > 0` filter
+    // below and offered unrelated invoices as candidates for a payment —
+    // exactly the way a payment gets applied to the wrong customer.
+    if (score > 0) {
+      const daysOld = Math.floor((Date.now() - new Date(s.date).getTime()) / 86400000);
+      score += Math.min(daysOld / 10, 5);
+    }
     return { saleId: s.id, customerName: s.customerName, balance: s.balance, totalAmount: s.totalAmount, date: s.date, score };
   });
   return candidates.filter(c => c.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);

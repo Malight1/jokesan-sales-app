@@ -6,6 +6,7 @@ import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Modal from '../components/Modal';
 
 const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', email: '', phone: '' };
 
@@ -102,8 +103,7 @@ export default function Suppliers() {
       />
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Supplier' : 'Add Supplier'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -129,8 +129,7 @@ export default function Suppliers() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteRow && (

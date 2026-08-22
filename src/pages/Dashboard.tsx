@@ -5,7 +5,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { reports, sales as salesApi, materials as materialsApi, finishedGoods as goodsApi, expenses as expensesApi, customers as customersApi } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
-import { whatsappLink } from '../lib/invoice';
+import { whatsappLink } from '../lib/whatsapp';
 import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';

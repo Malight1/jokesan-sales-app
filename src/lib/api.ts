@@ -59,6 +59,29 @@ async function run<T>(builder: PromiseLike<{ data: T | null; error: any }>): Pro
   if (res.error) throw new Error(res.error.message);
   return res.data as T;
 }
+// PostgREST caps a single response at a fixed row count (1000 by default) and
+// returns 200 for the truncated page — so an unpaged select silently shrinks
+// once a tenant grows, and a P&L just quietly reports a smaller number. Every
+// unbounded read goes through this instead: it walks .range() windows until a
+// page comes back empty, advancing by however many rows actually arrived, so
+// it stays correct whatever the server's cap is set to.
+const PAGE_SIZE = 1000;
+const MAX_ROWS = 100_000; // runaway guard; a tenant this size needs server-side aggregation
+
+async function runAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; ) {
+    const res = await page(from, from + PAGE_SIZE - 1);
+    if (res.error) throw new Error(res.error.message);
+    const batch = res.data ?? [];
+    out.push(...batch);
+    if (batch.length === 0 || out.length >= MAX_ROWS) return out;
+    from += batch.length;
+  }
+}
+
 // Await an RPC that returns a value.
 async function rpc<T>(name: string, args?: Record<string, any>): Promise<T> {
   const res = await supabase.rpc(name, args);
@@ -88,7 +111,7 @@ export const lookups = {
 // CUSTOMERS
 // ============================================================
 export const customers = {
-  list: () => run<Customer[]>(supabase.from('customers').select('*').order('created_at', { ascending: false })),
+  list: () => runAll<Customer>((f, t) => supabase.from('customers').select('*').order('created_at', { ascending: false }).range(f, t)),
   create: (c: Partial<Customer>) => run<Customer>(supabase.from('customers').insert(c).select().single()),
   update: (id: string, c: Partial<Customer>) => run<Customer>(supabase.from('customers').update(c).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('customers').delete().eq('id', id)),
@@ -99,7 +122,7 @@ export const customers = {
 // SUPPLIERS
 // ============================================================
 export const suppliers = {
-  list: () => run<Supplier[]>(supabase.from('suppliers').select('*').order('created_at', { ascending: false })),
+  list: () => runAll<Supplier>((f, t) => supabase.from('suppliers').select('*').order('created_at', { ascending: false }).range(f, t)),
   create: (s: Partial<Supplier>) => run<Supplier>(supabase.from('suppliers').insert(s).select().single()),
   update: (id: string, s: Partial<Supplier>) => run<Supplier>(supabase.from('suppliers').update(s).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('suppliers').delete().eq('id', id)),
@@ -109,7 +132,7 @@ export const suppliers = {
 // MATERIALS (raw + packaging)
 // ============================================================
 export const materials = {
-  list: () => run<Material[]>(supabase.from('materials').select('*').order('name')),
+  list: () => runAll<Material>((f, t) => supabase.from('materials').select('*').order('name').range(f, t)),
   create: (m: Partial<Material>) => run<Material>(supabase.from('materials').insert(m).select().single()),
   update: (id: string, m: Partial<Material>) => run<Material>(supabase.from('materials').update(m).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('materials').delete().eq('id', id)),
@@ -125,7 +148,7 @@ export const materials = {
 // FINISHED GOODS
 // ============================================================
 export const finishedGoods = {
-  list: () => run<FinishedGood[]>(supabase.from('finished_goods').select('*').order('name')),
+  list: () => runAll<FinishedGood>((f, t) => supabase.from('finished_goods').select('*').order('name').range(f, t)),
   create: (g: Partial<FinishedGood>) => run<FinishedGood>(supabase.from('finished_goods').insert(g).select().single()),
   update: (id: string, g: Partial<FinishedGood>) => run<FinishedGood>(supabase.from('finished_goods').update(g).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('finished_goods').delete().eq('id', id)),
@@ -166,7 +189,7 @@ export const boms = {
 // SALES  (writes go through the create_sale RPC engine)
 // ============================================================
 export const sales = {
-  list: () => run<SalesOrder[]>(supabase.from('sales_orders').select('*').order('transaction_date', { ascending: false })),
+  list: () => runAll<SalesOrder>((f, t) => supabase.from('sales_orders').select('*').order('transaction_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('sales_orders').select('*, sale_items(*), sale_payments(*)').eq('id', id).single()),
   create: (params: {
     customerId: string | null; date: string; paymentTypeId: string | null;
@@ -190,7 +213,7 @@ export const sales = {
 // PURCHASES  (writes go through the create_purchase RPC engine)
 // ============================================================
 export const purchases = {
-  list: () => run<PurchaseOrder[]>(supabase.from('purchase_orders').select('*').order('purchase_date', { ascending: false })),
+  list: () => runAll<PurchaseOrder>((f, t) => supabase.from('purchase_orders').select('*').order('purchase_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('purchase_orders').select('*, purchase_items(*), purchase_payments(*)').eq('id', id).single()),
   create: (params: {
     supplierId: string | null; date: string; paymentTypeId: string | null;
@@ -212,7 +235,7 @@ export const purchases = {
 // PRODUCTION  (writes go through the record_production RPC engine)
 // ============================================================
 export const production = {
-  list: () => run<ProductionRun[]>(supabase.from('production_runs').select('*').order('production_date', { ascending: false })),
+  list: () => runAll<ProductionRun>((f, t) => supabase.from('production_runs').select('*').order('production_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('production_runs').select('*, production_consumption(*)').eq('id', id).single()),
   record: (params: {
     finishedGoodId: string; date: string; expenses: number; qty: number;
@@ -229,7 +252,7 @@ export const production = {
 // EXPENSES
 // ============================================================
 export const expenses = {
-  list: () => run<Expense[]>(supabase.from('expenses').select('*').order('expense_date', { ascending: false })),
+  list: () => runAll<Expense>((f, t) => supabase.from('expenses').select('*').order('expense_date', { ascending: false }).range(f, t)),
   create: (e: Partial<Expense>) => run<Expense>(supabase.from('expenses').insert(e).select().single()),
   update: (id: string, e: Partial<Expense>) => run<Expense>(supabase.from('expenses').update(e).eq('id', id).select().single()),
   remove: (id: string) => del(supabase.from('expenses').delete().eq('id', id)),
@@ -246,10 +269,22 @@ export const stock = {
 // ============================================================
 // DASHBOARD / REPORTS aggregates
 // ============================================================
+export interface ProductProfit {
+  fg_id: string; product_name: string; qty_sold: number;
+  total_revenue: number; total_cogs: number; profit: number; margin_pct: number;
+}
+
 export const reports = {
-  salesSummary: () => run<any[]>(supabase.from('sales_orders').select('transaction_date,total_amount,amount_paid,balance,cogs,gross_profit')),
-  expenseSummary: () => run<any[]>(supabase.from('expenses').select('expense_date,amount,expense_type_id')),
-  purchaseSummary: () => run<any[]>(supabase.from('purchase_orders').select('purchase_date,total_amount,balance')),
+  // Aggregated in SQL (migration 0016) rather than in the browser: it reads
+  // sales_consumption, the highest-volume table, and uses the FIFO unit_cost
+  // the engine actually consumed.
+  productProfitability: (from?: string, to?: string) =>
+    rpc<ProductProfit[]>('report_product_profitability', {
+      p_from: from || null, p_to: to || null,
+    }),
+  salesSummary: () => runAll<any>((f, t) => supabase.from('sales_orders').select('transaction_date,total_amount,amount_paid,balance,cogs,gross_profit').order('transaction_date').range(f, t)),
+  expenseSummary: () => runAll<any>((f, t) => supabase.from('expenses').select('expense_date,amount,expense_type_id').order('expense_date').range(f, t)),
+  purchaseSummary: () => runAll<any>((f, t) => supabase.from('purchase_orders').select('purchase_date,total_amount,balance').order('purchase_date').range(f, t)),
 };
 
 // ============================================================
@@ -264,7 +299,7 @@ export interface StaffInvite {
 }
 
 export const team = {
-  members: () => run<TeamMember[]>(supabase.from('profiles').select('id, full_name, email, role, is_active, branch_id').order('created_at')),
+  members: () => runAll<TeamMember>((f, t) => supabase.from('profiles').select('id, full_name, email, role, is_active, branch_id').order('created_at').range(f, t)),
   setRole: (id: string, role: string) => del(supabase.from('profiles').update({ role }).eq('id', id)),
   setActive: (id: string, is_active: boolean) => del(supabase.from('profiles').update({ is_active }).eq('id', id)),
   setBranch: (id: string, branch_id: string | null) => del(supabase.from('profiles').update({ branch_id }).eq('id', id)),
@@ -368,9 +403,8 @@ export const billing = {
   },
 };
 
-// ============================================================
-// SEED — populate current tenant with Jokesan starter data
-// ============================================================
-export const demo = {
-  seed: () => rpcVoid('seed_sample_data'),
-};
+// NOTE: there is deliberately no client wrapper for seed_sample_data /
+// seed_demo_data_for. Demo data is seeded ONLY by running the SQL directly
+// in the Supabase editor, and only ever against the pitch account. Any UI
+// path to it would let a real tenant seed a stranger's contacts into their
+// own live data — see migration 0015.

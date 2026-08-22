@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, X, Sparkles, Pencil, Trash2, ScanLine, Wand2, Printer } from 'lucide-react';
-import { materials as materialsApi, demo, Material } from '../lib/api';
+import { Plus, X, Package, Pencil, Trash2, ScanLine, Wand2, Printer } from 'lucide-react';
+import { materials as materialsApi, Material } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
+import Modal from '../components/Modal';
 
 const emptyForm = { name: '', unit: '', type_of_material: 'Raw Material', qty_balance: 0, min_stock_level: 10, barcode: '' };
 
@@ -18,7 +19,6 @@ export default function Inventory() {
   const createMut = useMutation(materialsApi.create);
   const updateMut = useMutation((id: string, m: Partial<Material>) => materialsApi.update(id, m));
   const removeMut = useMutation(materialsApi.remove);
-  const seedMut = useMutation(demo.seed);
 
   const [showModal, setShowModal] = useState(false);
   const [editRow, setEditRow] = useState<Material | null>(null);
@@ -67,21 +67,19 @@ export default function Inventory() {
     }
   };
 
-  const loadSample = async () => {
-    const res = await seedMut.mutate();
-    if (res !== null) { toast.success('Sample data loaded.'); refetch(); }
-    else if (seedMut.error) toast.error(seedMut.error);
-  };
-
   const stockClass = (m: Material) => m.qty_balance === 0 ? 'badge-danger' : m.qty_balance <= m.min_stock_level ? 'badge-warning' : 'badge-success';
   const stockLabel = (m: Material) => m.qty_balance === 0 ? 'Out of stock' : m.qty_balance <= m.min_stock_level ? 'Low stock' : 'In stock';
 
   const filtered = (rows ?? []).filter(m => filter === 'All' || m.type_of_material === filter);
 
-  const printLabels = () => {
+  const printLabels = async () => {
     const withCodes = filtered.filter(m => m.barcode);
     if (withCodes.length === 0) { toast.error('No materials have a barcode yet. Add one via Edit first.'); return; }
-    printBarcodeLabels(withCodes.map(m => ({ name: m.name, barcode: m.barcode! })), 'Raw Material Labels');
+    try {
+      await printBarcodeLabels(withCodes.map(m => ({ name: m.name, barcode: m.barcode! })), 'Raw Material Labels');
+    } catch {
+      toast.error('Could not build the label sheet. Please try again.');
+    }
   };
 
   const columns: Column<Material>[] = [
@@ -113,15 +111,13 @@ export default function Inventory() {
 
       {!loading && !error && rows && rows.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '2.5rem 1rem' }}>
-          <Sparkles size={28} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
-          <h3 style={{ marginBottom: '0.35rem' }}>Start with sample data</h3>
+          <Package size={28} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
+          <h3 style={{ marginBottom: '0.35rem' }}>No raw materials yet</h3>
           <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1rem' }}>
-            Load Jokesan starter materials, products, and BOM recipes so you can try the costing engine right away.
+            Add the materials you buy and use in production. You can also bring them in from a
+            spreadsheet on the Import Data page.
           </p>
-          {seedMut.error && <ErrorState message={seedMut.error} />}
-          <button className="btn-primary" onClick={loadSample} disabled={seedMut.pending}>
-            {seedMut.pending ? 'Loading…' : 'Load Sample Data'}
-          </button>
+          <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Material</button>
         </div>
       )}
 
@@ -150,8 +146,7 @@ export default function Inventory() {
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Material' : 'Add Material'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -192,8 +187,7 @@ export default function Inventory() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteRow && (

@@ -7,6 +7,7 @@ import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -111,8 +112,7 @@ export default function Expenses() {
       />
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Expense' : 'Log Expense'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -152,8 +152,7 @@ export default function Expenses() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteRow && (

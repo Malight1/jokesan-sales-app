@@ -1,5 +1,3 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 // NOTE: jsPDF's built-in fonts cannot render the ₦ glyph, so PDFs
 // use "NGN"; WhatsApp text messages use ₦ freely.
@@ -23,7 +21,15 @@ export interface InvoiceData {
   logoDataUrl?: string | null;
 }
 
-export function generateInvoicePdf(d: InvoiceData) {
+// Async because jsPDF and its autotable plugin are now loaded on first use.
+// A PDF is always user-triggered, so the extra tick is invisible, and it keeps
+// the PDF engine out of the initial download.
+export async function generateInvoicePdf(d: InvoiceData) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  void autoTable;
   const doc = new jsPDF();
   const pageW = doc.internal.pageSize.getWidth();
 
@@ -120,18 +126,4 @@ export function generateInvoicePdf(d: InvoiceData) {
   doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
   doc.save(`${d.invoiceNo}.pdf`);
-}
-
-// Build a WhatsApp deep link. Nigerian local numbers (080…) are
-// converted to international format (23480…). Without a phone the
-// link opens WhatsApp's contact picker instead.
-export function whatsappLink(phone: string | null | undefined, text: string): string {
-  const encoded = encodeURIComponent(text);
-  if (phone && phone.trim()) {
-    let p = phone.replace(/[^\d+]/g, '');
-    if (p.startsWith('+')) p = p.slice(1);
-    if (p.startsWith('0')) p = '234' + p.slice(1);
-    return `https://wa.me/${p}?text=${encoded}`;
-  }
-  return `https://wa.me/?text=${encoded}`;
 }

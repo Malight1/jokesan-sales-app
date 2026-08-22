@@ -12,6 +12,7 @@ import { Loading, ErrorState, Empty } from '../components/DataStates';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
 import './Settings.scss';
+import Modal from '../components/Modal';
 
 type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'recipes';
 
@@ -141,8 +142,7 @@ function BranchesTab() {
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+        <Modal onClose={() => setShowModal(false)} maxWidth={400}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Branch' : 'Add Branch'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -159,8 +159,7 @@ function BranchesTab() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -603,8 +602,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
       )}
 
       {showInvite && (
-        <div className="modal-overlay" onClick={() => setShowInvite(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+        <Modal onClose={() => setShowInvite(false)} maxWidth={420}>
             <div className="modal-header">
               <h2>Invite a Team Member</h2>
               <button className="close-btn" onClick={() => setShowInvite(false)}><X size={18} /></button>
@@ -642,8 +640,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deactivating && (

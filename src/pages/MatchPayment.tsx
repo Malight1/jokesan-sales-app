@@ -7,6 +7,7 @@ import { Loading, ErrorState, Empty } from '../components/DataStates';
 import NumberInput from '../components/NumberInput';
 import { parseBankAlert, rankMatches, ParsedAlert, MatchCandidate } from '../lib/bankAlert';
 import { extractTextFromImage } from '../lib/ocr';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -231,8 +232,7 @@ export default function MatchPayment() {
       )}
 
       {confirmId && confirmSale && (
-        <div className="modal-overlay" onClick={() => setConfirmId(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+        <Modal onClose={() => setConfirmId(null)} maxWidth={400}>
             <div className="modal-header">
               <h2>Confirm Payment</h2>
             </div>
@@ -258,8 +258,7 @@ export default function MatchPayment() {
                 {payMut.pending ? 'Saving…' : <><CheckCircle2 size={15} /> Record Payment</>}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import Modal from './Modal';
 
 interface Props {
   title: string;
@@ -15,8 +16,7 @@ export default function ConfirmDialog({
   title, message, confirmLabel = 'Confirm', danger = true, pending = false, onConfirm, onCancel,
 }: Props) {
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+    <Modal onClose={onCancel} maxWidth={400}>
         <div className="modal-header">
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {danger && <AlertTriangle size={18} color="#dc2626" />}
@@ -33,7 +33,6 @@ export default function ConfirmDialog({
             {pending ? 'Working…' : confirmLabel}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

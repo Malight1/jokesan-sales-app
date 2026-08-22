@@ -7,6 +7,7 @@ import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -159,8 +160,7 @@ export default function Purchases() {
 
       {/* New Purchase Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Purchase Order</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -232,14 +232,12 @@ export default function Purchases() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Record Payment Modal */}
       {payFor && (
-        <div className="modal-overlay" onClick={() => setPayFor(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+        <Modal onClose={() => setPayFor(null)} maxWidth={380}>
             <div className="modal-header">
               <h2>Record Payment</h2>
               <button className="close-btn" onClick={() => setPayFor(null)}><X size={18} /></button>
@@ -267,8 +265,7 @@ export default function Purchases() {
                 {payMut.pending ? 'Saving…' : 'Record Payment'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {viewId && (
@@ -303,8 +300,7 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
   const { data, loading, error } = useQuery<any>(() => purchasesApi.detail(id), [id]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+    <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Purchase Detail</h2>
           <button className="close-btn" onClick={onClose}><X size={18} /></button>
@@ -354,7 +350,6 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

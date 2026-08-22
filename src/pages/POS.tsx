@@ -7,7 +7,8 @@ import {
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
-import { generateInvoicePdf, whatsappLink } from '../lib/invoice';
+import { generateInvoicePdf } from '../lib/invoice';
+import { whatsappLink } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
 import { enqueueSale } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -200,7 +201,7 @@ export default function POS() {
     const dl = async () => {
       let logo: string | null = null;
       if (tenant?.logo_url) { try { logo = await branding.toDataUrl(tenant.logo_url); } catch { /* skip logo */ } }
-      generateInvoicePdf({
+      await generateInvoicePdf({
         companyName: tenant?.name ?? 'My Business', invoiceNo: invNo,
         date: new Date().toISOString().split('T')[0],
         customerName: customerId ? customerName(customerId) : 'Walk-in Customer',

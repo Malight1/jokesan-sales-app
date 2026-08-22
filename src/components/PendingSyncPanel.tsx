@@ -2,6 +2,7 @@ import React from 'react';
 import { X, RefreshCcw, Trash2, CloudOff, CheckCircle2 } from 'lucide-react';
 import { QueuedSale, removeFromQueue, flushQueue } from '../lib/offlineQueue';
 import { useToast } from '../lib/ToastContext';
+import Modal from './Modal';
 
 export default function PendingSyncPanel({ queue, online, onClose }: { queue: QueuedSale[]; online: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -23,8 +24,7 @@ export default function PendingSyncPanel({ queue, online, onClose }: { queue: Qu
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+    <Modal onClose={onClose} maxWidth={480}>
         <div className="modal-header">
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CloudOff size={18} color={online ? '#16a34a' : '#dc2626'} /> Pending Sync
@@ -64,7 +64,6 @@ export default function PendingSyncPanel({ queue, online, onClose }: { queue: Qu
             <RefreshCcw size={14} /> {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

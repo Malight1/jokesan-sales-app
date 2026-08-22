@@ -7,6 +7,7 @@ import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -149,8 +150,7 @@ export default function Production() {
       />
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Production Run</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -226,8 +226,7 @@ export default function Production() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {viewId && (
@@ -262,8 +261,7 @@ function ProductionDetail({ id, onClose, productName, materialName }: {
   const { data, loading, error } = useQuery<any>(() => productionApi.detail(id), [id]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+    <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Production Detail</h2>
           <button className="close-btn" onClick={onClose}><X size={18} /></button>
@@ -301,7 +299,6 @@ function ProductionDetail({ id, onClose, productName, materialName }: {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

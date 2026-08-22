@@ -1,23 +1,26 @@
 import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Download, MessageCircle } from 'lucide-react';
-import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi, lookups } from '../lib/api';
+import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
+         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, lookups } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
-import { whatsappLink } from '../lib/invoice';
+import { whatsappLink } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors';
+type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
   { id: 'sales', label: 'Sales' },
   { id: 'expenses', label: 'Expenses' },
   { id: 'stock', label: 'Stock' },
   { id: 'debtors', label: 'Debtors' },
+  { id: 'creditors', label: 'Creditors' },
+  { id: 'products', label: 'Product Profit' },
 ];
 
 export default function Reports() {
@@ -31,6 +34,10 @@ export default function Reports() {
   const goodsQ = useQuery(() => goodsApi.list(), []);
   const custQ = useQuery(() => customersApi.list(), []);
   const expTypesQ = useQuery(() => lookups.expenseTypes(), []);
+  const purchQ = useQuery(() => purchasesApi.list(), []);
+  const suppQ = useQuery(() => suppliersApi.list(), []);
+  // Aggregated server-side, so it re-runs when the date range changes.
+  const prodProfitQ = useQuery(() => reportsApi.productProfitability(from, to), [from, to]);
 
   const loading = salesQ.loading || expQ.loading || goodsQ.loading;
   const error = salesQ.error || expQ.error || goodsQ.error;
@@ -94,6 +101,28 @@ export default function Reports() {
   });
   const debtors = Object.values(debtorMap).sort((a, b) => b.balance - a.balance);
 
+  // Creditors: suppliers we still owe. Same shape as debtors, other direction.
+  const suppName = (id: string | null) => {
+    const x = suppQ.data?.find(v => v.id === id);
+    return x ? `${x.first_name ?? ''} ${x.last_name ?? ''}`.trim() || x.company_store || 'Unknown' : 'No supplier';
+  };
+  const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date));
+  const creditorMap: Record<string, { name: string; total: number; paid: number; balance: number; count: number }> = {};
+  purchases.filter(pu => pu.balance > 0).forEach(pu => {
+    const key = pu.supplier_id ?? 'none';
+    creditorMap[key] = creditorMap[key] || { name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0 };
+    creditorMap[key].total += pu.total_amount;
+    creditorMap[key].paid += pu.total_paid;
+    creditorMap[key].balance += pu.balance;
+    creditorMap[key].count += 1;
+  });
+  const creditors = Object.values(creditorMap).sort((a, b) => b.balance - a.balance);
+  const totalOwed = creditors.reduce((sum, c) => sum + c.balance, 0);
+
+  const productProfit = prodProfitQ.data ?? [];
+  const productRevenue = productProfit.reduce((sum, r) => sum + Number(r.total_revenue || 0), 0);
+  const productProfitTotal = productProfit.reduce((sum, r) => sum + Number(r.profit || 0), 0);
+
   const remindDebtor = async (d: { id: string | null; name: string; phone: string | null; balance: number }) => {
     const lines = [
       `Dear ${d.name},`,
@@ -110,7 +139,7 @@ export default function Reports() {
   const rangeLabel = from || to ? ` (${from || 'start'} → ${to || 'today'})` : '';
 
   // ---- Exports per tab ----
-  const doExport = (kind: 'xlsx' | 'pdf') => {
+  const doExport = async (kind: 'xlsx' | 'pdf') => {
     let cols: ExportColumn<any>[] = [];
     let rows: any[] = [];
     let name: string = tab;
@@ -154,7 +183,7 @@ export default function Reports() {
         { header: 'Stock Value', value: r => r.selling_price * r.qty_balance },
       ];
       rows = goods; name = 'stock-report'; title = 'Stock Value Report';
-    } else {
+    } else if (tab === 'debtors') {
       cols = [
         { header: 'Customer', value: r => r.name },
         { header: 'Invoices', value: r => r.count },
@@ -163,10 +192,33 @@ export default function Reports() {
         { header: 'Outstanding', value: r => r.balance },
       ];
       rows = debtors; name = 'debtors-report'; title = 'Outstanding Debtors' + rangeLabel;
+    } else if (tab === 'creditors') {
+      cols = [
+        { header: 'Supplier', value: r => r.name },
+        { header: 'Bills', value: r => r.count },
+        { header: 'Total', value: r => r.total },
+        { header: 'Paid', value: r => r.paid },
+        { header: 'Owed', value: r => r.balance },
+      ];
+      rows = creditors; name = 'creditors-report'; title = 'Outstanding Creditors' + rangeLabel;
+    } else {
+      cols = [
+        { header: 'Product', value: r => r.product_name },
+        { header: 'Qty Sold', value: r => r.qty_sold },
+        { header: 'Revenue', value: r => r.total_revenue },
+        { header: 'COGS', value: r => r.total_cogs },
+        { header: 'Gross Profit', value: r => r.profit },
+        { header: 'Margin %', value: r => r.margin_pct },
+      ];
+      rows = productProfit; name = 'product-profitability'; title = 'Product Profitability' + rangeLabel;
     }
 
-    if (kind === 'xlsx') exportExcel(cols, rows, name);
-    else exportPDF(cols, rows, name, title);
+    try {
+      if (kind === 'xlsx') await exportExcel(cols, rows, name);
+      else await exportPDF(cols, rows, name, title);
+    } catch {
+      window.alert('Could not build the export file. Please try again.');
+    }
   };
 
   if (loading) return <Loading label="Building reports…" />;
@@ -356,6 +408,78 @@ export default function Reports() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'creditors' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '1rem' }}>Outstanding Creditors — total {fmt(totalOwed)}</h3>
+          {creditors.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>You don't owe any supplier right now. 🎉</p> : (
+            <div className="table-wrapper">
+              <table>
+                <thead><tr><th>Supplier</th><th>Bills</th><th>Total</th><th>Paid</th><th>Owed</th></tr></thead>
+                <tbody>
+                  {creditors.map(c => (
+                    <tr key={c.name}>
+                      <td data-label="Supplier" style={{ fontWeight: 600 }}>{c.name}</td>
+                      <td data-label="Bills">{c.count}</td>
+                      <td data-label="Total">{fmt(c.total)}</td>
+                      <td data-label="Paid">{fmt(c.paid)}</td>
+                      <td data-label="Owed" style={{ color: '#d97706', fontWeight: 700 }}>{fmt(c.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'products' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>Product Profitability{rangeLabel}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Margin per product, costed from the FIFO batches each sale actually consumed.
+          </p>
+          {prodProfitQ.loading && <Loading label="Calculating margins…" />}
+          {prodProfitQ.error && <ErrorState message={prodProfitQ.error} onRetry={prodProfitQ.refetch} />}
+          {!prodProfitQ.loading && !prodProfitQ.error && (
+            productProfit.length === 0
+              ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>No sales in this period yet.</p>
+              : (
+                <>
+                  <div className="table-wrapper">
+                    <table>
+                      <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th><th>COGS</th><th>Gross Profit</th><th>Margin</th></tr></thead>
+                      <tbody>
+                        {productProfit.map(r => (
+                          <tr key={r.fg_id}>
+                            <td data-label="Product" style={{ fontWeight: 600 }}>{r.product_name}</td>
+                            <td data-label="Qty Sold">{Number(r.qty_sold).toLocaleString()}</td>
+                            <td data-label="Revenue">{fmt(Number(r.total_revenue))}</td>
+                            <td data-label="COGS">{fmt(Number(r.total_cogs))}</td>
+                            <td data-label="Gross Profit" style={{ fontWeight: 700, color: Number(r.profit) >= 0 ? '#16a34a' : '#dc2626' }}>
+                              {fmt(Number(r.profit))}
+                            </td>
+                            <td data-label="Margin">
+                              <span className={Number(r.margin_pct) >= 20 ? 'badge-success' : Number(r.margin_pct) > 0 ? 'badge-warning' : 'badge-danger'}>
+                                {Number(r.margin_pct).toFixed(1)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
+                    Across {productProfit.length} product{productProfit.length !== 1 ? 's' : ''}:{' '}
+                    <strong>{fmt(productRevenue)}</strong> revenue,{' '}
+                    <strong style={{ color: productProfitTotal >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(productProfitTotal)}</strong> gross profit
+                    {productRevenue > 0 && <> ({((productProfitTotal / productRevenue) * 100).toFixed(1)}% blended margin)</>}.
+                  </p>
+                </>
+              )
           )}
         </div>
       )}

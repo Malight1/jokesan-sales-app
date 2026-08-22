@@ -1,6 +1,6 @@
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// xlsx and jsPDF are both large and only ever needed once a user actually
+// clicks Export, so they're pulled in on demand rather than shipped to
+// everyone who opens a table.
 
 // A column reduced to what export needs: a header + a plain-value accessor.
 export interface ExportColumn<T = any> {
@@ -26,19 +26,25 @@ function download(content: BlobPart, filename: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-export function exportExcel<T>(columns: ExportColumn<T>[], rows: T[], name: string) {
+export async function exportExcel<T>(columns: ExportColumn<T>[], rows: T[], name: string) {
+  const XLSX = await import('xlsx');
   const ws = XLSX.utils.json_to_sheet(toObjects(columns, rows));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
   XLSX.writeFile(wb, `${name}.xlsx`);
 }
 
-export function exportCSV<T>(columns: ExportColumn<T>[], rows: T[], name: string) {
+export async function exportCSV<T>(columns: ExportColumn<T>[], rows: T[], name: string) {
+  const XLSX = await import('xlsx');
   const ws = XLSX.utils.json_to_sheet(toObjects(columns, rows));
   download(XLSX.utils.sheet_to_csv(ws), `${name}.csv`, 'text/csv;charset=utf-8;');
 }
 
-export function exportPDF<T>(columns: ExportColumn<T>[], rows: T[], name: string, title?: string) {
+export async function exportPDF<T>(columns: ExportColumn<T>[], rows: T[], name: string, title?: string) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const doc = new jsPDF({ orientation: columns.length > 6 ? 'landscape' : 'portrait' });
   doc.setFontSize(13);
   doc.text(title ?? name, 14, 15);

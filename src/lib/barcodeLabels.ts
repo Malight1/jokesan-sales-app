@@ -1,5 +1,4 @@
-import JsBarcode from 'jsbarcode';
-import jsPDF from 'jspdf';
+// jsbarcode + jsPDF load on demand — label printing is a rare, deliberate action.
 
 export interface LabelItem {
   name: string;
@@ -8,7 +7,9 @@ export interface LabelItem {
 }
 
 // Renders a Code128 barcode to a data URL via an offscreen canvas.
-function barcodeDataUrl(code: string): string {
+// Takes JsBarcode as an argument so it stays synchronous inside the layout
+// loop — the module itself is loaded once by printBarcodeLabels.
+function barcodeDataUrl(JsBarcode: (el: HTMLCanvasElement, text: string, opts: object) => void, code: string): string {
   const canvas = document.createElement('canvas');
   JsBarcode(canvas, code, { format: 'CODE128', width: 2, height: 40, displayValue: true, fontSize: 12, margin: 4 });
   return canvas.toDataURL('image/png');
@@ -16,7 +17,11 @@ function barcodeDataUrl(code: string): string {
 
 // Prints a sheet of small barcode labels (3 per row) — for sticking on
 // shelves/products so the phone camera can scan them at the counter.
-export function printBarcodeLabels(items: LabelItem[], title = 'Barcode Labels') {
+export async function printBarcodeLabels(items: LabelItem[], title = 'Barcode Labels') {
+  const [{ default: jsPDF }, { default: JsBarcode }] = await Promise.all([
+    import('jspdf'),
+    import('jsbarcode'),
+  ]);
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 10;
@@ -44,7 +49,7 @@ export function printBarcodeLabels(items: LabelItem[], title = 'Barcode Labels')
     doc.text(nameLines.slice(0, 1), x + 2, y + 5);
 
     try {
-      const img = barcodeDataUrl(item.barcode);
+      const img = barcodeDataUrl(JsBarcode, item.barcode);
       doc.addImage(img, 'PNG', x + 2, y + 7, cellW - 8, 14);
     } catch {
       doc.setFontSize(7);

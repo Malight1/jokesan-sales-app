@@ -9,6 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
 const emptyForm = { name: '', unit: 'pcs', selling_price: 0, qty_balance: 0, min_stock_level: 10, default_markup: 1.5, barcode: '' };
@@ -86,10 +87,14 @@ export default function FinishedGoods() {
   const pending = createMut.pending || updateMut.pending;
   const formError = editRow ? updateMut.error : createMut.error;
 
-  const printLabels = () => {
+  const printLabels = async () => {
     const withCodes = (rows ?? []).filter(g => g.barcode);
     if (withCodes.length === 0) { toast.error('No products have a barcode yet. Add one via Edit first.'); return; }
-    printBarcodeLabels(withCodes.map(g => ({ name: g.name, barcode: g.barcode!, priceLabel: fmt(g.selling_price) })), 'Finished Goods Labels');
+    try {
+      await printBarcodeLabels(withCodes.map(g => ({ name: g.name, barcode: g.barcode!, priceLabel: fmt(g.selling_price) })), 'Finished Goods Labels');
+    } catch {
+      toast.error('Could not build the label sheet. Please try again.');
+    }
   };
 
   return (
@@ -116,8 +121,7 @@ export default function FinishedGoods() {
       />
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Product' : 'Add Finished Good'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -155,8 +159,7 @@ export default function FinishedGoods() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteRow && (

@@ -7,6 +7,7 @@ import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
+import Modal from '../components/Modal';
 
 const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '' };
 
@@ -110,8 +111,7 @@ export default function Customers() {
       />
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Customer' : 'Add Customer'}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -143,8 +143,7 @@ export default function Customers() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {deleteRow && (

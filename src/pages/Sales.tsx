@@ -7,13 +7,15 @@ import {
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
-import { generateInvoicePdf, whatsappLink } from '../lib/invoice';
+import { generateInvoicePdf } from '../lib/invoice';
+import { whatsappLink } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
 import NumberInput from '../components/NumberInput';
 import './Sales.scss';
+import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -131,7 +133,7 @@ export default function Sales() {
       const cust = customers?.find(c => c.id === s.customer_id);
       let logo: string | null = null;
       if (tenant?.logo_url) { try { logo = await branding.toDataUrl(tenant.logo_url); } catch { /* skip logo */ } }
-      generateInvoicePdf({
+      await generateInvoicePdf({
         companyName: tenant?.name ?? 'My Business',
         invoiceNo: invoiceNo(s),
         date: s.transaction_date,
@@ -230,8 +232,7 @@ export default function Sales() {
 
       {/* New Sale Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Sale</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
@@ -325,8 +326,7 @@ export default function Sales() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {viewId && <SaleDetail id={viewId} onClose={() => setViewId(null)} customerName={customerName} productName={productName} />}
@@ -344,8 +344,7 @@ export default function Sales() {
 
       {/* Record Payment Modal */}
       {payFor && (
-        <div className="modal-overlay" onClick={() => setPayFor(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
+        <Modal onClose={() => setPayFor(null)} maxWidth={380}>
             <div className="modal-header">
               <h2>Record Payment</h2>
               <button className="close-btn" onClick={() => setPayFor(null)}><X size={18} /></button>
@@ -373,8 +372,7 @@ export default function Sales() {
                 {payMut.pending ? 'Saving…' : 'Record Payment'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -389,8 +387,7 @@ function SaleDetail({ id, onClose, customerName, productName }: {
   const { data, loading, error } = useQuery<any>(() => salesApi.detail(id), [id]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+    <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Sale Detail</h2>
           <button className="close-btn" onClick={onClose}><X size={18} /></button>
@@ -440,7 +437,6 @@ function SaleDetail({ id, onClose, customerName, productName }: {
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

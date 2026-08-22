@@ -94,13 +94,19 @@ export default function DataTable<T>({
     else { setSortKey(col.key); setSortDir('asc'); }
   };
 
-  const doExport = (fmt: 'xlsx' | 'csv' | 'pdf') => {
+  // The export libraries load on demand, so this is async now. Failures are
+  // swallowed into an alert rather than an unhandled rejection.
+  const doExport = async (fmt: 'xlsx' | 'csv' | 'pdf') => {
     setExportOpen(false);
     const cols: ExportColumn<T>[] = columns.map(c => ({ header: c.header, value: (r: T) => val(c, r) ?? '' }));
     const name = exportName ?? 'export';
-    if (fmt === 'xlsx') exportExcel(cols, filtered, name);
-    else if (fmt === 'csv') exportCSV(cols, filtered, name);
-    else exportPDF(cols, filtered, name, exportTitle ?? name);
+    try {
+      if (fmt === 'xlsx') await exportExcel(cols, filtered, name);
+      else if (fmt === 'csv') await exportCSV(cols, filtered, name);
+      else await exportPDF(cols, filtered, name, exportTitle ?? name);
+    } catch {
+      window.alert('Could not build the export file. Please try again.');
+    }
   };
 
   if (loading) return <Loading />;

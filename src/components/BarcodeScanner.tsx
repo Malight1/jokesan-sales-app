@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Camera, Keyboard } from 'lucide-react';
+import Modal from './Modal';
 
 // Camera barcode/QR scanner using the phone's camera. Falls back to a
 // manual text entry field if the camera can't start (permission denied,
@@ -53,8 +54,7 @@ export default function BarcodeScanner({ onScan, onClose }: { onScan: (code: str
   };
 
   return (
-    <div className="modal-overlay" onClick={handleClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+    <Modal onClose={handleClose} maxWidth={420}>
         <div className="modal-header">
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Camera size={18} /> Scan Barcode</h2>
           <button className="close-btn" onClick={handleClose}><X size={18} /></button>
@@ -78,7 +78,6 @@ export default function BarcodeScanner({ onScan, onClose }: { onScan: (code: str
             <button type="submit" className="btn-primary btn-sm">Use</button>
           </form>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
