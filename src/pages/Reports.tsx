@@ -7,6 +7,7 @@ import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
 import { whatsappLink } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
+import DataTable, { Column } from '../components/DataTable';
 import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -107,10 +108,10 @@ export default function Reports() {
     return x ? `${x.first_name ?? ''} ${x.last_name ?? ''}`.trim() || x.company_store || 'Unknown' : 'No supplier';
   };
   const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date));
-  const creditorMap: Record<string, { name: string; total: number; paid: number; balance: number; count: number }> = {};
+  const creditorMap: Record<string, { key: string; name: string; total: number; paid: number; balance: number; count: number }> = {};
   purchases.filter(pu => pu.balance > 0).forEach(pu => {
     const key = pu.supplier_id ?? 'none';
-    creditorMap[key] = creditorMap[key] || { name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0 };
+    creditorMap[key] = creditorMap[key] || { key, name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0 };
     creditorMap[key].total += pu.total_amount;
     creditorMap[key].paid += pu.total_paid;
     creditorMap[key].balance += pu.balance;
@@ -137,6 +138,70 @@ export default function Reports() {
   };
 
   const rangeLabel = from || to ? ` (${from || 'start'} → ${to || 'today'})` : '';
+
+  // ---- Table column definitions (DataTable gives each one search, sort and paging) ----
+  const salesCols: Column<any>[] = [
+    { key: 'transaction_date', header: 'Date', value: r => r.transaction_date },
+    { key: 'customer', header: 'Customer', value: r => custName(r.customer_id) },
+    { key: 'total_amount', header: 'Total', align: 'right', value: r => r.total_amount, render: r => <strong>{fmt(r.total_amount)}</strong> },
+    { key: 'amount_paid', header: 'Paid', align: 'right', value: r => r.amount_paid, render: r => fmt(r.amount_paid) },
+    { key: 'balance', header: 'Balance', align: 'right', value: r => r.balance,
+      render: r => <span style={{ color: r.balance > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(r.balance)}</span> },
+    { key: 'gross_profit', header: 'Profit', align: 'right', value: r => r.gross_profit,
+      render: r => <span style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(r.gross_profit)}</span> },
+  ];
+
+  const expenseCols: Column<any>[] = [
+    { key: 'expense_date', header: 'Date', value: r => r.expense_date },
+    { key: 'type', header: 'Type', value: r => typeName(r.expense_type_id) },
+    { key: 'description', header: 'Description', value: r => r.description ?? '—' },
+    { key: 'amount', header: 'Amount', align: 'right', value: r => r.amount, render: r => <strong>{fmt(r.amount)}</strong> },
+  ];
+
+  const stockCols: Column<any>[] = [
+    { key: 'name', header: 'Product', value: r => r.name, render: r => <strong>{r.name}</strong> },
+    { key: 'qty_balance', header: 'Qty', align: 'right', value: r => r.qty_balance, render: r => r.qty_balance.toLocaleString() },
+    { key: 'selling_price', header: 'Unit Price', align: 'right', value: r => r.selling_price, render: r => fmt(r.selling_price) },
+    { key: 'stock_value', header: 'Stock Value', align: 'right', value: r => r.selling_price * r.qty_balance,
+      render: r => <strong>{fmt(r.selling_price * r.qty_balance)}</strong> },
+  ];
+
+  const debtorCols: Column<any>[] = [
+    { key: 'name', header: 'Customer', value: r => r.name, render: r => <strong>{r.name}</strong> },
+    { key: 'count', header: 'Invoices', align: 'right', value: r => r.count },
+    { key: 'total', header: 'Total', align: 'right', value: r => r.total, render: r => fmt(r.total) },
+    { key: 'paid', header: 'Paid', align: 'right', value: r => r.paid, render: r => fmt(r.paid) },
+    { key: 'balance', header: 'Outstanding', align: 'right', value: r => r.balance,
+      render: r => <span style={{ color: '#dc2626', fontWeight: 700 }}>{fmt(r.balance)}</span> },
+    { key: 'remind', header: '', sortable: false, align: 'right', value: () => '',
+      render: r => (
+        <button className="btn-secondary btn-sm" onClick={() => remindDebtor(r)} title="Send WhatsApp payment reminder">
+          <MessageCircle size={14} /> Remind
+        </button>
+      ) },
+  ];
+
+  const creditorCols: Column<any>[] = [
+    { key: 'name', header: 'Supplier', value: r => r.name, render: r => <strong>{r.name}</strong> },
+    { key: 'count', header: 'Bills', align: 'right', value: r => r.count },
+    { key: 'total', header: 'Total', align: 'right', value: r => r.total, render: r => fmt(r.total) },
+    { key: 'paid', header: 'Paid', align: 'right', value: r => r.paid, render: r => fmt(r.paid) },
+    { key: 'balance', header: 'Owed', align: 'right', value: r => r.balance,
+      render: r => <span style={{ color: '#d97706', fontWeight: 700 }}>{fmt(r.balance)}</span> },
+  ];
+
+  const productCols: Column<any>[] = [
+    { key: 'product_name', header: 'Product', value: r => r.product_name, render: r => <strong>{r.product_name}</strong> },
+    { key: 'qty_sold', header: 'Qty Sold', align: 'right', value: r => Number(r.qty_sold), render: r => Number(r.qty_sold).toLocaleString() },
+    { key: 'total_revenue', header: 'Revenue', align: 'right', value: r => Number(r.total_revenue), render: r => fmt(Number(r.total_revenue)) },
+    { key: 'total_cogs', header: 'COGS', align: 'right', value: r => Number(r.total_cogs), render: r => fmt(Number(r.total_cogs)) },
+    { key: 'profit', header: 'Gross Profit', align: 'right', value: r => Number(r.profit),
+      render: r => <span style={{ fontWeight: 700, color: Number(r.profit) >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(Number(r.profit))}</span> },
+    { key: 'margin_pct', header: 'Margin', align: 'right', value: r => Number(r.margin_pct),
+      render: r => <span className={Number(r.margin_pct) >= 20 ? 'badge-success' : Number(r.margin_pct) > 0 ? 'badge-warning' : 'badge-danger'}>
+        {Number(r.margin_pct).toFixed(1)}%
+      </span> },
+  ];
 
   // ---- Exports per tab ----
   const doExport = async (kind: 'xlsx' | 'pdf') => {
@@ -308,22 +373,15 @@ export default function Reports() {
               </BarChart>
             </ResponsiveContainer>
           )}
-          <div className="table-wrapper" style={{ marginTop: '1.5rem' }}>
-            <table>
-              <thead><tr><th>Date</th><th>Customer</th><th>Total</th><th>Paid</th><th>Balance</th><th>Profit</th></tr></thead>
-              <tbody>
-                {sales.map(s => (
-                  <tr key={s.id}>
-                    <td data-label="Date">{s.transaction_date}</td>
-                    <td data-label="Customer">{custName(s.customer_id)}</td>
-                    <td data-label="Total" style={{ fontWeight: 600 }}>{fmt(s.total_amount)}</td>
-                    <td data-label="Paid">{fmt(s.amount_paid)}</td>
-                    <td data-label="Balance" style={{ color: s.balance > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>{fmt(s.balance)}</td>
-                    <td data-label="Profit" style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ marginTop: '1.5rem' }}>
+            <DataTable
+              columns={salesCols}
+              rows={sales}
+              getRowKey={r => r.id}
+              searchKeys={[r => custName(r.customer_id), r => r.transaction_date ?? '', r => r.payment_status ?? '']}
+              searchPlaceholder="Search by customer, date or status…"
+              emptyMessage="No sales in this period."
+            />
           </div>
         </div>
       )}
@@ -359,80 +417,60 @@ export default function Reports() {
               <span>Total</span><span>{fmt(totalExpenses)}</span>
             </div>
           </div>
+          {/* The tab's export produces these rows, so they belong on screen too. */}
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <h3 style={{ marginBottom: '1rem' }}>All Expenses{rangeLabel}</h3>
+            <DataTable
+              columns={expenseCols}
+              rows={expenses}
+              getRowKey={e => e.id}
+              searchKeys={[e => typeName(e.expense_type_id), e => e.description ?? '', e => e.expense_date ?? '']}
+              searchPlaceholder="Search by type, description or date…"
+              emptyMessage="No expenses in this period."
+            />
+          </div>
         </div>
       )}
 
       {tab === 'stock' && (
         <div className="card">
           <h3 style={{ marginBottom: '1rem' }}>Finished Goods Stock Value — total {fmt(stockValue)}</h3>
-          <div className="table-wrapper">
-            <table>
-              <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Stock Value</th></tr></thead>
-              <tbody>
-                {goods.map(g => (
-                  <tr key={g.id}>
-                    <td data-label="Product" style={{ fontWeight: 600 }}>{g.name}</td>
-                    <td data-label="Qty">{g.qty_balance.toLocaleString()}</td>
-                    <td data-label="Unit Price">{fmt(g.selling_price)}</td>
-                    <td data-label="Stock Value" style={{ fontWeight: 700 }}>{fmt(g.selling_price * g.qty_balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={stockCols}
+            rows={goods}
+            getRowKey={g => g.id}
+            searchKeys={[g => g.name]}
+            searchPlaceholder="Search products…"
+            emptyMessage="No finished goods yet."
+          />
         </div>
       )}
 
       {tab === 'debtors' && (
         <div className="card">
           <h3 style={{ marginBottom: '1rem' }}>Outstanding Debtors — total {fmt(totalOutstanding)}</h3>
-          {debtors.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>No outstanding balances. 🎉</p> : (
-            <div className="table-wrapper">
-              <table>
-                <thead><tr><th>Customer</th><th>Invoices</th><th>Total</th><th>Paid</th><th>Outstanding</th><th></th></tr></thead>
-                <tbody>
-                  {debtors.map(d => (
-                    <tr key={d.name}>
-                      <td data-label="Customer" style={{ fontWeight: 600 }}>{d.name}</td>
-                      <td data-label="Invoices">{d.count}</td>
-                      <td data-label="Total">{fmt(d.total)}</td>
-                      <td data-label="Paid">{fmt(d.paid)}</td>
-                      <td data-label="Outstanding" style={{ color: '#dc2626', fontWeight: 700 }}>{fmt(d.balance)}</td>
-                      <td data-label="" style={{ textAlign: 'right' }}>
-                        <button className="btn-secondary btn-sm" onClick={() => remindDebtor(d)} title="Send WhatsApp payment reminder">
-                          <MessageCircle size={14} /> Remind
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={debtorCols}
+            rows={debtors}
+            getRowKey={d => d.id ?? 'walkin'}
+            searchKeys={[d => d.name]}
+            searchPlaceholder="Search customers…"
+            emptyMessage="No outstanding balances. 🎉"
+          />
         </div>
       )}
 
       {tab === 'creditors' && (
         <div className="card">
           <h3 style={{ marginBottom: '1rem' }}>Outstanding Creditors — total {fmt(totalOwed)}</h3>
-          {creditors.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>You don't owe any supplier right now. 🎉</p> : (
-            <div className="table-wrapper">
-              <table>
-                <thead><tr><th>Supplier</th><th>Bills</th><th>Total</th><th>Paid</th><th>Owed</th></tr></thead>
-                <tbody>
-                  {creditors.map(c => (
-                    <tr key={c.name}>
-                      <td data-label="Supplier" style={{ fontWeight: 600 }}>{c.name}</td>
-                      <td data-label="Bills">{c.count}</td>
-                      <td data-label="Total">{fmt(c.total)}</td>
-                      <td data-label="Paid">{fmt(c.paid)}</td>
-                      <td data-label="Owed" style={{ color: '#d97706', fontWeight: 700 }}>{fmt(c.balance)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            columns={creditorCols}
+            rows={creditors}
+            getRowKey={c => c.key}
+            searchKeys={[c => c.name]}
+            searchPlaceholder="Search suppliers…"
+            emptyMessage="You don't owe any supplier right now. 🎉"
+          />
         </div>
       )}
 
@@ -442,44 +480,24 @@ export default function Reports() {
           <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
             Margin per product, costed from the FIFO batches each sale actually consumed.
           </p>
-          {prodProfitQ.loading && <Loading label="Calculating margins…" />}
-          {prodProfitQ.error && <ErrorState message={prodProfitQ.error} onRetry={prodProfitQ.refetch} />}
-          {!prodProfitQ.loading && !prodProfitQ.error && (
-            productProfit.length === 0
-              ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>No sales in this period yet.</p>
-              : (
-                <>
-                  <div className="table-wrapper">
-                    <table>
-                      <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th><th>COGS</th><th>Gross Profit</th><th>Margin</th></tr></thead>
-                      <tbody>
-                        {productProfit.map(r => (
-                          <tr key={r.fg_id}>
-                            <td data-label="Product" style={{ fontWeight: 600 }}>{r.product_name}</td>
-                            <td data-label="Qty Sold">{Number(r.qty_sold).toLocaleString()}</td>
-                            <td data-label="Revenue">{fmt(Number(r.total_revenue))}</td>
-                            <td data-label="COGS">{fmt(Number(r.total_cogs))}</td>
-                            <td data-label="Gross Profit" style={{ fontWeight: 700, color: Number(r.profit) >= 0 ? '#16a34a' : '#dc2626' }}>
-                              {fmt(Number(r.profit))}
-                            </td>
-                            <td data-label="Margin">
-                              <span className={Number(r.margin_pct) >= 20 ? 'badge-success' : Number(r.margin_pct) > 0 ? 'badge-warning' : 'badge-danger'}>
-                                {Number(r.margin_pct).toFixed(1)}%
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
-                    Across {productProfit.length} product{productProfit.length !== 1 ? 's' : ''}:{' '}
-                    <strong>{fmt(productRevenue)}</strong> revenue,{' '}
-                    <strong style={{ color: productProfitTotal >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(productProfitTotal)}</strong> gross profit
-                    {productRevenue > 0 && <> ({((productProfitTotal / productRevenue) * 100).toFixed(1)}% blended margin)</>}.
-                  </p>
-                </>
-              )
+          <DataTable
+            columns={productCols}
+            rows={productProfit}
+            getRowKey={r => r.fg_id}
+            loading={prodProfitQ.loading}
+            error={prodProfitQ.error}
+            onRetry={prodProfitQ.refetch}
+            searchKeys={[r => r.product_name]}
+            searchPlaceholder="Search products…"
+            emptyMessage="No sales in this period yet."
+          />
+          {productProfit.length > 0 && (
+            <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
+              Across {productProfit.length} product{productProfit.length !== 1 ? 's' : ''}:{' '}
+              <strong>{fmt(productRevenue)}</strong> revenue,{' '}
+              <strong style={{ color: productProfitTotal >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(productProfitTotal)}</strong> gross profit
+              {productRevenue > 0 && <> ({((productProfitTotal / productRevenue) * 100).toFixed(1)}% blended margin)</>}.
+            </p>
           )}
         </div>
       )}

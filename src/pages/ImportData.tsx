@@ -3,6 +3,7 @@ import { Upload, FileSpreadsheet, Download, ArrowRight, ArrowLeft, CheckCircle2,
 import { useToast } from '../lib/ToastContext';
 import { ENTITIES, EntityDef, parseSpreadsheet, autoGuess, downloadTemplate } from '../lib/importer';
 import './ImportData.scss';
+import DataTable, { Column } from '../components/DataTable';
 
 type Step = 1 | 2 | 3 | 4;
 interface Result { imported: number; errors: { row: number; reason: string }[]; }
@@ -70,6 +71,11 @@ export default function ImportData() {
     setStep(4);
     if (imported > 0) toast.success(`${imported} ${entity.label.toLowerCase()} imported.`);
   };
+
+  const errorCols: Column<{ row: number; reason: string }>[] = [
+    { key: 'row', header: 'Row', align: 'right', value: e => e.row },
+    { key: 'reason', header: 'Reason', value: e => e.reason },
+  ];
 
   return (
     <div className="import-page">
@@ -192,11 +198,19 @@ export default function ImportData() {
             : <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Every row imported cleanly. 🎉</p>}
 
           {result.errors.length > 0 && (
-            <div className="table-wrapper" style={{ marginTop: '1.25rem', textAlign: 'left', maxWidth: 480, marginLeft: 'auto', marginRight: 'auto' }}>
-              <table>
-                <thead><tr><th>Row</th><th>Reason</th></tr></thead>
-                <tbody>{result.errors.slice(0, 50).map((e, i) => <tr key={i}><td data-label="Row">{e.row}</td><td data-label="Reason">{e.reason}</td></tr>)}</tbody>
-              </table>
+            <div style={{ marginTop: '1.25rem', textAlign: 'left' }}>
+              {/* Was capped at 50 rows with nothing to say so — a 200-error
+                  import looked like a 50-error one. All of them list now. */}
+              <DataTable
+                columns={errorCols}
+                rows={result.errors}
+                getRowKey={e => e.row}
+                searchKeys={[e => String(e.row), e => e.reason]}
+                searchPlaceholder="Search skipped rows…"
+                exportName="import-errors"
+                exportTitle="Skipped rows"
+                emptyMessage="No rows were skipped."
+              />
             </div>
           )}
 

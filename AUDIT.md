@@ -219,6 +219,28 @@ Nothing in the frontend can fix this. Check the Supabase dashboard:
 
 Note the local `.env` fix does nothing for production — Vercel holds its own copy of these variables.
 
+### 10. Report and Settings tables had no search or pagination — FIXED 22 Aug
+
+The nine list *pages* used the shared `DataTable` (search, sort, paging, export), but every table inside
+Reports, Settings and Import Data was hand-rolled `<table>` markup with none of it — so a tenant with 2,000
+sales got 2,000 unpaginated rows in the Sales tab and no way to find one.
+
+**Fixed:** all 10 hand-rolled tables converted to `DataTable` — Reports (Sales, Stock, Debtors, Creditors,
+Product Profit), Settings (Branches, Team, Pending Invites) and the Import Data error list. Each now has a
+search box scoped to its meaningful fields, click-to-sort headers, 15-row paging and a record count.
+
+Two things surfaced while doing it:
+
+- The **Expenses** tab exported individual expense rows that were never shown on screen — only charts and a
+  by-type summary. It now has the itemised table to match its own export.
+- The **Import Data** error list was `slice(0, 50)` with nothing saying so, so a 200-error import looked
+  like a 50-error one. All rows are listed now, searchable and exportable.
+
+Left alone deliberately: the Import Data mapping preview (fixed at 3 rows by design), the Dashboard's
+recent-sales and reminder cards (top-N summaries that link to the full pages), and MatchPayment's
+suggestions (top 5 by relevance). **Stock Alerts** is a card view rather than a table, so it got a search
+box rather than being restructured.
+
 ## Document drift
 
 - **`UX_IMPROVEMENT_PLAN.md` and `IMPLEMENTATION_PLAN.md` show nearly every box unchecked** — including

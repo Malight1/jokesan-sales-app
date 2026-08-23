@@ -13,6 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
 import './Settings.scss';
 import Modal from '../components/Modal';
+import DataTable, { Column } from '../components/DataTable';
 
 type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'recipes';
 
@@ -104,6 +105,22 @@ function BranchesTab() {
     else toast.error(activeMut.error ?? 'Failed.');
   };
 
+  const branchCols: Column<Branch>[] = [
+    { key: 'name', header: 'Name', value: b => b.name, render: b => <strong>{b.name}</strong> },
+    { key: 'address', header: 'Address', value: b => b.address || '—' },
+    { key: 'is_active', header: 'Status', value: b => (b.is_active ? 'Active' : 'Inactive'),
+      render: b => b.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Inactive</span> },
+    { key: 'actions', header: 'Actions', sortable: false, align: 'right', value: () => '',
+      render: b => (
+        <>
+          <button className="btn-ghost btn-sm" onClick={() => openEdit(b)}><Pencil size={13} /></button>
+          <button className="btn-ghost btn-sm" style={{ color: b.is_active ? '#dc2626' : '#16a34a' }} onClick={() => toggle(b)}>
+            {b.is_active ? 'Deactivate' : 'Reactivate'}
+          </button>
+        </>
+      ) },
+  ];
+
   if (branchesQ.loading) return <Loading label="Loading branches…" />;
   if (branchesQ.error) return <ErrorState message={branchesQ.error} onRetry={branchesQ.refetch} />;
 
@@ -118,28 +135,14 @@ function BranchesTab() {
         New sales/purchases/production are recorded under the branch each staff member is assigned to (see the Team tab). Assign staff to a branch so their records land in the right place.
       </div>
 
-      {(branchesQ.data?.length ?? 0) === 0 ? <Empty message="No branches yet." /> : (
-        <div className="table-wrapper">
-          <table>
-            <thead><tr><th>Name</th><th>Address</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-            <tbody>
-              {branchesQ.data?.map(b => (
-                <tr key={b.id}>
-                  <td><strong>{b.name}</strong></td>
-                  <td>{b.address || '—'}</td>
-                  <td>{b.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Inactive</span>}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="btn-ghost btn-sm" onClick={() => openEdit(b)}><Pencil size={13} /></button>
-                    <button className="btn-ghost btn-sm" style={{ color: b.is_active ? '#dc2626' : '#16a34a' }} onClick={() => toggle(b)}>
-                      {b.is_active ? 'Deactivate' : 'Reactivate'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={branchCols}
+        rows={branchesQ.data ?? []}
+        getRowKey={b => b.id}
+        searchKeys={[b => b.name, b => b.address ?? '']}
+        searchPlaceholder="Search branches…"
+        emptyMessage="No branches yet."
+      />
 
       {showModal && (
         <Modal onClose={() => setShowModal(false)} maxWidth={400}>
@@ -527,6 +530,55 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
     setRevoking(null);
   };
 
+  const selectStyle = { padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' };
+
+  const memberCols: Column<TeamMember>[] = [
+    { key: 'full_name', header: 'Name', value: m => m.full_name ?? '',
+      render: m => (
+        <>
+          <strong>{m.full_name ?? '—'}</strong>
+          {m.id === profile?.id && <span className="badge-primary" style={{ marginLeft: 8 }}>You</span>}
+        </>
+      ) },
+    { key: 'email', header: 'Email', value: m => m.email ?? '—' },
+    { key: 'role', header: 'Role', value: m => m.role,
+      render: m => (
+        <select value={m.role} disabled={m.id === profile?.id} onChange={e => changeRole(m, e.target.value)} style={selectStyle}>
+          {roleOptions.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
+        </select>
+      ) },
+    ...(isMultiBranch ? [{
+      key: 'branch_id', header: 'Branch',
+      value: (m: TeamMember) => branchesQ.data?.find(b => b.id === m.branch_id)?.name ?? '',
+      render: (m: TeamMember) => (
+        <select value={m.branch_id ?? ''} onChange={e => changeBranch(m, e.target.value)} style={selectStyle}>
+          <option value="">— none —</option>
+          {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      ),
+    } as Column<TeamMember>] : []),
+    { key: 'is_active', header: 'Status', value: m => (m.is_active ? 'Active' : 'Deactivated'),
+      render: m => m.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Deactivated</span> },
+    { key: 'actions', header: 'Actions', sortable: false, align: 'right', value: () => '',
+      render: m => m.id === profile?.id ? null : (m.is_active
+        ? <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setDeactivating(m)}>Deactivate</button>
+        : <button className="btn-ghost btn-sm" onClick={() => reactivate(m)}>Reactivate</button>) },
+  ];
+
+  const inviteCols: Column<StaffInvite>[] = [
+    { key: 'email', header: 'Email', value: inv => inv.email, render: inv => <strong>{inv.email}</strong> },
+    { key: 'role', header: 'Role', value: inv => inv.role, render: inv => <span className="badge-gray">{inv.role}</span> },
+    { key: 'created_at', header: 'Invited', value: inv => inv.created_at,
+      render: inv => new Date(inv.created_at).toLocaleDateString('en-GB') },
+    { key: 'actions', header: '', sortable: false, align: 'right', value: () => '',
+      render: inv => (
+        <>
+          <button className="btn-ghost btn-sm" onClick={() => copyInvite(inv)} title="Copy invite message"><Copy size={13} /> Copy</button>{' '}
+          <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setRevoking(inv)}><Trash2 size={14} /> Revoke</button>
+        </>
+      ) },
+  ];
+
   if (membersQ.loading) return <Loading label="Loading team…" />;
   if (membersQ.error) return <ErrorState message={membersQ.error} onRetry={membersQ.refetch} />;
 
@@ -539,65 +591,30 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
         <button className="btn-primary" onClick={() => setShowInvite(true)}><Plus size={16} /> Invite User</button>
       </div>
 
-      <div className="table-wrapper" style={{ marginBottom: '1.5rem' }}>
-        <table>
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th>{isMultiBranch && <th>Branch</th>}<th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-          <tbody>
-            {membersQ.data?.map(m => {
-              const isSelf = m.id === profile?.id;
-              return (
-                <tr key={m.id}>
-                  <td data-label="Name"><strong>{m.full_name ?? '—'}</strong>{isSelf && <span className="badge-primary" style={{ marginLeft: 8 }}>You</span>}</td>
-                  <td data-label="Email">{m.email ?? '—'}</td>
-                  <td data-label="Role">
-                    <select value={m.role} disabled={isSelf} onChange={e => changeRole(m, e.target.value)}
-                      style={{ padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
-                      {roleOptions.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
-                    </select>
-                  </td>
-                  {isMultiBranch && (
-                    <td data-label="Branch">
-                      <select value={m.branch_id ?? ''} onChange={e => changeBranch(m, e.target.value)}
-                        style={{ padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' }}>
-                        <option value="">— none —</option>
-                        {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
-                    </td>
-                  )}
-                  <td data-label="Status">{m.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Deactivated</span>}</td>
-                  <td data-label="Actions" style={{ textAlign: 'right' }}>
-                    {!isSelf && (m.is_active
-                      ? <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setDeactivating(m)}>Deactivate</button>
-                      : <button className="btn-ghost btn-sm" onClick={() => reactivate(m)}>Reactivate</button>)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <DataTable
+          columns={memberCols}
+          rows={membersQ.data ?? []}
+          getRowKey={m => m.id}
+          searchKeys={[m => m.full_name ?? '', m => m.email ?? '', m => m.role]}
+          searchPlaceholder="Search by name, email or role…"
+          emptyMessage="No team members yet."
+        />
       </div>
 
       <h3 style={{ marginBottom: '0.75rem' }}>Pending Invites</h3>
       {(invitesQ.data?.length ?? 0) === 0 ? (
         <Empty message="No pending invites. Invite a teammate — they sign up with that email and land inside your company automatically." />
       ) : (
-        <div className="table-wrapper">
-          <table>
-            <thead><tr><th>Email</th><th>Role</th><th>Invited</th><th style={{ textAlign: 'right' }}></th></tr></thead>
-            <tbody>
-              {invitesQ.data?.map(inv => (
-                <tr key={inv.id}>
-                  <td data-label="Email"><strong>{inv.email}</strong></td>
-                  <td data-label="Role"><span className="badge-gray">{inv.role}</span></td>
-                  <td data-label="Invited">{new Date(inv.created_at).toLocaleDateString('en-GB')}</td>
-                  <td data-label="Actions" style={{ textAlign: 'right' }}>
-                    <button className="btn-ghost btn-sm" onClick={() => copyInvite(inv)} title="Copy invite message"><Copy size={13} /> Copy</button>{' '}
-                    <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setRevoking(inv)}><Trash2 size={14} /> Revoke</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          <DataTable
+            columns={inviteCols}
+            rows={invitesQ.data ?? []}
+            getRowKey={inv => inv.id}
+            searchKeys={[inv => inv.email, inv => inv.role]}
+            searchPlaceholder="Search invites…"
+            emptyMessage="No pending invites."
+          />
         </div>
       )}
 

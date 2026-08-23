@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2 } from 'lucide-react';
+import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { materials as materialsApi, finishedGoods as goodsApi, Material, FinishedGood } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -20,11 +20,16 @@ export default function StockAlerts() {
   const saveGood = useMutation(goodsApi.setMinLevel);
 
   const [editItem, setEditItem] = useState<EditTarget | null>(null);
+  const [search, setSearch] = useState('');
 
   const loading = matQ.loading || goodQ.loading;
   const error = matQ.error || goodQ.error;
-  const materials = matQ.data ?? [];
-  const goods = goodQ.data ?? [];
+  const q = search.trim().toLowerCase();
+  const byName = <T extends { name: string }>(list: T[]) =>
+    q ? list.filter(i => i.name.toLowerCase().includes(q)) : list;
+
+  const materials = byName(matQ.data ?? []);
+  const goods = byName(goodQ.data ?? []);
 
   const outOfStockGoods     = goods.filter(g => g.qty_balance === 0);
   const lowStockGoods       = goods.filter(g => g.qty_balance > 0 && g.qty_balance <= g.min_stock_level);
@@ -57,6 +62,10 @@ export default function StockAlerts() {
           <h1>Stock Alerts</h1>
           <p>{loading ? ' ' : totalAlerts === 0 ? 'All stock levels are healthy' : `${totalAlerts} item${totalAlerts !== 1 ? 's' : ''} need attention`}</p>
         </div>
+        <div className="dt-search" style={{ maxWidth: 260 }}>
+          <Search size={15} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items…" />
+        </div>
       </div>
 
       {loading && <Loading label="Checking stock levels…" />}
@@ -64,9 +73,11 @@ export default function StockAlerts() {
 
       {!loading && !error && totalAlerts === 0 && (
         <div className="all-clear">
-          <div className="all-clear-icon">✅</div>
-          <h2>All good!</h2>
-          <p>No low stock or out-of-stock items at the moment.</p>
+          <div className="all-clear-icon">{q ? '🔍' : '✅'}</div>
+          <h2>{q ? 'No matches' : 'All good!'}</h2>
+          <p>{q
+            ? <>Nothing matching “{search}” needs attention. <button className="btn-ghost btn-sm" onClick={() => setSearch('')}>Clear search</button></>
+            : 'No low stock or out-of-stock items at the moment.'}</p>
         </div>
       )}
 
