@@ -2,12 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat
 } from 'lucide-react';
-import { materials as materialsApi, finishedGoods as goodsApi, platform } from '../lib/api';
+import { stock, branches as branchesApi, platform, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
+import { accountState } from '../lib/accountState';
 import { useAuth } from '../lib/AuthContext';
+import { useToast } from '../lib/ToastContext';
 import { canAccess } from '../lib/permissions';
+import { useBranches } from '../lib/useBranches';
+import { lowStockRows } from '../lib/branchStock';
 import { useOnlineSync } from '../lib/useOnlineSync';
 import PendingSyncPanel from './PendingSyncPanel';
 import ConfirmDialog from './ConfirmDialog';
@@ -34,6 +38,7 @@ const navItems = [
     items: [
       { to: '/production', label: 'Production', icon: FlaskConical },
       { to: '/finished-goods', label: 'Finished Goods', icon: Package },
+      { to: '/transfers', label: 'Stock Transfers', icon: Repeat },
     ],
   },
   {
@@ -68,6 +73,9 @@ const navItems = [
   },
 ];
 
+// Only meaningful when there's somewhere to send stock.
+const MULTI_BRANCH_ONLY = new Set(['/transfers']);
+
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
   '/pos': 'Point of Sale',
@@ -77,6 +85,7 @@ const pageTitles: Record<string, string> = {
   '/customers': 'Customers',
   '/production': 'Production',
   '/finished-goods': 'Finished Goods',
+  '/transfers': 'Stock Transfers',
   '/purchases': 'Purchases',
   '/inventory': 'Raw Materials',
   '/suppliers': 'Suppliers',
@@ -85,6 +94,7 @@ const pageTitles: Record<string, string> = {
   '/reports': 'Reports',
   '/stock-alerts': 'Stock Alerts',
   '/insights': 'Smart Insights',
+  '/profile': 'My Profile',
   '/settings': 'Settings',
   '/platform': 'Platform Admin',
 };
@@ -99,15 +109,23 @@ const roleLabels: Record<string, string> = {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const toast = useToast();
   const { profile, tenant, signOut } = useAuth();
-  const { data: mats } = useQuery(() => materialsApi.list(), []);
-  const { data: fgoods } = useQuery(() => goodsApi.list(), []);
+  const role = profile?.role;
+  const { multi, active, myBranchId, myBranchName } = useBranches();
+
+  // Staff are alerted about their own branch's shelves; admin and accounts
+  // about every branch. Quantities only — stock_levels() carries no costs.
+  const seeAll = role === 'admin' || role === 'accounts';
+  const { data: levels } = useQuery<StockLevel[]>(
+    () => stock.levels(seeAll ? null : myBranchId), [seeAll, myBranchId]);
   const { data: isPlatformAdmin } = useQuery(() => platform.isAdmin().catch(() => false), []);
   const { online, pendingCount, failedCount, queue } = useOnlineSync();
   const [showSync, setShowSync] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
 
   const handleSignOutClick = () => {
@@ -115,13 +133,30 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     else signOut();
   };
 
+  // An admin's "working at" branch decides where their sales, purchases and
+  // production are recorded. Every open screen is keyed to the old branch
+  // (till stock, dashboard, alerts), so a full reload is the honest way to
+  // make sure nothing stale is left showing.
+  const switchBranch = async (id: string) => {
+    if (!id || id === myBranchId) return;
+    setSwitching(true);
+    try {
+      await branchesApi.setMine(id);
+      window.location.reload();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not switch branch.');
+      setSwitching(false);
+    }
+  };
+
   // Low/out-of-stock items feeding the notification bell.
-  const alertItems = [
-    ...(mats ?? []).filter(m => m.qty_balance <= m.min_stock_level)
-      .map(m => ({ id: 'm' + m.id, name: m.name, out: m.qty_balance === 0, kind: 'material' as const })),
-    ...(fgoods ?? []).filter(g => g.qty_balance <= g.min_stock_level)
-      .map(g => ({ id: 'g' + g.id, name: g.name, out: g.qty_balance === 0, kind: 'product' as const })),
-  ].sort((a, b) => Number(b.out) - Number(a.out));
+  const alertItems = lowStockRows(levels).map(l => ({
+    id: `${l.branch_id}:${l.product_id}`,
+    name: l.name,
+    where: multi && seeAll ? l.branch_name : '',
+    out: Number(l.qty) <= 0,
+    kind: l.product_kind === 'material' ? 'material' : 'product',
+  }));
   const alertCount = alertItems.length;
 
   // Close the notification dropdown on outside click / route change.
@@ -137,7 +172,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const title = pageTitles[location.pathname] ?? 'StockFlow';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  const role = profile?.role;
+  const acct = accountState(tenant);
   const tenantName = tenant?.name ?? 'StockFlow';
   const initial = (tenantName[0] ?? 'S').toUpperCase();
   const userName = profile?.full_name ?? 'User';
@@ -145,7 +180,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // Only show sections/items this role may access.
   const visibleSections = navItems
-    .map(sec => ({ ...sec, items: sec.items.filter(it => canAccess(role, it.to)) }))
+    .map(sec => ({
+      ...sec,
+      items: sec.items.filter(it => canAccess(role, it.to) && (multi || !MULTI_BRANCH_ONLY.has(it.to))),
+    }))
     .filter(sec => sec.items.length > 0);
 
   // Platform owner gets an extra section (not part of the tenant role system).
@@ -161,7 +199,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="logo-icon">{initial}</div>
           <div className="logo-text">
             <div className="name">{tenantName}</div>
-            <div className="tagline">Powered by StockFlow</div>
+            <div className="tagline">{multi ? myBranchName : 'Powered by StockFlow'}</div>
           </div>
         </div>
 
@@ -226,6 +264,30 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </button>
             )}
 
+            {/* Branch — an admin chooses where they're working; staff just see theirs */}
+            {multi && (role === 'admin' ? (
+              <label
+                className="date-badge"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+                title="Where your sales, purchases and production are recorded"
+              >
+                <MapPin size={13} />
+                <select
+                  value={myBranchId ?? ''}
+                  onChange={e => switchBranch(e.target.value)}
+                  disabled={switching}
+                  aria-label="Branch you're working at"
+                  style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'inherit', cursor: 'pointer', padding: 0 }}
+                >
+                  {active.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </label>
+            ) : (
+              <span className="date-badge" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Your branch">
+                <MapPin size={13} /> {myBranchName}
+              </span>
+            ))}
+
             <span className="date-badge">{today}</span>
 
             {/* Notifications */}
@@ -257,7 +319,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             </span>
                             <span className="notif-body">
                               <span className="notif-title">{a.name}</span>
-                              <span className="notif-sub">{a.out ? 'Out of stock' : 'Low stock'} · {a.kind}</span>
+                              <span className="notif-sub">
+                                {a.out ? 'Out of stock' : 'Low stock'} · {a.kind}{a.where ? ` · ${a.where}` : ''}
+                              </span>
                             </span>
                           </Link>
                         ))
@@ -268,6 +332,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
+            {/* Profile — every role, so staff can change their own password */}
+            <button className="icon-btn" onClick={() => navigate('/profile')} aria-label="My profile" title="My profile">
+              <UserCircle size={18} />
+            </button>
+
             {/* Settings */}
             {canAccess(role, '/settings') && (
               <button className="icon-btn" onClick={() => navigate('/settings')} aria-label="Settings" title="Settings">
@@ -277,7 +346,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="page-content">{children}</main>
+        <main className="page-content">
+          {!acct.live && (
+            <div className="alert alert-warning" style={{ alignItems: 'flex-start', gap: 10, marginBottom: '1rem' }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong>Read-only — nothing can be saved right now.</strong>
+                <div style={{ fontSize: '0.85rem', marginTop: 2 }}>{acct.message}</div>
+              </div>
+              {canAccess(role, '/settings') && (
+                <Link className="btn-primary btn-sm" to="/settings" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                  Billing
+                </Link>
+              )}
+            </div>
+          )}
+          {children}
+        </main>
       </div>
 
       {showSync && <PendingSyncPanel queue={queue} online={online} onClose={() => setShowSync(false)} />}

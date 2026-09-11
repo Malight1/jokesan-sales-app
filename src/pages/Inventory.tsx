@@ -1,21 +1,36 @@
-import React, { useState } from 'react';
-import { Plus, X, Package, Pencil, Trash2, ScanLine, Wand2, Printer } from 'lucide-react';
-import { materials as materialsApi, Material } from '../lib/api';
+import React, { useMemo, useState } from 'react';
+import { Plus, X, Package, Pencil, Trash2, ScanLine, Wand2, Printer, SlidersHorizontal } from 'lucide-react';
+import { materials as materialsApi, stock, Material, StockLevel } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { useAuth } from '../lib/AuthContext';
+import { useBranches } from '../lib/useBranches';
+import { qtyByProduct } from '../lib/branchStock';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
+import AdjustStockModal from '../components/AdjustStockModal';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import Modal from '../components/Modal';
 
-const emptyForm = { name: '', unit: '', type_of_material: 'Raw Material', qty_balance: 0, min_stock_level: 10, barcode: '' };
+// Opening stock is no longer typed into the item itself. It goes through
+// Adjust Stock (migration 0020) so it lands at a branch with a cost — stock
+// typed straight into qty_balance had no FIFO layer behind it and could
+// never be used in production.
+const emptyForm = {
+  name: '', unit: '', type_of_material: 'Raw Material', min_stock_level: 10, barcode: '',
+  openingQty: 0, openingCost: 0,
+};
 
 export default function Inventory() {
   const toast = useToast();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+  const { multi, myBranchId, myBranchName } = useBranches();
   const { data: rows, loading, error, refetch } = useQuery<Material[]>(() => materialsApi.list(), []);
+  const levelsQ = useQuery<StockLevel[]>(() => stock.levels(null), []);
   const createMut = useMutation(materialsApi.create);
   const updateMut = useMutation((id: string, m: Partial<Material>) => materialsApi.update(id, m));
   const removeMut = useMutation(materialsApi.remove);
@@ -23,32 +38,56 @@ export default function Inventory() {
   const [showModal, setShowModal] = useState(false);
   const [editRow, setEditRow] = useState<Material | null>(null);
   const [deleteRow, setDeleteRow] = useState<Material | null>(null);
+  const [adjustRow, setAdjustRow] = useState<Material | null>(null);
   const [filter, setFilter] = useState('All');
   const [form, setForm] = useState(emptyForm);
   const [showScanner, setShowScanner] = useState(false);
 
+  const matLevels = useMemo(
+    () => (levelsQ.data ?? []).filter(l => l.product_kind === 'material'), [levelsQ.data]);
+  const here = useMemo(() => qtyByProduct(matLevels, myBranchId), [matLevels, myBranchId]);
+  // What's on THIS branch's shelf. For a single-location company that's the
+  // same as the company total.
+  const qtyHere = (m: Material) => (multi && levelsQ.data ? here.get(m.id) ?? 0 : m.qty_balance);
+  const qtyAt = (id: string) => (branchId: string) =>
+    levelsQ.data ? qtyByProduct(matLevels, branchId).get(id) ?? 0 : 0;
+
   const openCreate = () => { setEditRow(null); setForm(emptyForm); setShowModal(true); };
   const openEdit = (m: Material) => {
     setEditRow(m);
-    setForm({ name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material, qty_balance: m.qty_balance, min_stock_level: m.min_stock_level, barcode: m.barcode ?? '' });
+    setForm({
+      name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material,
+      min_stock_level: m.min_stock_level, barcode: m.barcode ?? '', openingQty: 0, openingCost: 0,
+    });
     setShowModal(true);
   };
 
+  const reload = () => { refetch(); levelsQ.refetch(); };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // On edit, exclude qty_balance — stock only moves via purchases/production/sales.
-    const { qty_balance, barcode, ...editable } = form;
+    const { openingQty, openingCost, barcode, ...editable } = form;
     const payload = { ...editable, barcode: barcode.trim() || null };
-    const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate({ ...payload, qty_balance });
-    if (res) {
-      toast.success(editRow ? 'Material updated.' : 'Material added.');
-      setShowModal(false);
-      setForm(emptyForm);
-      setEditRow(null);
-      refetch();
-    } else {
+    const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
+    if (!res) {
       toast.error((editRow ? updateMut.error : createMut.error) ?? 'Something went wrong.');
+      return;
     }
+    if (!editRow && openingQty > 0) {
+      try {
+        await stock.adjust({
+          branchId: myBranchId, kind: 'material', productId: (res as Material).id,
+          qtyDelta: openingQty, unitCost: openingCost || null, reason: 'Opening balance',
+        });
+      } catch (err: any) {
+        toast.error(`${form.name} was added, but its opening stock wasn't: ${err?.message ?? 'unknown error'}. Use Adjust stock to add it.`);
+      }
+    }
+    toast.success(editRow ? 'Material updated.' : 'Material added.');
+    setShowModal(false);
+    setForm(emptyForm);
+    setEditRow(null);
+    reload();
   };
 
   const handleDelete = async () => {
@@ -57,7 +96,7 @@ export default function Inventory() {
     if (res !== null) {
       toast.success('Material deleted.');
       setDeleteRow(null);
-      refetch();
+      reload();
     } else {
       const msg = removeMut.error ?? '';
       toast.error(msg.includes('foreign key') || msg.includes('violates')
@@ -67,8 +106,8 @@ export default function Inventory() {
     }
   };
 
-  const stockClass = (m: Material) => m.qty_balance === 0 ? 'badge-danger' : m.qty_balance <= m.min_stock_level ? 'badge-warning' : 'badge-success';
-  const stockLabel = (m: Material) => m.qty_balance === 0 ? 'Out of stock' : m.qty_balance <= m.min_stock_level ? 'Low stock' : 'In stock';
+  const stockClass = (m: Material) => qtyHere(m) <= 0 ? 'badge-danger' : qtyHere(m) <= m.min_stock_level ? 'badge-warning' : 'badge-success';
+  const stockLabel = (m: Material) => qtyHere(m) <= 0 ? 'Out of stock' : qtyHere(m) <= m.min_stock_level ? 'Low stock' : 'In stock';
 
   const filtered = (rows ?? []).filter(m => filter === 'All' || m.type_of_material === filter);
 
@@ -82,16 +121,26 @@ export default function Inventory() {
     }
   };
 
+  const qtyColumns: Column<Material>[] = multi
+    ? [
+        { key: 'here', header: `At ${myBranchName}`, align: 'right', value: m => qtyHere(m), render: m => <strong>{qtyHere(m).toLocaleString()}</strong> },
+        { key: 'qty_balance', header: 'All branches', align: 'right', value: m => m.qty_balance, render: m => m.qty_balance.toLocaleString() },
+      ]
+    : [
+        { key: 'qty_balance', header: 'Qty Balance', align: 'right', value: m => m.qty_balance, render: m => m.qty_balance.toLocaleString() },
+      ];
+
   const columns: Column<Material>[] = [
     { key: 'name', header: 'Material', value: m => m.name, render: m => <strong>{m.name}</strong> },
     { key: 'type_of_material', header: 'Type', value: m => m.type_of_material },
     { key: 'unit', header: 'Unit', value: m => m.unit ?? '—' },
-    { key: 'qty_balance', header: 'Qty Balance', align: 'right', value: m => m.qty_balance, render: m => m.qty_balance.toLocaleString() },
+    ...qtyColumns,
     { key: 'min_stock_level', header: 'Min Level', align: 'right', value: m => m.min_stock_level, render: m => m.min_stock_level.toLocaleString() },
     { key: 'status', header: 'Status', value: m => stockLabel(m), render: m => <span className={stockClass(m)}>{stockLabel(m)}</span> },
   ];
 
   const rowActions: RowAction<Material>[] = [
+    { icon: <SlidersHorizontal size={15} />, label: 'Adjust stock', onClick: setAdjustRow },
     { icon: <Pencil size={15} />, label: 'Edit', onClick: openEdit },
     { icon: <Trash2 size={15} />, label: 'Delete', onClick: setDeleteRow, variant: 'danger' },
   ];
@@ -102,7 +151,10 @@ export default function Inventory() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title"><h1>Raw Materials</h1><p>{rows ? `${rows.length} items tracked` : ' '}</p></div>
+        <div className="page-title">
+          <h1>Raw Materials</h1>
+          <p>{rows ? `${rows.length} items tracked${multi ? ` · showing ${myBranchName}` : ''}` : ' '}</p>
+        </div>
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Material</button>
       </div>
 
@@ -164,13 +216,31 @@ export default function Inventory() {
                   </div>
                 </div>
                 <div className="grid-2">
-                  <div className="form-group">
-                    <label>{editRow ? 'Qty Balance' : 'Opening Qty'}</label>
-                    <NumberInput value={form.qty_balance} onChange={v => setForm(f => ({ ...f, qty_balance: v }))} disabled={!!editRow} />
-                    {editRow && <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Stock changes only via purchases, production &amp; sales — keeps the ledger honest.</small>}
-                  </div>
+                  {editRow ? (
+                    <div className="form-group">
+                      <label>In stock{multi ? ` at ${myBranchName}` : ''}</label>
+                      <input value={`${qtyHere(editRow).toLocaleString()} ${editRow.unit ?? ''}`} disabled />
+                      <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                        To change stock, use <strong>Adjust stock</strong> on the list — it records why and what it cost.
+                      </small>
+                    </div>
+                  ) : (
+                    <div className="form-group">
+                      <label>Opening stock{multi ? ` at ${myBranchName}` : ''} (optional)</label>
+                      <NumberInput value={form.openingQty} onChange={v => setForm(f => ({ ...f, openingQty: v }))} />
+                    </div>
+                  )}
                   <div className="form-group"><label>Min Stock Level (alert)</label><NumberInput value={form.min_stock_level} onChange={v => setForm(f => ({ ...f, min_stock_level: v }))} /></div>
                 </div>
+                {!editRow && form.openingQty > 0 && (
+                  <div className="form-group">
+                    <label>Cost per unit of that opening stock (₦)</label>
+                    <NumberInput value={form.openingCost} onChange={v => setForm(f => ({ ...f, openingCost: v }))} />
+                    <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                      What you paid for each unit. Production costs are worked out from this.
+                    </small>
+                  </div>
+                )}
                 <div className="form-group">
                   <label>Barcode</label>
                   <div style={{ display: 'flex', gap: '0.4rem' }}>
@@ -188,6 +258,19 @@ export default function Inventory() {
               </div>
             </form>
         </Modal>
+      )}
+
+      {adjustRow && (
+        <AdjustStockModal
+          kind="material"
+          productId={adjustRow.id}
+          productName={adjustRow.name}
+          unit={adjustRow.unit}
+          qtyAt={multi ? qtyAt(adjustRow.id) : () => adjustRow.qty_balance}
+          canChooseBranch={isAdmin}
+          onClose={() => setAdjustRow(null)}
+          onDone={() => { setAdjustRow(null); reload(); }}
+        />
       )}
 
       {deleteRow && (

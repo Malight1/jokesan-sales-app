@@ -31,23 +31,28 @@ export interface SalesOrder {
   gross_profit: number; payment_status: string; reference: string | null;
   notes: string | null; created_at: string; voided: boolean;
   subtotal: number; vat_amount: number; vat_rate: number;
+  branch_id: string | null;
 }
 export interface PurchaseOrder {
   id: string; purchase_date: string; supplier_id: string | null;
   total_amount: number; total_paid: number; balance: number;
   payment_status: string; processed: boolean; voided: boolean;
+  branch_id: string | null;
 }
 export interface ProductionRun {
   id: string; production_date: string; finished_good_id: string;
   expenses: number; material_cost: number; total_cost: number;
   unit_cost: number; qty_produced: number; voided: boolean;
+  branch_id: string | null;
 }
 export interface Expense {
   id: string; expense_date: string; expense_type_id: string | null;
   description: string | null; amount: number; payment_type_id: string | null;
+  branch_id: string | null;
 }
 export interface StockMovement {
   id: number; product_kind: string; product_id: string; movement_type: string;
+  branch_id: string | null;
   quantity: number; created_at: string;
 }
 export interface Lookup { id: string; name: string; }
@@ -195,11 +200,15 @@ export const sales = {
     customerId: string | null; date: string; paymentTypeId: string | null;
     amountPaid: number; items: { finished_good_id: string; quantity: number; unit_price: number }[];
     vatRate?: number;
+    // Pinned by the offline queue so a sale replays at the branch it was
+    // rung up at. Omitted otherwise: the server uses the caller's branch.
+    branchId?: string | null;
   }) =>
     rpc<string>('create_sale', {
       p_customer: params.customerId, p_date: params.date,
       p_payment_type: params.paymentTypeId, p_amount_paid: params.amountPaid, p_items: params.items,
       p_vat_rate: params.vatRate ?? 0,
+      ...(params.branchId ? { p_branch: params.branchId } : {}),
     }),
   addPayment: (saleId: string, amount: number, paymentTypeId: string | null, reference?: string, notes?: string) =>
     rpcVoid('record_sale_payment', {
@@ -261,7 +270,30 @@ export const expenses = {
 // ============================================================
 // STOCK MOVEMENTS (ledger)
 // ============================================================
+// One row per (branch, item) the branch carries. Quantities only — no
+// costs — so every role can read it (migration 0020, stock_levels()).
+export interface StockLevel {
+  branch_id: string; branch_name: string;
+  product_kind: 'material' | 'finished_good';
+  product_id: string; name: string; unit: string | null;
+  qty: number; min_level: number;
+}
+
 export const stock = {
+  // null → every active branch; an id → just that branch.
+  levels: (branchId?: string | null) =>
+    rpc<StockLevel[]>('stock_levels', branchId ? { p_branch: branchId } : {}),
+  // Opening stock / found stock (positive) or damage / count shortfall
+  // (negative). Positive adds a costed layer at the branch; negative leaves
+  // FIFO and records what it cost.
+  adjust: (params: {
+    branchId: string | null; kind: 'material' | 'finished_good'; productId: string;
+    qtyDelta: number; unitCost?: number | null; reason?: string | null;
+  }) =>
+    rpc<string>('adjust_stock', {
+      p_branch: params.branchId, p_kind: params.kind, p_product: params.productId,
+      p_qty_delta: params.qtyDelta, p_unit_cost: params.unitCost ?? null, p_reason: params.reason ?? null,
+    }),
   movements: (limit = 200) =>
     run<StockMovement[]>(supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(limit)),
 };
@@ -278,13 +310,66 @@ export const reports = {
   // Aggregated in SQL (migration 0016) rather than in the browser: it reads
   // sales_consumption, the highest-volume table, and uses the FIFO unit_cost
   // the engine actually consumed.
-  productProfitability: (from?: string, to?: string) =>
+  productProfitability: (from?: string, to?: string, branchId?: string | null) =>
     rpc<ProductProfit[]>('report_product_profitability', {
       p_from: from || null, p_to: to || null,
+      ...(branchId ? { p_branch: branchId } : {}),
     }),
   salesSummary: () => runAll<any>((f, t) => supabase.from('sales_orders').select('transaction_date,total_amount,amount_paid,balance,cogs,gross_profit').order('transaction_date').range(f, t)),
   expenseSummary: () => runAll<any>((f, t) => supabase.from('expenses').select('expense_date,amount,expense_type_id').order('expense_date').range(f, t)),
   purchaseSummary: () => runAll<any>((f, t) => supabase.from('purchase_orders').select('purchase_date,total_amount,balance').order('purchase_date').range(f, t)),
+};
+
+// ============================================================
+// DASHBOARD — one role-shaped aggregate (migration 0018)
+// Replaces the nine full-table reads the old dashboard fired on mount.
+// The payload differs by role: a cashier is never sent the P&L, because
+// it isn't computed for them, not because the UI hides it.
+// ============================================================
+export interface LowStockItem {
+  kind: 'material' | 'finished_good';
+  name: string; qty: number; unit: string | null; min: number;
+  branch?: string;
+}
+export interface BranchSnapshot {
+  id: string; name: string; today: number; month: number;
+  month_profit: number; outstanding: number; low_stock: number;
+}
+export interface DashboardSummary {
+  role: 'admin' | 'sales' | 'inventory' | 'accounts';
+  account_live: boolean;
+  multi_branch?: boolean;
+  branch_id?: string | null;
+  branch_name?: string;
+  by_branch?: BranchSnapshot[];
+  low_goods_count: number;
+  low_materials_count: number;
+  low_stock: LowStockItem[];
+
+  // cashier
+  today_total?: number; today_count?: number;
+  my_today_total?: number; my_today_count?: number; today_unpaid?: number;
+  my_recent?: { id: string; date: string; total: number; balance: number; status: string; customer: string }[];
+  week_trend?: { day: string; total: number }[];
+
+  // storekeeper
+  out_of_stock_count?: number;
+  production_this_month?: number; production_runs_this_month?: number;
+  open_purchases?: number;
+  recent_production?: { id: string; date: string; product: string; qty: number }[];
+  recent_movements?: { id: number; type: string; qty: number; kind: string; at: string }[];
+
+  // owner / accounts
+  total_sales?: number; sales_count?: number; gross_profit?: number; outstanding?: number;
+  total_purchases?: number; purchase_count?: number; creditors?: number;
+  total_expenses?: number; expense_count?: number;
+  month_trend?: { month: string; label: string; total: number }[];
+  recent_sales?: { id: string; date: string; total: number; status: string; customer: string; branch?: string }[];
+  reminders?: { id: string; name: string; phone: string | null; balance: number; days: number }[];
+}
+
+export const dashboard = {
+  summary: () => rpc<DashboardSummary>('dashboard_summary'),
 };
 
 // ============================================================
@@ -331,6 +416,28 @@ export const branches = {
   create: (b: { name: string; address?: string | null }) => run<Branch>(supabase.from('branches').insert(b).select().single()),
   update: (id: string, b: Partial<Branch>) => run<Branch>(supabase.from('branches').update(b).eq('id', id).select().single()),
   setActive: (id: string, is_active: boolean) => del(supabase.from('branches').update({ is_active }).eq('id', id)),
+  // Admin only: moves the admin's own "working at" branch, which decides
+  // where their sales, purchases and production are recorded.
+  setMine: (id: string) => rpcVoid('set_my_branch', { p_branch: id }),
+};
+
+// ============================================================
+// STOCK TRANSFERS — move stock between branches at its FIFO cost
+// ============================================================
+export interface StockTransfer {
+  id: string; from_branch_id: string; to_branch_id: string;
+  product_kind: 'material' | 'finished_good'; product_id: string;
+  qty: number; total_cost: number; note: string | null;
+  created_by: string | null; created_at: string;
+}
+export const transfers = {
+  list: () => runAll<StockTransfer>((f, t) =>
+    supabase.from('stock_transfers').select('*').order('created_at', { ascending: false }).range(f, t)),
+  create: (p: { fromBranchId: string; toBranchId: string; kind: 'material' | 'finished_good'; productId: string; qty: number; note?: string | null }) =>
+    rpc<string>('transfer_stock', {
+      p_from: p.fromBranchId, p_to: p.toBranchId, p_kind: p.kind,
+      p_product: p.productId, p_qty: p.qty, p_note: p.note ?? null,
+    }),
 };
 
 // Generic CRUD over the three lookup tables (payment/expense/customer types)

@@ -3,6 +3,7 @@ import { Plus, X, Wand2, Eye, Ban } from 'lucide-react';
 import { production as productionApi, finishedGoods as goodsApi, materials as materialsApi, boms, ProductionRun, FinishedGood, Material } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { useAuth } from '../lib/AuthContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -15,6 +16,10 @@ interface Consumption { material_id: string; qty: number; }
 
 export default function Production() {
   const toast = useToast();
+  // Voiding reverses stock and cost. Admin-only in the database
+  // (guard_void, migration 0017); hidden here so nobody clicks into an error.
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const { data: rows, loading, error, refetch } = useQuery<ProductionRun[]>(() => productionApi.list(), []);
   const { data: goods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const { data: materials } = useQuery<Material[]>(() => materialsApi.list(), []);
@@ -121,7 +126,7 @@ export default function Production() {
 
   const rowActions: RowAction<ProductionRun>[] = [
     { icon: <Eye size={15} />, label: 'View consumption', onClick: p => setViewId(p.id) },
-    { icon: <Ban size={15} />, label: 'Void production', onClick: setVoidFor, show: p => !p.voided, variant: 'danger' },
+    { icon: <Ban size={15} />, label: 'Void production', onClick: setVoidFor, show: p => !p.voided && isAdmin, variant: 'danger' },
   ];
 
   return (

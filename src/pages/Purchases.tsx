@@ -3,6 +3,7 @@ import { Plus, X, Eye, Wallet, Ban } from 'lucide-react';
 import { purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, lookups, PurchaseOrder, Supplier, Material, Lookup } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { useAuth } from '../lib/AuthContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -21,6 +22,14 @@ interface LineItem { material_id: string; qty: number; cost_price: number; }
 
 export default function Purchases() {
   const toast = useToast();
+  // Voiding reverses stock and money. The database enforces admin-only
+  // (guard_void, migration 0017) — this just keeps the button off screen
+  // rather than letting staff click into a permission error.
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+  // Recording a purchase is admin+inventory; accounts can still see them
+  // and settle supplier payments.
+  const canCreatePurchase = isAdmin || profile?.role === 'inventory';
   const { data: rows, loading, error, refetch } = useQuery<PurchaseOrder[]>(() => purchasesApi.list(), []);
   const { data: suppliers } = useQuery<Supplier[]>(() => suppliersApi.list(), []);
   const { data: materials } = useQuery<Material[]>(() => materialsApi.list(), []);
@@ -130,7 +139,7 @@ export default function Purchases() {
   const rowActions: RowAction<PurchaseOrder>[] = [
     { icon: <Wallet size={15} />, label: 'Record payment', onClick: openPay, show: p => p.balance > 0 && !p.voided },
     { icon: <Eye size={15} />, label: 'View', onClick: p => setViewId(p.id) },
-    { icon: <Ban size={15} />, label: 'Void purchase', onClick: setVoidFor, show: p => !p.voided, variant: 'danger' },
+    { icon: <Ban size={15} />, label: 'Void purchase', onClick: setVoidFor, show: p => !p.voided && isAdmin, variant: 'danger' },
   ];
 
   return (
@@ -140,7 +149,7 @@ export default function Purchases() {
           <h1>Purchases</h1>
           <p>{rows ? `${rows.length} purchase orders` : ' '}</p>
         </div>
-        <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Purchase</button>
+        {canCreatePurchase && <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Purchase</button>}
       </div>
 
       <DataTable

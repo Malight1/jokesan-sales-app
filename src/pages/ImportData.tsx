@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Upload, FileSpreadsheet, Download, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '../lib/ToastContext';
 import { ENTITIES, EntityDef, parseSpreadsheet, autoGuess, downloadTemplate } from '../lib/importer';
+import { useAuth } from '../lib/AuthContext';
+import { useBranches } from '../lib/useBranches';
 import './ImportData.scss';
 import DataTable, { Column } from '../components/DataTable';
 
@@ -11,7 +13,25 @@ interface Result { imported: number; errors: { row: number; reason: string }[]; 
 export default function ImportData() {
   const toast = useToast();
   const [step, setStep] = useState<Step>(1);
-  const [entity, setEntity] = useState<EntityDef>(ENTITIES[0]);
+  // Writes are role-gated in the database (migration 0017): a storekeeper
+  // may create suppliers, materials and products but not customers. Offer
+  // only the sheets they can actually import, rather than letting them map
+  // a whole file and fail on the last step.
+  const { profile } = useAuth();
+  // Imported opening stock lands at the importer's own branch.
+  const { myBranchId } = useBranches();
+  const allowed = React.useMemo(() => {
+    const byRole: Record<string, string[]> = {
+      admin: ['customers', 'suppliers', 'materials', 'finished_goods'],
+      sales: ['customers'],
+      inventory: ['suppliers', 'materials', 'finished_goods'],
+      accounts: [],
+    };
+    const ids = byRole[profile?.role ?? 'admin'] ?? [];
+    return ENTITIES.filter(e => ids.includes(e.id));
+  }, [profile?.role]);
+
+  const [entity, setEntity] = useState<EntityDef>(allowed[0] ?? ENTITIES[0]);
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({}); // field.key -> source header
@@ -61,7 +81,7 @@ export default function ImportData() {
       const missing = entity.fields.find(f => f.required && !row[f.key]);
       if (missing) { errors.push({ row: i + 2, reason: `Missing ${missing.label}` }); }
       else {
-        try { await entity.create(row); imported++; }
+        try { await entity.create(row, { branchId: myBranchId }); imported++; }
         catch (e: any) { errors.push({ row: i + 2, reason: e.message ?? 'Insert failed' }); }
       }
       setProgress(Math.round(((i + 1) / rows.length) * 100));
@@ -96,7 +116,7 @@ export default function ImportData() {
         <div className="card">
           <h3 style={{ marginBottom: '1rem' }}>What do you want to import?</h3>
           <div className="entity-grid">
-            {ENTITIES.map(e => (
+            {allowed.map(e => (
               <button key={e.id} className={`entity-tile ${entity.id === e.id ? 'selected' : ''}`} onClick={() => setEntity(e)}>
                 <FileSpreadsheet size={22} />
                 <span>{e.label}</span>

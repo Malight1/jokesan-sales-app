@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { customers, suppliers, materials, finishedGoods } from './api';
+import { customers, suppliers, materials, finishedGoods, stock } from './api';
 
 // ---- parse an uploaded file into an array of row-objects ----
 export async function parseSpreadsheet(file: File): Promise<Record<string, any>[]> {
@@ -17,11 +17,17 @@ export interface FieldDef {
   synonyms?: string[];   // for auto-guessing the source column
 }
 
+// Where imported opening stock lands. NULL lets the server use the
+// importer's own branch.
+export interface ImportContext {
+  branchId: string | null;
+}
+
 export interface EntityDef {
   id: string;
   label: string;
   fields: FieldDef[];
-  create: (row: Record<string, any>) => Promise<any>;
+  create: (row: Record<string, any>, ctx: ImportContext) => Promise<any>;
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -40,6 +46,25 @@ const num = (v: any) => {
   const n = parseFloat(String(v).replace(/[^\d.-]/g, ''));
   return isNaN(n) ? 0 : n;
 };
+
+// Opening stock used to be written straight into qty_balance, which gave it
+// no FIFO layer — imported product stock could never be sold ("Stock/batch
+// mismatch") and imported materials could never be used in production.
+// It now goes through Adjust Stock so it arrives at a branch with a cost.
+async function openingStock(
+  kind: 'material' | 'finished_good', productId: string, qty: number, unitCost: number, ctx: ImportContext,
+) {
+  if (qty <= 0) return;
+  try {
+    await stock.adjust({
+      branchId: ctx.branchId, kind, productId, qtyDelta: qty,
+      unitCost: unitCost > 0 ? unitCost : null, reason: 'Opening balance (import)',
+    });
+  } catch (e: any) {
+    // The item exists; say so plainly so the row can be fixed by hand.
+    throw new Error(`Item created, but its opening stock was not recorded: ${e?.message ?? 'unknown error'}. Use Adjust stock to add it.`);
+  }
+}
 
 export const ENTITIES: EntityDef[] = [
   {
@@ -81,13 +106,18 @@ export const ENTITIES: EntityDef[] = [
       { key: 'unit', label: 'Unit', synonyms: ['uom', 'measure'] },
       { key: 'type_of_material', label: 'Type', synonyms: ['category', 'materialtype'] },
       { key: 'qty_balance', label: 'Opening Qty', type: 'number', synonyms: ['quantity', 'stock', 'balance', 'openingstock'] },
+      { key: 'unit_cost', label: 'Unit Cost', type: 'number', synonyms: ['cost', 'costprice', 'unitcost', 'price'] },
       { key: 'min_stock_level', label: 'Min Level', type: 'number', synonyms: ['reorder', 'minimum', 'reorderpoint'] },
     ],
-    create: r => materials.create({
-      name: r.name, unit: r.unit,
-      type_of_material: /pack/i.test(r.type_of_material) ? 'Packaging Material' : 'Raw Material',
-      qty_balance: num(r.qty_balance), min_stock_level: num(r.min_stock_level) || 10,
-    }),
+    create: async (r, ctx) => {
+      const m = await materials.create({
+        name: r.name, unit: r.unit,
+        type_of_material: /pack/i.test(r.type_of_material) ? 'Packaging Material' : 'Raw Material',
+        min_stock_level: num(r.min_stock_level) || 10,
+      });
+      await openingStock('material', m.id, num(r.qty_balance), num(r.unit_cost), ctx);
+      return m;
+    },
   },
   {
     id: 'finished_goods',
@@ -97,14 +127,20 @@ export const ENTITIES: EntityDef[] = [
       { key: 'unit', label: 'Unit', synonyms: ['uom', 'measure'] },
       { key: 'selling_price', label: 'Selling Price', type: 'number', synonyms: ['price', 'sellingprice', 'amount'] },
       { key: 'qty_balance', label: 'Opening Stock', type: 'number', synonyms: ['quantity', 'stock', 'balance'] },
+      { key: 'unit_cost', label: 'Unit Cost', type: 'number', synonyms: ['cost', 'costprice', 'unitcost'] },
       { key: 'min_stock_level', label: 'Min Level', type: 'number', synonyms: ['reorder', 'minimum'] },
     ],
-    create: r => finishedGoods.create({
-      name: r.name, unit: r.unit || 'pcs',
-      selling_price: num(r.selling_price),
-      qty_balance: num(r.qty_balance), min_stock_level: num(r.min_stock_level) || 10,
-      default_markup: 1.5,
-    }),
+    create: async (r, ctx) => {
+      const g = await finishedGoods.create({
+        name: r.name, unit: r.unit || 'pcs',
+        selling_price: num(r.selling_price),
+        min_stock_level: num(r.min_stock_level) || 10,
+        default_markup: 1.5,
+      });
+      // No cost column? The server estimates it from price ÷ markup.
+      await openingStock('finished_good', g.id, num(r.qty_balance), num(r.unit_cost), ctx);
+      return g;
+    },
   },
 ];
 

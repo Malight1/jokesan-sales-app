@@ -273,3 +273,79 @@ production build on this machine.
 **Nothing here was verified against a running app.** There are no Supabase credentials on this Mac yet, so no
 screen was loaded and no query was executed against live data. Findings 1, 2 and 7 are read from code and
 would each be worth confirming once the app boots.
+
+---
+
+## Launch pass — 11 Sep 2026
+
+Everything in the pre-push review, plus separate stores with their own stock.
+
+### Run order
+
+Already run on the live project: **0001–0016** and **0019**. Still to run, in
+this order, in the Supabase SQL Editor:
+
+1. `0017_role_enforcement.sql` — the database enforces roles, not just the menu.
+2. `0018_dashboard_summary.sql` — role-shaped dashboards (needs 0017).
+3. `0020_branch_stock.sql` — per-branch stock (replaces 0018's dashboard function).
+
+**Then deploy the frontend.** The new app calls `dashboard_summary()` and
+`stock_levels()`; if it ships first, the dashboard shows an error until the
+migrations are in.
+
+0020 reconciles existing data rather than moving it: every existing sale,
+purchase, layer and staff member is attached to the company's oldest branch,
+and any typed-in opening stock gets a costed layer. No stock figure on screen
+changes when it runs.
+
+### What changed
+
+**Roles are enforced in the database (0017).** Each table has read/write
+policies by role; money tables accept no direct writes. Trigger guards inside
+the engine gate who may sell, buy, produce, take payment or void. Void is
+admin-only. A suspended or lapsed account is read-only.
+
+**Three dashboards (0018 → 0020).** Cashier: their own takings and their
+branch's till today. Storekeeper: their branch's stock and production, no
+money. Owner/accounts: the full picture plus a per-branch table. The server
+computes a different payload per role, so a cashier is never sent the P&L.
+
+**Separate stores (0020).** Every FIFO layer belongs to a branch. A branch
+sells, produces from and sends only what it holds. Transfers carry the
+original FIFO cost across. Opening stock and stock counts go through Adjust
+Stock with a cost and a reason. An admin switches the branch they work at
+from the top bar. Staff see their own branch's transactions; admin and
+accounts see all. A branch holding stock can't be deactivated, and branches
+can't be deleted.
+
+**Bugs fixed on the way:**
+- Opening stock typed into the product/material forms or imported by CSV had
+  no FIFO layer — it could never be sold ("Stock/batch mismatch") or used in
+  production.
+- The ₦45,000 Business plan charged the card, then failed to activate
+  (`business` wasn't a valid `plan_tier`) — fixed in 0019.
+- The engine accepted other companies' item/customer/supplier IDs, zero or
+  negative quantities, negative payments, overpayments, and payments on voided
+  sales.
+- Two tills could both sell the last unit; FIFO layers are now row-locked.
+- VAT came from whatever rate the browser sent; it now comes from settings.
+- Any staff member could pull every product's margin via the API.
+- Any signed-in user could overwrite any company's logo (0019).
+- Staff couldn't change their own password (new My Profile page).
+
+### Verified
+
+- `supabase/tests/` — every migration applied to real Postgres (PGlite), then
+  66 checks across a Lagos/Abuja company with four roles, plus an existing
+  account reconciled from today's data shape. See its README to rerun.
+- 49 unit tests, clean typecheck, production build.
+
+### Not verified
+
+- Nothing has been clicked through in a browser with a real signed-in session.
+- The row lock against two tills selling the last unit is reasoned from
+  Postgres semantics, not tested — the harness runs one session.
+- RLS cost at scale: read policies call `has_role()` per row. Fine for SME
+  volumes; worth watching past ~100k rows per table.
+- Per-branch reorder levels: the minimum level is still one number per item,
+  applied at every branch.

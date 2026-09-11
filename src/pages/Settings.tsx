@@ -551,8 +551,9 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
       key: 'branch_id', header: 'Branch',
       value: (m: TeamMember) => branchesQ.data?.find(b => b.id === m.branch_id)?.name ?? '',
       render: (m: TeamMember) => (
-        <select value={m.branch_id ?? ''} onChange={e => changeBranch(m, e.target.value)} style={selectStyle}>
-          <option value="">— none —</option>
+        <select value={m.branch_id ?? ''} onChange={e => e.target.value && changeBranch(m, e.target.value)} style={selectStyle}>
+          {/* No "none": since 0020 a cashier or storekeeper without a branch can't record anything. */}
+          {!m.branch_id && <option value="">Choose a branch…</option>}
           {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       ),
@@ -641,7 +642,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                   <div className="form-group">
                     <label>Branch</label>
                     <select value={invBranch} onChange={e => setInvBranch(e.target.value)}>
-                      <option value="">— none yet —</option>
+                      <option value="">Company default branch</option>
                       {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>

@@ -29,7 +29,11 @@ interface LineItem { finished_good_id: string; quantity: number; unit_price: num
 
 export default function Sales() {
   const toast = useToast();
-  const { tenant } = useAuth();
+  // Voiding reverses stock and money. The database enforces admin-only
+  // (guard_void, migration 0017) — this just keeps the button off screen
+  // rather than letting staff click into a permission error.
+  const { profile, tenant } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
   const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
   const { data: goods, refetch: refetchGoods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
@@ -201,7 +205,7 @@ export default function Sales() {
     { icon: <Eye size={15} />, label: 'View', onClick: s => setViewId(s.id) },
     { icon: <FileText size={15} />, label: 'Download invoice (PDF)', onClick: downloadInvoice, show: s => !s.voided },
     { icon: <MessageCircle size={15} />, label: 'Send receipt via WhatsApp', onClick: sendWhatsAppReceipt, show: s => !s.voided },
-    { icon: <Ban size={15} />, label: 'Void sale', onClick: setVoidFor, show: s => !s.voided, variant: 'danger' },
+    { icon: <Ban size={15} />, label: 'Void sale', onClick: setVoidFor, show: s => !s.voided && isAdmin, variant: 'danger' },
   ];
 
   return (

@@ -1,42 +1,62 @@
-import React, { useState } from 'react';
-import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2, Search } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2, Search, Repeat } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { materials as materialsApi, finishedGoods as goodsApi, Material, FinishedGood } from '../lib/api';
+import { materials as materialsApi, finishedGoods as goodsApi, stock, StockLevel } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { useAuth } from '../lib/AuthContext';
+import { useBranches } from '../lib/useBranches';
+import { canAccess } from '../lib/permissions';
 import { Loading, ErrorState } from '../components/DataStates';
 import NumberInput from '../components/NumberInput';
 import './StockAlerts.scss';
 import Modal from '../components/Modal';
 
-type EditTarget = { kind: 'material' | 'good'; id: string; value: number };
+type EditTarget = { kind: 'material' | 'finished_good'; id: string; name: string; value: number };
 
+const num = (n: number) => Number(n || 0).toLocaleString();
+const pct = (qty: number, min: number) => Math.min(100, Math.round((qty / (min || 1)) * 100));
+
+// Alerts are per branch now: 40 bottles in the company means nothing to the
+// Abuja shop if all 40 are in Lagos. Staff see their own branch; admin and
+// accounts see every branch, labelled.
 export default function StockAlerts() {
   const navigate = useNavigate();
   const toast = useToast();
-  const matQ = useQuery<Material[]>(() => materialsApi.list(), []);
-  const goodQ = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
+  const { profile } = useAuth();
+  const role = profile?.role;
+  // Everyone can see what's short; only admin/inventory may change a
+  // reorder level, matching the stock-table write policy.
+  const canEditStock = role === 'admin' || role === 'inventory';
+  const seeAll = role === 'admin' || role === 'accounts';
+  const { multi, myBranchId, myBranchName } = useBranches();
+
+  const levelsQ = useQuery<StockLevel[]>(() => stock.levels(seeAll ? null : myBranchId), [seeAll, myBranchId]);
   const saveMat = useMutation(materialsApi.setMinLevel);
   const saveGood = useMutation(goodsApi.setMinLevel);
 
   const [editItem, setEditItem] = useState<EditTarget | null>(null);
   const [search, setSearch] = useState('');
 
-  const loading = matQ.loading || goodQ.loading;
-  const error = matQ.error || goodQ.error;
+  const showBranch = multi && seeAll;
   const q = search.trim().toLowerCase();
-  const byName = <T extends { name: string }>(list: T[]) =>
-    q ? list.filter(i => i.name.toLowerCase().includes(q)) : list;
+  const rows = useMemo(
+    () => (levelsQ.data ?? []).filter(l =>
+      !q || l.name.toLowerCase().includes(q) || (showBranch && l.branch_name.toLowerCase().includes(q))),
+    [levelsQ.data, q, showBranch],
+  );
 
-  const materials = byName(matQ.data ?? []);
-  const goods = byName(goodQ.data ?? []);
+  const isOut = (l: StockLevel) => Number(l.qty) <= 0;
+  const isLow = (l: StockLevel) => Number(l.qty) > 0 && Number(l.qty) <= Number(l.min_level);
+  const groups = [
+    { key: 'out-fg', tone: 'danger',  title: 'Out of Stock — Finished Goods', items: rows.filter(l => l.product_kind === 'finished_good' && isOut(l)) },
+    { key: 'low-fg', tone: 'warning', title: 'Low Stock — Finished Goods',    items: rows.filter(l => l.product_kind === 'finished_good' && isLow(l)) },
+    { key: 'out-m',  tone: 'danger',  title: 'Out of Stock — Raw Materials',  items: rows.filter(l => l.product_kind === 'material' && isOut(l)) },
+    { key: 'low-m',  tone: 'warning', title: 'Low Stock — Raw Materials',     items: rows.filter(l => l.product_kind === 'material' && isLow(l)) },
+  ];
+  const totalAlerts = groups.reduce((s, g) => s + g.items.length, 0);
 
-  const outOfStockGoods     = goods.filter(g => g.qty_balance === 0);
-  const lowStockGoods       = goods.filter(g => g.qty_balance > 0 && g.qty_balance <= g.min_stock_level);
-  const outOfStockMaterials = materials.filter(m => m.qty_balance === 0);
-  const lowStockMaterials   = materials.filter(m => m.qty_balance > 0 && m.qty_balance <= m.min_stock_level);
-
-  const totalAlerts = outOfStockGoods.length + lowStockGoods.length + outOfStockMaterials.length + lowStockMaterials.length;
+  const scope = !multi ? '' : seeAll ? ' across all branches' : ` at ${myBranchName}`;
 
   const saveMinLevel = async () => {
     if (!editItem) return;
@@ -46,146 +66,93 @@ export default function StockAlerts() {
     if (res !== null) {
       toast.success('Minimum stock level updated.');
       setEditItem(null);
-      matQ.refetch();
-      goodQ.refetch();
+      levelsQ.refetch();
     } else {
       toast.error('Could not update level.');
     }
   };
 
-  const pct = (qty: number, min: number) => Math.min(100, Math.round((qty / (min || 1)) * 100));
+  const card = (l: StockLevel) => {
+    const out = isOut(l);
+    const unit = l.unit ?? '';
+    return (
+      <div className={`alert-card ${out ? 'out-of-stock' : 'low-stock'}`} key={`${l.branch_id}:${l.product_id}`}>
+        <div className="alert-card-top">
+          <div>
+            <div className="item-name">{l.name}</div>
+            <div className="item-meta">{showBranch ? `${l.branch_name} · ` : ''}Min level: {num(l.min_level)} {unit}</div>
+          </div>
+          <span className={out ? 'badge-danger' : 'badge-warning'}>{out ? 'Out of Stock' : 'Low Stock'}</span>
+        </div>
+        <div className="stock-bar-wrap">
+          <div className="stock-bar-track">
+            <div className={`stock-bar-fill ${out ? 'danger' : 'warning'}`} style={{ width: `${out ? 0 : pct(Number(l.qty), Number(l.min_level))}%` }} />
+          </div>
+          <span className="stock-qty">{num(l.qty)} / {num(l.min_level)} {unit}</span>
+        </div>
+        <div className="alert-actions">
+          {l.product_kind === 'finished_good'
+            ? canAccess(role, '/production') && (
+                <button className="btn-primary btn-sm" onClick={() => navigate('/production')}><FlaskConical size={13} /> Start Production</button>)
+            : canAccess(role, '/purchases') && (
+                <button className="btn-primary btn-sm" onClick={() => navigate('/purchases')}><ShoppingCart size={13} /> Create Purchase</button>)}
+          {multi && canAccess(role, '/transfers') && (
+            <button className="btn-ghost btn-sm" onClick={() => navigate('/transfers')}><Repeat size={13} /> Transfer</button>
+          )}
+          {canEditStock && (
+            <button className="btn-ghost btn-sm"
+              onClick={() => setEditItem({ kind: l.product_kind, id: l.product_id, name: l.name, value: Number(l.min_level) })}>
+              <Edit2 size={13} /> Set Min Level
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="stock-alerts-page">
       <div className="page-header">
         <div className="page-title">
           <h1>Stock Alerts</h1>
-          <p>{loading ? ' ' : totalAlerts === 0 ? 'All stock levels are healthy' : `${totalAlerts} item${totalAlerts !== 1 ? 's' : ''} need attention`}</p>
+          <p>{levelsQ.loading ? ' ' : totalAlerts === 0
+            ? `All stock levels are healthy${scope}`
+            : `${totalAlerts} item${totalAlerts !== 1 ? 's' : ''} need attention${scope}`}</p>
         </div>
         <div className="dt-search" style={{ maxWidth: 260 }}>
           <Search size={15} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search items…" />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+                 placeholder={showBranch ? 'Search items or branches…' : 'Search items…'} />
         </div>
       </div>
 
-      {loading && <Loading label="Checking stock levels…" />}
-      {error && <ErrorState message={error} onRetry={() => { matQ.refetch(); goodQ.refetch(); }} />}
+      {levelsQ.loading && <Loading label="Checking stock levels…" />}
+      {levelsQ.error && <ErrorState message={levelsQ.error} onRetry={levelsQ.refetch} />}
 
-      {!loading && !error && totalAlerts === 0 && (
+      {!levelsQ.loading && !levelsQ.error && totalAlerts === 0 && (
         <div className="all-clear">
           <div className="all-clear-icon">{q ? '🔍' : '✅'}</div>
           <h2>{q ? 'No matches' : 'All good!'}</h2>
           <p>{q
             ? <>Nothing matching “{search}” needs attention. <button className="btn-ghost btn-sm" onClick={() => setSearch('')}>Clear search</button></>
-            : 'No low stock or out-of-stock items at the moment.'}</p>
+            : `No low stock or out-of-stock items${scope} at the moment.`}</p>
         </div>
       )}
 
-      {/* Out of Stock — Finished Goods */}
-      {outOfStockGoods.length > 0 && (
-        <section className="alert-section">
-          <div className="section-header danger"><XCircle size={16} /><h3>Out of Stock — Finished Goods ({outOfStockGoods.length})</h3></div>
-          <div className="alert-cards">
-            {outOfStockGoods.map(g => (
-              <div className="alert-card out-of-stock" key={g.id}>
-                <div className="alert-card-top">
-                  <div><div className="item-name">{g.name}</div><div className="item-meta">Min level: {g.min_stock_level} {g.unit}</div></div>
-                  <span className="badge-danger">Out of Stock</span>
-                </div>
-                <div className="stock-bar-wrap">
-                  <div className="stock-bar-track"><div className="stock-bar-fill danger" style={{ width: '0%' }} /></div>
-                  <span className="stock-qty">0 / {g.min_stock_level} {g.unit}</span>
-                </div>
-                <div className="alert-actions">
-                  <button className="btn-primary btn-sm" onClick={() => navigate('/production')}><FlaskConical size={13} /> Start Production</button>
-                  <button className="btn-ghost btn-sm" onClick={() => setEditItem({ kind: 'good', id: g.id, value: g.min_stock_level })}><Edit2 size={13} /> Set Min Level</button>
-                </div>
-              </div>
-            ))}
+      {groups.filter(g => g.items.length > 0).map(g => (
+        <section className="alert-section" key={g.key}>
+          <div className={`section-header ${g.tone}`}>
+            {g.tone === 'danger' ? <XCircle size={16} /> : <AlertTriangle size={16} />}
+            <h3>{g.title} ({g.items.length})</h3>
           </div>
+          <div className="alert-cards">{g.items.map(card)}</div>
         </section>
-      )}
+      ))}
 
-      {/* Low Stock — Finished Goods */}
-      {lowStockGoods.length > 0 && (
-        <section className="alert-section">
-          <div className="section-header warning"><AlertTriangle size={16} /><h3>Low Stock — Finished Goods ({lowStockGoods.length})</h3></div>
-          <div className="alert-cards">
-            {lowStockGoods.map(g => (
-              <div className="alert-card low-stock" key={g.id}>
-                <div className="alert-card-top">
-                  <div><div className="item-name">{g.name}</div><div className="item-meta">Min level: {g.min_stock_level} {g.unit}</div></div>
-                  <span className="badge-warning">Low Stock</span>
-                </div>
-                <div className="stock-bar-wrap">
-                  <div className="stock-bar-track"><div className="stock-bar-fill warning" style={{ width: `${pct(g.qty_balance, g.min_stock_level)}%` }} /></div>
-                  <span className="stock-qty">{g.qty_balance} / {g.min_stock_level} {g.unit}</span>
-                </div>
-                <div className="alert-actions">
-                  <button className="btn-primary btn-sm" onClick={() => navigate('/production')}><FlaskConical size={13} /> Start Production</button>
-                  <button className="btn-ghost btn-sm" onClick={() => setEditItem({ kind: 'good', id: g.id, value: g.min_stock_level })}><Edit2 size={13} /> Set Min Level</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Out of Stock — Raw Materials */}
-      {outOfStockMaterials.length > 0 && (
-        <section className="alert-section">
-          <div className="section-header danger"><XCircle size={16} /><h3>Out of Stock — Raw Materials ({outOfStockMaterials.length})</h3></div>
-          <div className="alert-cards">
-            {outOfStockMaterials.map(m => (
-              <div className="alert-card out-of-stock" key={m.id}>
-                <div className="alert-card-top">
-                  <div><div className="item-name">{m.name}</div><div className="item-meta">{m.type_of_material} · Min: {m.min_stock_level} {m.unit}</div></div>
-                  <span className="badge-danger">Out of Stock</span>
-                </div>
-                <div className="stock-bar-wrap">
-                  <div className="stock-bar-track"><div className="stock-bar-fill danger" style={{ width: '0%' }} /></div>
-                  <span className="stock-qty">0 / {m.min_stock_level} {m.unit}</span>
-                </div>
-                <div className="alert-actions">
-                  <button className="btn-primary btn-sm" onClick={() => navigate('/purchases')}><ShoppingCart size={13} /> Create Purchase</button>
-                  <button className="btn-ghost btn-sm" onClick={() => setEditItem({ kind: 'material', id: m.id, value: m.min_stock_level })}><Edit2 size={13} /> Set Min Level</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Low Stock — Raw Materials */}
-      {lowStockMaterials.length > 0 && (
-        <section className="alert-section">
-          <div className="section-header warning"><AlertTriangle size={16} /><h3>Low Stock — Raw Materials ({lowStockMaterials.length})</h3></div>
-          <div className="alert-cards">
-            {lowStockMaterials.map(m => (
-              <div className="alert-card low-stock" key={m.id}>
-                <div className="alert-card-top">
-                  <div><div className="item-name">{m.name}</div><div className="item-meta">{m.type_of_material} · Min: {m.min_stock_level} {m.unit}</div></div>
-                  <span className="badge-warning">Low Stock</span>
-                </div>
-                <div className="stock-bar-wrap">
-                  <div className="stock-bar-track"><div className="stock-bar-fill warning" style={{ width: `${pct(m.qty_balance, m.min_stock_level)}%` }} /></div>
-                  <span className="stock-qty">{m.qty_balance} / {m.min_stock_level} {m.unit}</span>
-                </div>
-                <div className="alert-actions">
-                  <button className="btn-primary btn-sm" onClick={() => navigate('/purchases')}><ShoppingCart size={13} /> Create Purchase</button>
-                  <button className="btn-ghost btn-sm" onClick={() => setEditItem({ kind: 'material', id: m.id, value: m.min_stock_level })}><Edit2 size={13} /> Set Min Level</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Edit Min Level Modal */}
       {editItem && (
         <Modal onClose={() => setEditItem(null)} maxWidth={360}>
             <div className="modal-header">
-              <h2>Set Minimum Stock Level</h2>
+              <h2>Minimum level — {editItem.name}</h2>
               <button className="close-btn" onClick={() => setEditItem(null)}><X size={18} /></button>
             </div>
             <div className="modal-body">
@@ -193,7 +160,7 @@ export default function StockAlerts() {
                 <label>Minimum Quantity (reorder point)</label>
                 <NumberInput value={editItem.value} onChange={v => setEditItem(ei => ei ? { ...ei, value: v } : ei)} />
                 <small style={{ color: '#64748b', fontSize: '0.78rem', marginTop: '0.3rem', display: 'block' }}>
-                  A stock alert will trigger when quantity falls at or below this number.
+                  A stock alert triggers when quantity falls to or below this number{multi ? ' — at every branch' : ''}.
                 </small>
               </div>
             </div>

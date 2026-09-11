@@ -28,6 +28,9 @@ export interface Tenant {
   tin: string | null;
   trial_ends_at: string | null;
   plan_expires_at: string | null;
+  // Set false by the platform owner's suspend button. Was never selected,
+  // so the app could not tell a suspended tenant from a live one.
+  is_active: boolean;
 }
 
 interface AuthState {
@@ -69,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (prof?.tenant_id) {
       const { data: ten } = await supabase
         .from('tenants')
-        .select('id, name, type, plan, currency, logo_url, vat_enabled, vat_rate, tin, trial_ends_at, plan_expires_at')
+        .select('id, name, type, plan, currency, logo_url, vat_enabled, vat_rate, tin, trial_ends_at, plan_expires_at, is_active')
         .eq('id', prof.tenant_id)
         .single();
       setTenant(ten as Tenant | null);

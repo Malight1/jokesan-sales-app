@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete } from 'lucide-react';
 import {
-  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding,
-  FinishedGood, Customer, Lookup,
+  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock,
+  FinishedGood, Customer, Lookup, StockLevel,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -11,6 +11,8 @@ import { generateInvoicePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
 import { enqueueSale } from '../lib/offlineQueue';
+import { useBranches } from '../lib/useBranches';
+import { qtyByProduct, decrementAt } from '../lib/branchStock';
 import { Loading, ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';
 import BarcodeScanner from '../components/BarcodeScanner';
@@ -78,7 +80,10 @@ function NumericKeypad({ value, onChange }: { value: number; onChange: (n: numbe
 export default function POS() {
   const toast = useToast();
   const { tenant } = useAuth();
+  const { multi, myBranchId, myBranchName } = useBranches();
   const goodsQ = useQuery<FinishedGood[]>(() => goodsApi.list(), [], { cacheKey: 'pos-goods' });
+  const levelsQ = useQuery<StockLevel[]>(() => stock.levels(myBranchId), [myBranchId],
+    { cacheKey: `pos-levels-${myBranchId ?? 'default'}` });
   const custQ = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'pos-customers' });
   const payQ = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
   const [checkingOut, setCheckingOut] = useState(false);
@@ -94,6 +99,15 @@ export default function POS() {
   const [done, setDone] = useState<{ total: number; paid: number; subtotal: number; vat: number; vatRate: number; offline?: boolean } | null>(null);
 
   const goods = useMemo(() => goodsQ.data ?? [], [goodsQ.data]);
+  // What THIS branch holds. The company total on the product row would let
+  // the Lagos till try to sell stock that's sitting in Abuja — the server
+  // refuses that now, so the till must show the same number it enforces.
+  const here = useMemo(
+    () => qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), myBranchId),
+    [levelsQ.data, myBranchId],
+  );
+  const avail = (g: FinishedGood) => (levelsQ.data ? here.get(g.id) ?? 0 : g.qty_balance);
+  const where = multi ? `at ${myBranchName}` : 'in stock';
   const filtered = useMemo(
     () => goods.filter(g => g.name.toLowerCase().includes(search.toLowerCase())),
     [goods, search]
@@ -107,11 +121,11 @@ export default function POS() {
   const change = payMode === 'full' && tendered > total ? tendered - total : 0;
 
   const addToCart = (g: FinishedGood) => {
-    if (g.qty_balance <= 0) { toast.error(`${g.name} is out of stock.`); return; }
+    if (avail(g) <= 0) { toast.error(`${g.name} is out of stock${multi ? ` at ${myBranchName}` : ''}.`); return; }
     setCart(c => {
       const ex = c.find(l => l.good.id === g.id);
       if (ex) {
-        if (ex.qty >= g.qty_balance) { toast.error(`Only ${g.qty_balance} of ${g.name} in stock.`); return c; }
+        if (ex.qty >= avail(g)) { toast.error(`Only ${avail(g)} of ${g.name} ${where}.`); return c; }
         return c.map(l => l.good.id === g.id ? { ...l, qty: l.qty + 1 } : l);
       }
       return [...c, { good: g, qty: 1 }];
@@ -129,7 +143,7 @@ export default function POS() {
     setCart(c => c.flatMap(l => {
       if (l.good.id !== id) return [l];
       if (qty <= 0) return [];
-      const capped = Math.min(qty, l.good.qty_balance);
+      const capped = Math.min(qty, avail(l.good));
       return [{ ...l, qty: capped }];
     }));
   };
@@ -149,12 +163,16 @@ export default function POS() {
       amountPaid: paid,
       items: cart.map(l => ({ finished_good_id: l.good.id, quantity: l.qty, unit_price: l.good.selling_price })),
       vatRate,
+      // Pinned so a sale queued offline replays at the branch it was rung up
+      // at, even if this device later signs in somewhere else.
+      branchId: myBranchId,
     };
     setCheckingOut(true);
     try {
       await salesApi.create(payload);
       setDone({ total, paid, subtotal, vat: vatAmt, vatRate });
       goodsQ.refetch();
+      levelsQ.refetch();
     } catch (e: any) {
       if (looksOffline(e)) {
         // Keep selling — the sale is queued locally and replayed through the
@@ -163,6 +181,7 @@ export default function POS() {
         // aren't oversold twice before that sync happens.
         const label = `${cart.reduce((s, l) => s + l.qty, 0)} item(s) — ${fmt(total)} — ${customerId ? customerName(customerId) : 'Walk-in'}`;
         enqueueSale(payload, label);
+        levelsQ.setData(prev => prev ? decrementAt(prev, myBranchId, cart.map(l => ({ productId: l.good.id, qty: l.qty }))) : prev);
         goodsQ.setData(prev => prev ? prev.map(g => {
           const line = cart.find(l => l.good.id === g.id);
           return line ? { ...g, qty_balance: g.qty_balance - line.qty } : g;
@@ -248,11 +267,11 @@ export default function POS() {
         </div>
         <div className="product-grid">
           {filtered.map(g => (
-            <button key={g.id} className={`product-tile ${g.qty_balance <= 0 ? 'out' : ''}`} onClick={() => addToCart(g)} disabled={g.qty_balance <= 0}>
+            <button key={g.id} className={`product-tile ${avail(g) <= 0 ? 'out' : ''}`} onClick={() => addToCart(g)} disabled={avail(g) <= 0}>
               <div className="p-name">{g.name}</div>
               <div className="p-price">{fmt(g.selling_price)}</div>
-              <div className={`p-stock ${g.qty_balance <= 0 ? 'zero' : g.qty_balance <= g.min_stock_level ? 'low' : ''}`}>
-                {g.qty_balance <= 0 ? 'Out of stock' : `${g.qty_balance} in stock`}
+              <div className={`p-stock ${avail(g) <= 0 ? 'zero' : avail(g) <= g.min_stock_level ? 'low' : ''}`}>
+                {avail(g) <= 0 ? 'Out of stock' : `${avail(g)} ${multi ? 'here' : 'in stock'}`}
               </div>
             </button>
           ))}
@@ -263,7 +282,7 @@ export default function POS() {
       {/* Cart */}
       <div className="pos-cart">
         <div className="cart-head">
-          <ShoppingCart size={18} /> <h2>Current Sale</h2>
+          <ShoppingCart size={18} /> <h2>Current Sale{multi ? ` · ${myBranchName}` : ''}</h2>
           {cart.length > 0 && <button className="clear-btn" onClick={clearSale} title="Clear"><Trash2 size={15} /></button>}
         </div>
 

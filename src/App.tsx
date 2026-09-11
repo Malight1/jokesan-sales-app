@@ -32,6 +32,8 @@ const POS = lazy(() => import('./pages/POS'));
 const ImportData = lazy(() => import('./pages/ImportData'));
 const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Transfers = lazy(() => import('./pages/Transfers'));
 
 export default function App() {
   return (
@@ -68,6 +70,8 @@ export default function App() {
                         <Route path="/import" element={<ImportData />} />
                         <Route path="/platform" element={<SuperAdmin />} />
                         <Route path="/match-payment" element={<MatchPayment />} />
+                        <Route path="/transfers" element={<Transfers />} />
+                        <Route path="/profile" element={<Profile />} />
                         <Route path="/settings" element={<Settings />} />
                       </Routes>
                     </Suspense>

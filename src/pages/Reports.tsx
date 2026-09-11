@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
-         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, lookups } from '../lib/api';
+         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, lookups, stock } from '../lib/api';
+import { useBranches } from '../lib/useBranches';
+import { qtyByProduct } from '../lib/branchStock';
 import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
 import { whatsappLink } from '../lib/whatsapp';
@@ -29,6 +31,9 @@ export default function Reports() {
   const [tab, setTab] = useState<Tab>('pnl');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // '' = every branch. Only offered to multi-branch companies.
+  const [branch, setBranch] = useState('');
+  const { multi, active, nameOf } = useBranches();
 
   const salesQ = useQuery(() => salesApi.list(), []);
   const expQ = useQuery(() => expensesApi.list(), []);
@@ -38,7 +43,9 @@ export default function Reports() {
   const purchQ = useQuery(() => purchasesApi.list(), []);
   const suppQ = useQuery(() => suppliersApi.list(), []);
   // Aggregated server-side, so it re-runs when the date range changes.
-  const prodProfitQ = useQuery(() => reportsApi.productProfitability(from, to), [from, to]);
+  const prodProfitQ = useQuery(() => reportsApi.productProfitability(from, to, branch || null), [from, to, branch]);
+  // Per-branch quantities for the Stock tab when a branch is chosen.
+  const levelsQ = useQuery(() => stock.levels(null), []);
 
   const loading = salesQ.loading || expQ.loading || goodsQ.loading;
   const error = salesQ.error || expQ.error || goodsQ.error;
@@ -50,10 +57,14 @@ export default function Reports() {
     return true;
   };
 
+  const inBranch = (b: string | null | undefined) => !branch || b === branch;
+
   // Voided sales are excluded from every report.
-  const sales = (salesQ.data ?? []).filter(s => !s.voided && inRange(s.transaction_date));
-  const expenses = (expQ.data ?? []).filter(e => inRange(e.expense_date));
-  const goods = goodsQ.data ?? [];
+  const sales = (salesQ.data ?? []).filter(s => !s.voided && inRange(s.transaction_date) && inBranch(s.branch_id));
+  const expenses = (expQ.data ?? []).filter(e => inRange(e.expense_date) && inBranch(e.branch_id));
+  // With a branch chosen, stock is what THAT branch holds, not the company total.
+  const branchQty = qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), branch);
+  const goods = (goodsQ.data ?? []).map(g => branch ? { ...g, qty_balance: branchQty.get(g.id) ?? 0 } : g);
 
   const totalSales = sales.reduce((s, t) => s + (t.total_amount || 0), 0);
   const totalCogs = sales.reduce((s, t) => s + (t.cogs || 0), 0);
@@ -107,7 +118,7 @@ export default function Reports() {
     const x = suppQ.data?.find(v => v.id === id);
     return x ? `${x.first_name ?? ''} ${x.last_name ?? ''}`.trim() || x.company_store || 'Unknown' : 'No supplier';
   };
-  const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date));
+  const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date) && inBranch(pu.branch_id));
   const creditorMap: Record<string, { key: string; name: string; total: number; paid: number; balance: number; count: number }> = {};
   purchases.filter(pu => pu.balance > 0).forEach(pu => {
     const key = pu.supplier_id ?? 'none';
@@ -137,12 +148,13 @@ export default function Reports() {
     if (d.id) await customersApi.markReminded(d.id);
   };
 
-  const rangeLabel = from || to ? ` (${from || 'start'} → ${to || 'today'})` : '';
+  const rangeLabel = (from || to ? ` (${from || 'start'} → ${to || 'today'})` : '') + (branch ? ` — ${nameOf(branch)}` : '');
 
   // ---- Table column definitions (DataTable gives each one search, sort and paging) ----
   const salesCols: Column<any>[] = [
     { key: 'transaction_date', header: 'Date', value: r => r.transaction_date },
     { key: 'customer', header: 'Customer', value: r => custName(r.customer_id) },
+    ...(multi && !branch ? [{ key: 'branch', header: 'Branch', value: (r: any) => nameOf(r.branch_id) } as Column<any>] : []),
     { key: 'total_amount', header: 'Total', align: 'right', value: r => r.total_amount, render: r => <strong>{fmt(r.total_amount)}</strong> },
     { key: 'amount_paid', header: 'Paid', align: 'right', value: r => r.amount_paid, render: r => fmt(r.amount_paid) },
     { key: 'balance', header: 'Balance', align: 'right', value: r => r.balance,
@@ -309,8 +321,17 @@ export default function Reports() {
           <label>To</label>
           <input type="date" value={to} onChange={e => setTo(e.target.value)} />
         </div>
-        {(from || to) && (
-          <button className="btn-ghost btn-sm" style={{ marginBottom: 4 }} onClick={() => { setFrom(''); setTo(''); }}>Clear</button>
+        {multi && (
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Branch</label>
+            <select value={branch} onChange={e => setBranch(e.target.value)}>
+              <option value="">All branches</option>
+              {active.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        )}
+        {(from || to || branch) && (
+          <button className="btn-ghost btn-sm" style={{ marginBottom: 4 }} onClick={() => { setFrom(''); setTo(''); setBranch(''); }}>Clear</button>
         )}
       </div>
 
