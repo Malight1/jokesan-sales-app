@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete, Undo2 } from 'lucide-react';
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock,
-  FinishedGood, Customer, Lookup, StockLevel,
+  FinishedGood, Customer, Lookup, StockLevel, SalesOrder,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -17,6 +17,8 @@ import { Loading, ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
+import Modal from '../components/Modal';
+import { ReturnModal } from './Sales';
 import './POS.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -100,6 +102,15 @@ export default function POS() {
     total: number; paid: number; subtotal: number; vat: number; vatRate: number;
     offline?: boolean; docNo?: string | null;
   } | null>(null);
+
+  // Returns, found by invoice number rather than a full sales list — POS
+  // never loads one. Needs a connection: unlike a sale, a return checks
+  // FIFO batches and balances live, so it can't be queued offline.
+  const [showFindReturn, setShowFindReturn] = useState(false);
+  const [findDocNo, setFindDocNo] = useState('');
+  const [finding, setFinding] = useState(false);
+  const [findError, setFindError] = useState<string | null>(null);
+  const [returnSale, setReturnSale] = useState<SalesOrder | null>(null);
 
   const goods = useMemo(() => goodsQ.data ?? [], [goodsQ.data]);
   // What THIS branch can sell. The company total on the product row would
@@ -207,6 +218,27 @@ export default function POS() {
     const c = custQ.data?.find(x => x.id === id);
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Customer' : 'Walk-in';
   };
+  const customerNameOrNull = (id: string | null) => id ? customerName(id) : 'Walk-in';
+  const productName = (id: string) => goods.find(g => g.id === id)?.name ?? '—';
+  const returnInvoiceNo = (s: SalesOrder) => s.doc_no || 'INV-' + s.id.slice(0, 8).toUpperCase();
+
+  const findReturn = async () => {
+    if (!findDocNo.trim()) return;
+    setFinding(true);
+    setFindError(null);
+    try {
+      const sale = await salesApi.findByDocNo(findDocNo);
+      if (!sale) { setFindError(`No sale found for "${findDocNo.trim()}".`); return; }
+      if (sale.voided) { setFindError(`${returnInvoiceNo(sale)} was voided — there's nothing left to return.`); return; }
+      setShowFindReturn(false);
+      setFindDocNo('');
+      setReturnSale(sale);
+    } catch (e: any) {
+      setFindError(e.message ?? 'Could not look that up.');
+    } finally {
+      setFinding(false);
+    }
+  };
 
   // ---- success screen ----
   if (done) {
@@ -273,6 +305,9 @@ export default function POS() {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search products…" autoFocus />
           </div>
           <button className="btn-secondary" onClick={() => setShowScanner(true)} title="Scan barcode"><ScanLine size={16} /> Scan</button>
+          <button className="btn-secondary" onClick={() => { setFindDocNo(''); setFindError(null); setShowFindReturn(true); }} title="Return an item">
+            <Undo2 size={16} /> Returns
+          </button>
         </div>
         <div className="product-grid">
           {filtered.map(g => (
@@ -442,6 +477,45 @@ export default function POS() {
       </div>
 
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
+
+      {showFindReturn && (
+        <Modal onClose={() => setShowFindReturn(false)} maxWidth={380}>
+          <div className="modal-header">
+            <h2>Find a sale to return</h2>
+            <button className="close-btn" onClick={() => setShowFindReturn(false)} aria-label="Close"><X size={18} /></button>
+          </div>
+          <div className="modal-body">
+            {findError && <ErrorState message={findError} />}
+            <div className="form-group">
+              <label>Invoice number</label>
+              <input value={findDocNo} autoFocus placeholder="e.g. INV-000123"
+                     onChange={e => setFindDocNo(e.target.value)}
+                     onKeyDown={e => { if (e.key === 'Enter') findReturn(); }} />
+              <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Printed on the receipt.</small>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn-secondary" onClick={() => setShowFindReturn(false)}>Cancel</button>
+            <button type="button" className="btn-primary" disabled={finding || !findDocNo.trim()} onClick={findReturn}>
+              {finding ? 'Looking…' : 'Find sale'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {returnSale && (
+        <ReturnModal
+          sale={returnSale}
+          customerName={customerNameOrNull}
+          productName={productName}
+          companyName={tenant?.name ?? 'My Business'}
+          invoiceNo={returnInvoiceNo(returnSale)}
+          payTypes={payQ.data ?? []}
+          hasCustomer={!!returnSale.customer_id}
+          onClose={() => setReturnSale(null)}
+          onDone={() => { setReturnSale(null); goodsQ.refetch(); levelsQ.refetch(); }}
+        />
+      )}
     </div>
   );
 }

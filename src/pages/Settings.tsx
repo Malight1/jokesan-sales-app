@@ -274,6 +274,9 @@ function BusinessTab() {
   const hasExpirySettings = tenant?.expiry_warning_days !== undefined;
   const [warnDays, setWarnDays] = useState(tenant?.expiry_warning_days ?? 60);
   const [allowExpired, setAllowExpired] = useState(!!tenant?.allow_expired_sale);
+  // How far a cashier may go with a return (migration 0024).
+  const hasReturnPolicy = tenant?.cashier_returns !== undefined;
+  const [cashierReturns, setCashierReturns] = useState<'none' | 'same_day_own' | 'any'>(tenant?.cashier_returns ?? 'same_day_own');
   const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
   const [invPrefix, setInvPrefix] = useState<string | null>(null);
   const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
@@ -309,6 +312,7 @@ function BusinessTab() {
     const res = await saveBiz.mutate(tenant.id, {
       name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null,
       ...(hasExpirySettings ? { expiry_warning_days: days, allow_expired_sale: allowExpired } : {}),
+      ...(hasReturnPolicy ? { cashier_returns: cashierReturns } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
     if (invPrefix !== null && invPrefix.trim() !== (prefixQ.data ?? 'INV-')) {
@@ -425,6 +429,21 @@ function BusinessTab() {
                   <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>Not recommended. NAFDAC can sanction the sale of expired products.</small>
                 </span>
               </label>
+            </>
+          )}
+
+          {hasReturnPolicy && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label htmlFor="cashier-returns">How far a cashier may go with a return</label>
+                <select id="cashier-returns" value={cashierReturns} onChange={e => setCashierReturns(e.target.value as typeof cashierReturns)}>
+                  <option value="same_day_own">Their own sales, same day only (default)</option>
+                  <option value="any">Any sale, any time</option>
+                  <option value="none">Not at all — admin or accounts only</option>
+                </select>
+                <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>An admin or accounts can always process a return, whatever this is set to.</small>
+              </div>
             </>
           )}
 

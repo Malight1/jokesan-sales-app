@@ -360,7 +360,10 @@ export default function Sales() {
         </Modal>
       )}
 
-      {viewId && <SaleDetail id={viewId} onClose={() => setViewId(null)} customerName={customerName} productName={productName} />}
+      {viewId && (
+        <SaleDetail id={viewId} onClose={() => setViewId(null)} customerName={customerName} productName={productName}
+                    isAdmin={isAdmin} onVoidedReturn={refetch} />
+      )}
 
       {voidFor && (
         <ConfirmDialog
@@ -446,7 +449,7 @@ interface ReturnLine {
   sale_item_id: string; finished_good_id: string; label: string;
   unit_price: number; max: number; qty: number; condition: ReturnCondition;
 }
-function ReturnModal({ sale, customerName, productName, companyName, invoiceNo, payTypes, hasCustomer, onClose, onDone }: {
+export function ReturnModal({ sale, customerName, productName, companyName, invoiceNo, payTypes, hasCustomer, onClose, onDone }: {
   sale: SalesOrder;
   customerName: (id: string | null) => string;
   productName: (id: string) => string;
@@ -599,16 +602,34 @@ function ReturnModal({ sale, customerName, productName, companyName, invoiceNo, 
 }
 
 // ---- Sale detail (fetches items + payments) ----
-function SaleDetail({ id, onClose, customerName, productName }: {
+function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedReturn }: {
   id: string; onClose: () => void;
   customerName: (id: string | null) => string;
   productName: (id: string) => string;
+  isAdmin: boolean;
+  onVoidedReturn: () => void;
 }) {
-  const { data, loading, error } = useQuery<any>(() => salesApi.detail(id), [id]);
-  const { data: creditNotes } = useQuery(() => returnsApi.sales.forSale(id), [id]);
+  const { data, loading, error, refetch } = useQuery<any>(() => salesApi.detail(id), [id]);
+  const { data: creditNotes, refetch: refetchReturns } = useQuery(() => returnsApi.sales.forSale(id), [id]);
   const { tenant } = useAuth();
   const toast = useToast();
   const [downloading, setDownloading] = useState<string | null>(null);
+  const voidMut = useMutation(returnsApi.sales.void);
+  const [voidTarget, setVoidTarget] = useState<{ id: string; doc_no: string | null } | null>(null);
+
+  const confirmVoid = async () => {
+    if (!voidTarget) return;
+    const res = await voidMut.mutate(voidTarget.id);
+    if (res !== null) {
+      toast.success('Return voided — stock and balance restored.');
+      setVoidTarget(null);
+      refetch();
+      refetchReturns();
+      onVoidedReturn();
+    } else {
+      toast.error(voidMut.error ?? 'Could not void that return.');
+    }
+  };
 
   const downloadCreditNote = async (ret: { id: string; doc_no: string | null; return_date: string; reason: string | null;
     subtotal: number; vat_amount: number; total: number; applied_to_balance: number; refunded: number; to_store_credit: number }) => {
@@ -631,6 +652,7 @@ function SaleDetail({ id, onClose, customerName, productName }: {
   };
 
   return (
+    <>
     <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Sale Detail</h2>
@@ -670,18 +692,26 @@ function SaleDetail({ id, onClose, customerName, productName }: {
                 <>
                   <h3 className="section-title">Credit Notes</h3>
                   <table className="view-table">
-                    <thead><tr><th>Date</th><th>Credit Note</th><th>Reason</th><th>Total</th><th /></tr></thead>
+                    <thead><tr><th>Date</th><th>Credit Note</th><th>Reason</th><th>Total</th><th /><th /></tr></thead>
                     <tbody>
                       {creditNotes.map(r => (
-                        <tr key={r.id}>
+                        <tr key={r.id} style={r.voided ? { opacity: 0.55 } : undefined}>
                           <td>{r.return_date}</td>
-                          <td>{r.doc_no}</td>
-                          <td>{r.reason || '—'}</td>
-                          <td>{fmt(r.total)}</td>
+                          <td>{r.doc_no}{r.voided && <span className="badge-gray" style={{ marginLeft: 6 }}>Voided</span>}</td>
+                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{r.reason || '—'}</td>
+                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{fmt(r.total)}</td>
                           <td>
                             <button className="btn-ghost btn-sm" disabled={downloading === r.id} onClick={() => downloadCreditNote(r)}>
                               <FileText size={13} /> {downloading === r.id ? 'Preparing…' : 'PDF'}
                             </button>
+                          </td>
+                          <td>
+                            {isAdmin && !r.voided && (
+                              <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }}
+                                      onClick={() => setVoidTarget({ id: r.id, doc_no: r.doc_no })}>
+                                <Undo2 size={13} /> Void
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -706,5 +736,17 @@ function SaleDetail({ id, onClose, customerName, productName }: {
           )}
         </div>
     </Modal>
+
+    {voidTarget && (
+      <ConfirmDialog
+        title="Void Return"
+        message={<>Void credit note <strong>{voidTarget.doc_no}</strong>? Any resellable stock it put back is taken off the shelf again, the balance it paid down is restored, and any store credit it issued is clawed back. This is refused if that stock has since moved on, or the credit has already been spent.</>}
+        confirmLabel="Void Return"
+        pending={voidMut.pending}
+        onConfirm={confirmVoid}
+        onCancel={() => setVoidTarget(null)}
+      />
+    )}
+    </>
   );
 }

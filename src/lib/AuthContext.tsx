@@ -34,6 +34,8 @@ export interface Tenant {
   // Batch/expiry settings (migration 0022). Optional until it has run.
   expiry_warning_days?: number;
   allow_expired_sale?: boolean;
+  // How far a cashier may go with a return (migration 0024).
+  cashier_returns?: 'none' | 'same_day_own' | 'any';
 }
 
 interface AuthState {

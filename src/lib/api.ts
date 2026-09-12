@@ -216,6 +216,15 @@ export const boms = {
 export const sales = {
   list: () => runAll<SalesOrder>((f, t) => supabase.from('sales_orders').select('*').order('transaction_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('sales_orders').select('*, sale_items(*), sale_payments(*)').eq('id', id).single()),
+  // Look a sale up by its invoice number, for the POS "Returns" counter.
+  // RLS already limits a cashier to their own branch's sales.
+  findByDocNo: async (docNo: string): Promise<SalesOrder | null> => {
+    const clean = docNo.trim().toUpperCase();
+    if (!clean) return null;
+    const r = await supabase.from('sales_orders').select('*').ilike('doc_no', clean).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return r.data as SalesOrder | null;
+  },
   // The invoice number the server issued for a sale (create_sale returns the id).
   docNo: async (id: string): Promise<string | null> => {
     const r = await supabase.from('sales_orders').select('doc_no').eq('id', id).maybeSingle();
@@ -284,6 +293,9 @@ export interface SaleReturn {
   subtotal: number; vat_amount: number; total: number; cogs_reversed: number;
   applied_to_balance: number; refunded: number; to_store_credit: number;
   refund_payment_type_id: string | null; created_at: string;
+  // Voidable (migration 0024): admin-only, and refused if the stock has
+  // since moved on or the store credit has already been spent.
+  voided?: boolean; voided_at?: string | null;
 }
 export interface SaleReturnItem {
   id: string; sale_return_id: string; sale_item_id: string; finished_good_id: string;
@@ -293,6 +305,7 @@ export interface PurchaseReturn {
   id: string; purchase_order_id: string; branch_id: string | null;
   doc_no: string | null; return_date: string; reason: string | null;
   total: number; created_at: string;
+  voided?: boolean; voided_at?: string | null;
 }
 export interface PurchaseReturnItem {
   id: string; purchase_return_id: string; purchase_item_id: string; material_id: string;
@@ -325,6 +338,9 @@ export const returns = {
         p_payment_type: params.paymentTypeId ?? null,
         ...(params.date ? { p_date: params.date } : {}),
       }),
+    // Admin only — refused if the stock has since moved on, or if the
+    // store credit it issued has already been spent.
+    void: (returnId: string) => rpcVoid('void_sale_return', { p_return: returnId }),
   },
   purchases: {
     list: () => runAll<PurchaseReturn>((f, t) => supabase.from('purchase_returns').select('*').order('return_date', { ascending: false }).range(f, t)),
@@ -340,6 +356,7 @@ export const returns = {
         p_items: params.items.map(i => ({ purchase_item_id: i.purchaseItemId, qty: i.qty })),
         p_reason: params.reason ?? null,
       }),
+    void: (returnId: string) => rpcVoid('void_purchase_return', { p_return: returnId }),
   },
   // Finance-only, mirrors report_product_profitability's role check.
   byProduct: (from?: string, to?: string, branchId?: string | null) =>
@@ -614,6 +631,7 @@ export const tenantApi = {
   update: (id: string, patch: {
     name?: string; currency?: string; vat_enabled?: boolean; vat_rate?: number; tin?: string | null; logo_url?: string | null;
     expiry_warning_days?: number; allow_expired_sale?: boolean;
+    cashier_returns?: 'none' | 'same_day_own' | 'any';
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };

@@ -315,6 +315,7 @@ export default function Purchases() {
           onClose={() => setViewId(null)}
           supplierName={supplierName}
           materialName={(id: string) => materials?.find(m => m.id === id)?.name ?? '—'}
+          isAdmin={isAdmin}
         />
       )}
 
@@ -439,15 +440,33 @@ function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
 }
 
 // ---- Purchase detail (fetches items + payments) ----
-function PurchaseDetail({ id, onClose, supplierName, materialName }: {
+function PurchaseDetail({ id, onClose, supplierName, materialName, isAdmin }: {
   id: string; onClose: () => void;
   supplierName: (id: string | null) => string;
   materialName: (id: string) => string;
+  isAdmin: boolean;
 }) {
-  const { data, loading, error } = useQuery<any>(() => purchasesApi.detail(id), [id]);
-  const { data: returnNotes } = useQuery(() => returnsApi.purchases.forPurchase(id), [id]);
+  const toast = useToast();
+  const { data, loading, error, refetch } = useQuery<any>(() => purchasesApi.detail(id), [id]);
+  const { data: returnNotes, refetch: refetchReturns } = useQuery(() => returnsApi.purchases.forPurchase(id), [id]);
+  const voidMut = useMutation(returnsApi.purchases.void);
+  const [voidTarget, setVoidTarget] = useState<{ id: string; doc_no: string | null } | null>(null);
+
+  const confirmVoid = async () => {
+    if (!voidTarget) return;
+    const res = await voidMut.mutate(voidTarget.id);
+    if (res !== null) {
+      toast.success('Return voided — the goods and the balance are restored.');
+      setVoidTarget(null);
+      refetch();
+      refetchReturns();
+    } else {
+      toast.error(voidMut.error ?? 'Could not void that return.');
+    }
+  };
 
   return (
+    <>
     <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Purchase Detail</h2>
@@ -468,11 +487,22 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
                 <>
                   <h3 style={{ fontSize: '0.9rem', margin: '1rem 0 0.5rem' }}>Returned to Supplier</h3>
                   <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
-                    <thead><tr style={{ textAlign: 'left', color: '#64748b' }}><th>Date</th><th>Note</th><th>Reason</th><th>Total</th></tr></thead>
+                    <thead><tr style={{ textAlign: 'left', color: '#64748b' }}><th>Date</th><th>Note</th><th>Reason</th><th>Total</th><th /></tr></thead>
                     <tbody>
                       {returnNotes.map(r => (
-                        <tr key={r.id} style={{ borderTop: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '0.4rem 0' }}>{r.return_date}</td><td>{r.doc_no}</td><td>{r.reason || '—'}</td><td>{fmt(r.total)}</td>
+                        <tr key={r.id} style={{ borderTop: '1px solid #f1f5f9', opacity: r.voided ? 0.55 : 1 }}>
+                          <td style={{ padding: '0.4rem 0' }}>{r.return_date}</td>
+                          <td>{r.doc_no}{r.voided && <span className="badge-gray" style={{ marginLeft: 6 }}>Voided</span>}</td>
+                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{r.reason || '—'}</td>
+                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{fmt(r.total)}</td>
+                          <td>
+                            {isAdmin && !r.voided && (
+                              <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }}
+                                      onClick={() => setVoidTarget({ id: r.id, doc_no: r.doc_no })}>
+                                <Undo2 size={13} /> Void
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -514,5 +544,17 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
           )}
         </div>
     </Modal>
+
+    {voidTarget && (
+      <ConfirmDialog
+        title="Void Return"
+        message={<>Void return note <strong>{voidTarget.doc_no}</strong>? The goods it sent back are added to stock again, and what you owe the supplier is restored.</>}
+        confirmLabel="Void Return"
+        pending={voidMut.pending}
+        onConfirm={confirmVoid}
+        onCancel={() => setVoidTarget(null)}
+      />
+    )}
+    </>
   );
 }

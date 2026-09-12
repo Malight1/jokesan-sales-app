@@ -892,6 +892,166 @@ begin
   update tenants set vat_enabled = false where id = t_id('tenant');
 end $$;
 
+-- ---------- 27. voiding a return (0024) ----------
+do $$
+declare
+  v_item uuid; v_cash uuid; v_cust uuid;
+  v_sale1 uuid; v_ret_a uuid; v_item1 uuid;
+  v_sale2 uuid; v_ret_b uuid; v_item2 uuid;
+  v_sale3 uuid; v_ret_c uuid; v_item3 uuid;
+  v_sale4 uuid; v_ret_c2 uuid;
+  v_bal numeric; v_credit numeric; v_n int;
+begin
+  select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(t_id('lagos'));
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Void Test Item', 'pcs', 5, 50, 1.5) returning id into v_item;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_item, 30, 20, 'Opening balance');
+  insert into customers (tenant_id, first_name) values (t_id('tenant'), 'Credit Test Customer') returning id into v_cust;
+
+  -- ---- A: a plain resellable return, voided, undoes stock and balance exactly ----
+  execute format('select public.create_sale(null, current_date, null, 100, %L::jsonb)', t_items(v_item, 5, 50)) into v_sale1;
+  select id into v_item1 from sale_items where sales_order_id = v_sale1;
+  select public.create_sale_return(v_sale1,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2, 'condition', 'resellable')),
+    'wrong colour') into v_ret_a;
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('only an admin may void a return', format('select public.void_sale_return(%L::uuid)', v_ret_a), 'Only an admin');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.void_sale_return(v_ret_a);
+  perform t_su();
+  select balance into v_bal from sales_orders where id = v_sale1;
+  perform t_rec('voiding restores the balance the return had paid down (150)', v_bal = 150, v_bal::text);
+  perform t_rec('voiding takes the resellable stock back off the shelf (25 = 30-5+2-2)',
+    (select qty_remaining = 25 from fg_batches where finished_good_id = v_item and origin = 'adjustment'));
+  perform t_rec('the line is returnable again after the void', (select qty_returned = 0 from sale_items where id = v_item1));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('a voided return cannot be voided twice',
+    format('select public.void_sale_return(%L::uuid)', v_ret_a), 'already voided');
+  perform t_su();
+
+  -- ---- B: voiding a return that paid out a cash refund removes that refund ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, null, 150, %L::jsonb)', t_items(v_item, 3, 50)) into v_sale2;
+  select id into v_item2 from sale_items where sales_order_id = v_sale2;
+  select public.create_sale_return(v_sale2,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item2, 'qty', 1, 'condition', 'resellable')),
+    'too many', 'cash', v_cash) into v_ret_b;
+  perform t_rec('(setup) the refund was recorded', exists (select 1 from sale_payments where sale_return_id = v_ret_b));
+  perform public.void_sale_return(v_ret_b);
+  perform t_su();
+  perform t_rec('voiding a cash-refunded return deletes that refund from the ledger',
+    not exists (select 1 from sale_payments where sale_return_id = v_ret_b));
+  perform t_rec('a fully-paid sale stays fully paid once the return that touched it is undone',
+    (select balance = 0 and payment_status = 'full' from sales_orders where id = v_sale2));
+
+  -- ---- C: voiding claws store credit back, unless it's already been spent ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(%L::uuid, current_date, null, 100, %L::jsonb)', v_cust, t_items(v_item, 2, 50)) into v_sale3;
+  select id into v_item3 from sale_items where sales_order_id = v_sale3;
+  select public.create_sale_return(v_sale3,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item3, 'qty', 1, 'condition', 'resellable')),
+    'store credit please', 'store_credit') into v_ret_c;
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('(setup) the customer holds the store credit', v_credit = 50, v_credit::text);
+  perform public.void_sale_return(v_ret_c);
+  perform t_su();
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('voiding a store-credit return claws the credit back (50 → 0)', v_credit = 0, v_credit::text);
+
+  -- Do the same return again, spend part of the credit, then the void is refused.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select public.create_sale_return(v_sale3,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item3, 'qty', 1, 'condition', 'resellable')),
+    'store credit again', 'store_credit') into v_ret_c2;
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_cust, t_items(v_item, 1, 50)) into v_sale4;
+  perform public.spend_store_credit(v_sale4, 30);
+  perform t_su();
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('(setup) only 20 of the 50 credit is left unspent', v_credit = 20, v_credit::text);
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('a return can''t be undone once its store credit has been spent',
+    format('select public.void_sale_return(%L::uuid)', v_ret_c2), 'already spent');
+  perform t_su();
+
+  -- ---- D: a return can't be undone once the stock it restored has moved on ----
+  declare v_item2fg uuid; v_sale5 uuid; v_ret_d uuid; v_item5 uuid; v_sale6 uuid;
+  begin
+    perform t_as('00000000-0000-0000-0000-000000000001');
+    insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (t_id('tenant'), 'Void Test Item 2', 'pcs', 5, 30, 1.5) returning id into v_item2fg;
+    perform public.adjust_stock(t_id('lagos'), 'finished_good', v_item2fg, 3, 10, 'Opening balance');
+    execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(v_item2fg, 2, 30)) into v_sale5;
+    select id into v_item5 from sale_items where sales_order_id = v_sale5;
+    select public.create_sale_return(v_sale5,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item5, 'qty', 1, 'condition', 'resellable')),
+      'changed mind') into v_ret_d;
+    -- 2 left on the shelf (1 never sold + 1 just returned) — sell both, so nothing is left to claw back.
+    execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(v_item2fg, 2, 30)) into v_sale6;
+    perform t_err('a return can''t be undone once that stock has been sold again',
+      format('select public.void_sale_return(%L::uuid)', v_ret_d), 'sold or moved elsewhere');
+    perform t_su();
+  end;
+end $$;
+
+-- ---------- 28. voiding a supplier return, and the cashier-return policy (0024) ----------
+do $$
+declare
+  v_po uuid; v_pi uuid; v_pret uuid; v_bal numeric;
+  v_sale uuid; v_item uuid; v_fg uuid;
+begin
+  -- ---- supplier return void: admin only, restores the batch and balance ----
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  select public.create_purchase(null, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 10, 'cost_price', 10))) into v_po;
+  select id into v_pi from purchase_items where purchase_order_id = v_po;
+  select public.create_purchase_return(v_po,
+    jsonb_build_array(jsonb_build_object('purchase_item_id', v_pi, 'qty', 3)), 'wrong grade') into v_pret;
+  perform t_err('a storekeeper cannot void a supplier return', format('select public.void_purchase_return(%L::uuid)', v_pret), 'Only an admin');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.void_purchase_return(v_pret);
+  perform t_su();
+  perform t_rec('voiding a supplier return puts the goods back (10, not 7)', (select qty_remaining = 10 from purchase_items where id = v_pi));
+  select balance into v_bal from purchase_orders where id = v_po;
+  perform t_rec('and restores what was owed (₦100)', v_bal = 100, v_bal::text);
+
+  -- ---- cashier-return policy is a per-business setting ----
+  -- The cashier works at Abuja; "Void Test Item" so far only exists at Lagos.
+  select id into v_fg from finished_goods where name = 'Void Test Item' and tenant_id = t_id('tenant');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_fg, 5, 20, 'Opening balance');
+  perform t_su();
+
+  update tenants set cashier_returns = 'none' where id = t_id('tenant');
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  execute format('select public.create_sale(null, current_date, null, 0, %L::jsonb)', t_items(v_fg, 1, 50)) into v_sale;
+  select id into v_item from sale_items where sales_order_id = v_sale;
+  perform t_err('policy ''none'' blocks a cashier from returning anything',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 1))::text),
+    'Cashiers cannot process returns');
+  perform t_su();
+
+  update tenants set cashier_returns = 'any' where id = t_id('tenant');
+  -- Backdated so it would fail under the default same-day rule.
+  update sales_orders set transaction_date = current_date - 5 where id = v_sale;
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_ok('policy ''any'' lets a cashier return an older sale',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 1))::text));
+  perform t_su();
+
+  update tenants set cashier_returns = 'same_day_own' where id = t_id('tenant');
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin
