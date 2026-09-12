@@ -324,16 +324,25 @@ begin
   perform t_rec('cashier dashboard: till figures, no profit, no expenses',
     v ? 'today_total' and not v ? 'gross_profit' and not v ? 'total_expenses', v::text);
   perform t_rec('cashier dashboard is about Abuja', v->>'branch_name' = 'Abuja', v->>'branch_name');
+  perform t_rec('cashier dashboard carries yesterday for a like-for-like comparison', v ? 'yesterday_total', v::text);
 
   perform t_as('00000000-0000-0000-0000-000000000003');
   v := public.dashboard_summary();
   perform t_rec('storekeeper dashboard: stock, no money',
     v ? 'out_of_stock_count' and not v ? 'total_sales' and not v ? 'today_total', v::text);
+  perform t_rec('storekeeper dashboard counts what their branch carries',
+    (v->>'stock_items')::int >= 1, v->>'stock_items');
+  perform t_rec('storekeeper movements name the item',
+    (select bool_and(e ? 'name' and e->>'name' is not null) from jsonb_array_elements(v->'recent_movements') e),
+    (v->'recent_movements')::text);
 
   perform t_as('00000000-0000-0000-0000-000000000001');
   v := public.dashboard_summary();
   perform t_rec('owner dashboard compares both branches',
     jsonb_array_length(v->'by_branch') = 2 and v ? 'gross_profit', (v->'by_branch')::text);
+  perform t_rec('owner dashboard has month-to-date figures and a like-for-like last month',
+    v ? 'month_sales' and v ? 'last_month_sales' and v ? 'month_profit' and v ? 'month_expenses'
+    and (v->>'month_sales')::numeric > 0, v::text);
   perform t_su();
 end $$;
 

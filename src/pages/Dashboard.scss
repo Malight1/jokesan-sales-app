@@ -1,49 +1,398 @@
 @use '../styles/variables' as *;
 @use '../styles/mixins' as *;
 
-.dashboard {
-  .dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+// Role dashboards. Flat: surfaces are separated by 1px lines, not shadows.
+// One accent ($primary). Semantic colour carries state only, and always sits
+// next to an icon or a word. Figures use tabular numerals so they align.
 
-    @media (max-width: 900px) { grid-template-columns: 1fr; }
+$db-line: $gray-200;
+// Text-weight versions of the semantic colours: the light-UI tokens are
+// tuned for fills and fall under 4.5:1 as small text on white.
+$ok-text: #15803d;
+$warn-text: #b45309;
+$bad-text: $danger;
+
+.db {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.db-num,
+.db-fig-value,
+.db-till-value,
+.db-table td,
+.db-health-legend strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// ---------- buttons (44px minimum; 52px on the till) ----------
+.db-btn {
+  @include btn-base;
+  min-height: 44px;
+  padding: 0 1.1rem;
+
+  &.db-btn-lg { min-height: 52px; padding: 0 1.4rem; font-size: $font-size-base; justify-content: flex-start; }
+  &.db-btn-sm { min-height: 36px; padding: 0 0.8rem; font-size: $font-size-xs; }
+
+  &.db-btn-primary {
+    background: $primary;
+    color: $white;
+    &:hover:not(:disabled) { background: $primary-dark; }
+  }
+  &.db-btn-secondary {
+    background: $white;
+    color: $gray-800;
+    border-color: $gray-300;
+    &:hover:not(:disabled) { background: $gray-50; border-color: $gray-400; }
+  }
+  &.db-btn-ondark {
+    background: transparent;
+    color: $white;
+    border-color: rgba(255, 255, 255, 0.3);
+    &:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
   }
 
-  .chart-card h3 { margin-bottom: 1rem; }
-
-  .dash-table {
-    @include table-style;
-    margin-top: 0.75rem;
-
-    .badge-success { @include badge($success-light, $success); }
-    .badge-warning { @include badge($warning-light, $warning); }
-    .badge-danger  { @include badge($danger-light, $danger); }
-  }
-
-  .alert-row {
-    @include flex(flex-start, flex-start, 0.5rem);
-    padding: 0.6rem 0.75rem;
-    border-radius: $border-radius;
-    background: $warning-light;
-    color: darken($warning, 10%);
-    margin-top: 0.5rem;
-    font-size: $font-size-sm;
-
-    svg { flex-shrink: 0; margin-top: 2px; }
-
-    div {
-      display: flex;
-      flex-direction: column;
-      gap: 0.1rem;
-      strong { font-weight: 600; }
-      span   { font-size: $font-size-xs; opacity: 0.8; }
-    }
-  }
-
-  .no-alerts {
-    font-size: $font-size-sm;
-    color: $gray-400;
-    margin-top: 0.5rem;
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    &:active { transform: none; }
   }
 }
+
+.db-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 32px;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $primary;
+  text-decoration: none;
+  white-space: nowrap;
+
+  &:hover { color: $primary-darker; text-decoration: underline; }
+  &:focus-visible { outline: none; box-shadow: $ring; border-radius: $radius-sm; }
+}
+
+// ---------- cashier: the till ----------
+.db-till {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 1.5rem;
+  padding: 1.75rem 2rem;
+  border-radius: $radius-lg;
+  background: $sidebar-bg;
+  color: $white;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    padding: 1.25rem;
+  }
+}
+.db-till-greet { margin: 0 0 1rem; font-size: $font-size-sm; color: $gray-400; }
+.db-till-label { margin: 0; font-size: $font-size-sm; font-weight: 600; color: $gray-300; }
+.db-till-value {
+  margin: 0.25rem 0 0.4rem;
+  font-size: clamp(2.25rem, 5vw, 3.25rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+.db-till-sub { margin: 0; font-size: $font-size-sm; color: $gray-300; }
+.db-till-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 230px;
+
+  @media (max-width: 768px) { min-width: 0; }
+}
+
+// ---------- page head (storekeeper, owner) ----------
+.db-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.db-head-title { margin: 0; font-size: $font-size-xl; font-weight: 700; letter-spacing: -0.01em; color: $gray-900; }
+.db-head-sub { margin: 0.15rem 0 0; font-size: $font-size-sm; color: $gray-500; }
+.db-head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+// ---------- figure strip: one ruled row instead of floating cards ----------
+.db-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid $db-line;
+  border-radius: $radius-lg;
+  background: $db-line;
+}
+.db-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 1rem 1.25rem;
+  background: $white;
+  color: inherit;
+  text-decoration: none;
+
+  &.bare { padding: 0; background: transparent; }
+  &.is-link {
+    transition: background-color 0.15s $ease;
+    &:hover { background: $gray-50; }
+    &:focus-visible { outline: none; box-shadow: inset 0 0 0 3px rgba(37, 99, 235, 0.28); }
+  }
+}
+.db-fig-label { font-size: $font-size-sm; font-weight: 500; color: $gray-600; }
+.db-fig-value {
+  font-size: $font-size-2xl;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: $gray-900;
+  &.warn { color: $warn-text; }
+}
+.db-fig-note { font-size: $font-size-xs; color: $gray-500; }
+
+.db-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-weight: 600;
+  &.up { color: $ok-text; }
+  &.down { color: $bad-text; }
+  &.flat { color: $gray-500; font-weight: 500; }
+}
+
+.db-aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: -0.25rem 0 0;
+  font-size: $font-size-sm;
+  color: $gray-600;
+
+  strong { color: $gray-900; }
+  .is-neg { color: $bad-text; }
+}
+.db-aside-sep { width: 1px; height: 14px; margin: 0 0.5rem; background: $gray-300; }
+
+// ---------- layout ----------
+.db-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 1rem;
+
+  &.db-grid-wide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+
+  @media (max-width: 1024px) {
+    &, &.db-grid-wide { grid-template-columns: 1fr; }
+  }
+}
+.db-stack { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+.db-panel {
+  min-width: 0;
+  padding: 1.1rem 1.25rem 1.25rem;
+  border: 1px solid $db-line;
+  border-radius: $radius-lg;
+  background: $white;
+}
+.db-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+
+  h3 { margin: 0; font-size: 0.95rem; font-weight: 700; color: $gray-900; }
+}
+.db-panel-sub { margin: 0.15rem 0 0; font-size: $font-size-xs; color: $gray-500; }
+
+.db-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding-top: 0.25rem;
+
+  @media (max-width: 480px) { grid-template-columns: 1fr; }
+}
+
+// ---------- lists: one divider style, between rows only ----------
+.db-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 0;
+  }
+  li + li { border-top: 1px solid $gray-100; }
+}
+.db-list-main { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.db-list-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $gray-900;
+  overflow-wrap: anywhere;
+}
+.db-list-meta { font-size: $font-size-xs; color: $gray-500; }
+.db-list-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.6rem;
+
+  .db-num { font-size: $font-size-sm; font-weight: 600; color: $gray-900; }
+  .is-out, .is-neg { color: $bad-text; }
+  .is-low { color: $warn-text; }
+  .is-pos { color: $ok-text; }
+}
+.db-flag {
+  display: inline-flex;
+  &.out { color: $bad-text; }
+  &.low { color: $warn-text; }
+}
+
+.db-status {
+  @include badge($gray-100, $gray-700);
+  &.paid { @include badge($success-light, $ok-text); }
+  &.part { @include badge($warning-light, $warn-text); }
+  &.unpaid { @include badge($danger-light, $bad-text); }
+}
+.db-muted { color: $gray-400; }
+
+// ---------- storekeeper: shelf health ----------
+.db-health {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid $db-line;
+  border-radius: $radius-lg;
+  background: $white;
+}
+// A composition bar (the three parts fill it), not a progress track.
+.db-health-bar {
+  display: flex;
+  gap: 3px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: $radius-full;
+
+  .seg { min-width: 6px; }
+  .seg.out { background: $danger; }
+  .seg.low { background: $warning; }
+  .seg.ok { background: $success; }
+}
+.db-health-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li { display: inline-flex; align-items: center; gap: 0.4rem; font-size: $font-size-sm; color: $gray-600; }
+  strong { font-size: $font-size-base; color: $gray-900; }
+  .out svg { color: $bad-text; }
+  .low svg { color: $warn-text; }
+  .ok svg { color: $ok-text; }
+}
+
+// ---------- owner: branch table ----------
+.db-table-wrap { overflow-x: auto; }
+.db-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: $font-size-sm;
+
+  th, td { padding: 0.65rem 0.75rem; text-align: left; white-space: nowrap; }
+  thead th { font-size: $font-size-xs; font-weight: 600; color: $gray-500; border-bottom: 1px solid $db-line; }
+  tbody tr + tr th,
+  tbody tr + tr td { border-top: 1px solid $gray-100; }
+  tbody th { font-weight: 600; color: $gray-900; }
+  .r { text-align: right; }
+  .is-neg { color: $bad-text; }
+}
+// Each branch's share of the month, as a bare bar (no background track).
+.db-share { display: flex; flex-direction: column; gap: 0.3rem; min-width: 140px; }
+.db-share-bar { display: block; height: 4px; border-radius: $radius-full; background: $primary; }
+
+// ---------- chart, empty, notice ----------
+.db-chart { margin-top: 0.25rem; }
+.db-empty { margin: 0.5rem 0 0; padding: 1.25rem 0; font-size: $font-size-sm; color: $gray-500; }
+
+.db-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid $primary-100;
+  border-radius: $radius-lg;
+  background: $primary-light;
+  color: $primary-darker;
+  font-size: $font-size-sm;
+
+  .db-btn { margin-left: auto; }
+}
+
+// ---------- skeleton ----------
+.db-skel { display: flex; flex-direction: column; gap: 1rem; }
+.db-skel-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: $radius-lg;
+  background: $gray-100;
+
+  @media (prefers-reduced-motion: no-preference) {
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+      animation: db-shimmer 1.4s ease-in-out infinite;
+    }
+  }
+}
+@keyframes db-shimmer { to { transform: translateX(100%); } }
+.db-skel-hero { height: 150px; }
+.db-skel-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; }
+.db-skel-fig { height: 84px; }
+.db-skel-grid {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 1rem;
+  @media (max-width: 1024px) { grid-template-columns: 1fr; }
+}
+.db-skel-panel { height: 260px; }

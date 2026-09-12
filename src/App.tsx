@@ -34,6 +34,12 @@ const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
+// Development-only design preview of the three role dashboards (sample
+// data, no sign-in). The constant condition is resolved at build time, so
+// the route and its chunk are dropped from production builds.
+const DashboardPreview = process.env.NODE_ENV === 'development'
+  ? lazy(() => import('./dev/DashboardPreview'))
+  : null;
 
 export default function App() {
   return (
@@ -44,6 +50,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
+            {DashboardPreview && <Route path="/__dev/dashboards" element={<DashboardPreview />} />}
             <Route
               path="/*"
               element={

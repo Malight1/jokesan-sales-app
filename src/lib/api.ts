@@ -349,6 +349,7 @@ export interface DashboardSummary {
   // cashier
   today_total?: number; today_count?: number;
   my_today_total?: number; my_today_count?: number; today_unpaid?: number;
+  yesterday_total?: number;
   my_recent?: { id: string; date: string; total: number; balance: number; status: string; customer: string }[];
   week_trend?: { day: string; total: number }[];
 
@@ -356,13 +357,16 @@ export interface DashboardSummary {
   out_of_stock_count?: number;
   production_this_month?: number; production_runs_this_month?: number;
   open_purchases?: number;
+  stock_items?: number;
   recent_production?: { id: string; date: string; product: string; qty: number }[];
-  recent_movements?: { id: number; type: string; qty: number; kind: string; at: string }[];
+  recent_movements?: { id: number; type: string; qty: number; kind: string; at: string; name?: string | null }[];
 
   // owner / accounts
   total_sales?: number; sales_count?: number; gross_profit?: number; outstanding?: number;
   total_purchases?: number; purchase_count?: number; creditors?: number;
   total_expenses?: number; expense_count?: number;
+  month_sales?: number; month_sales_count?: number; month_profit?: number; month_expenses?: number;
+  last_month_sales?: number; last_month_profit?: number;
   month_trend?: { month: string; label: string; total: number }[];
   recent_sales?: { id: string; date: string; total: number; status: string; customer: string; branch?: string }[];
   reminders?: { id: string; name: string; phone: string | null; balance: number; days: number }[];

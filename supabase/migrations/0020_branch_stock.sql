@@ -1392,6 +1392,9 @@ begin
       'today_unpaid', coalesce((
         select sum(balance) from sales_orders
          where tenant_id = v_tenant and branch_id = v_branch and not voided and transaction_date = v_today), 0),
+      'yesterday_total', coalesce((
+        select sum(total_amount) from sales_orders
+         where tenant_id = v_tenant and branch_id = v_branch and not voided and transaction_date = v_today - 1), 0),
       'my_recent', (
         select coalesce(jsonb_agg(x), '[]'::jsonb) from (
           select jsonb_build_object(
@@ -1419,6 +1422,8 @@ begin
     select v_common || jsonb_build_object(
       'out_of_stock_count', (
         select count(*) from public.stock_levels(v_branch) s where s.qty <= 0),
+      'stock_items', (
+        select count(*) from public.stock_levels(v_branch) s),
       'production_this_month', coalesce((
         select sum(qty_produced) from production_runs
          where tenant_id = v_tenant and branch_id = v_branch and not voided
@@ -1441,7 +1446,10 @@ begin
       'recent_movements', (
         select coalesce(jsonb_agg(x), '[]'::jsonb) from (
           select jsonb_build_object('id', sm.id, 'type', sm.movement_type,
-                                    'qty', sm.quantity, 'kind', sm.product_kind, 'at', sm.created_at) as x
+                                    'qty', sm.quantity, 'kind', sm.product_kind, 'at', sm.created_at,
+                                    'name', coalesce(
+                                      (select m.name from materials m where m.id = sm.product_id),
+                                      (select g.name from finished_goods g where g.id = sm.product_id))) as x
             from stock_movements sm
            where sm.tenant_id = v_tenant and sm.branch_id = v_branch
            order by sm.created_at desc limit 8) s)
@@ -1459,6 +1467,20 @@ begin
       'creditors',       coalesce((select sum(balance)      from purchase_orders where tenant_id = v_tenant and not voided), 0),
       'total_expenses',  coalesce((select sum(amount)       from expenses        where tenant_id = v_tenant), 0),
       'expense_count',   (select count(*)                   from expenses        where tenant_id = v_tenant),
+      'month_sales',       coalesce((select sum(total_amount) from sales_orders where tenant_id = v_tenant and not voided
+                                      and transaction_date >= date_trunc('month', v_today)), 0),
+      'month_sales_count', (select count(*) from sales_orders where tenant_id = v_tenant and not voided
+                                      and transaction_date >= date_trunc('month', v_today)),
+      'month_profit',      coalesce((select sum(gross_profit) from sales_orders where tenant_id = v_tenant and not voided
+                                      and transaction_date >= date_trunc('month', v_today)), 0),
+      'month_expenses',    coalesce((select sum(amount) from expenses where tenant_id = v_tenant
+                                      and expense_date >= date_trunc('month', v_today)), 0),
+      'last_month_sales',  coalesce((select sum(total_amount) from sales_orders where tenant_id = v_tenant and not voided
+                                      and transaction_date >= date_trunc('month', v_today) - interval '1 month'
+                                      and transaction_date <= (v_today - interval '1 month')::date), 0),
+      'last_month_profit', coalesce((select sum(gross_profit) from sales_orders where tenant_id = v_tenant and not voided
+                                      and transaction_date >= date_trunc('month', v_today) - interval '1 month'
+                                      and transaction_date <= (v_today - interval '1 month')::date), 0),
       'month_trend', (
         select coalesce(jsonb_agg(x order by x->>'month'), '[]'::jsonb) from (
           select jsonb_build_object(
