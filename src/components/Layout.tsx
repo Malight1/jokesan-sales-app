@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers
 } from 'lucide-react';
 import { stock, branches as branchesApi, platform, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
@@ -38,6 +38,7 @@ const navItems = [
     items: [
       { to: '/production', label: 'Production', icon: FlaskConical },
       { to: '/finished-goods', label: 'Finished Goods', icon: Package },
+      { to: '/batches', label: 'Batches', icon: Layers },
       { to: '/transfers', label: 'Stock Transfers', icon: Repeat },
     ],
   },
@@ -85,6 +86,7 @@ const pageTitles: Record<string, string> = {
   '/customers': 'Customers',
   '/production': 'Production',
   '/finished-goods': 'Finished Goods',
+  '/batches': 'Batches',
   '/transfers': 'Stock Transfers',
   '/purchases': 'Purchases',
   '/inventory': 'Raw Materials',

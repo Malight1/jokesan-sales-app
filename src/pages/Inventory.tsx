@@ -13,6 +13,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
+import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
 
 // Opening stock is no longer typed into the item itself. It goes through
@@ -22,12 +23,16 @@ import Modal from '../components/Modal';
 const emptyForm = {
   name: '', unit: '', type_of_material: 'Raw Material', min_stock_level: 10, barcode: '',
   openingQty: 0, openingCost: 0,
+  // Batch and expiry (migration 0022): records the supplier's batch and
+  // expiry on each purchase, and picks earliest-expiry-first in production.
+  track_batches: false,
 };
 
 export default function Inventory() {
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const tracking = hasFeature(tenant?.plan, 'batch_tracking');
   const { multi, myBranchId, myBranchName } = useBranches();
   const { data: rows, loading, error, refetch } = useQuery<Material[]>(() => materialsApi.list(), []);
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(null), []);
@@ -58,16 +63,24 @@ export default function Inventory() {
     setForm({
       name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material,
       min_stock_level: m.min_stock_level, barcode: m.barcode ?? '', openingQty: 0, openingCost: 0,
+      track_batches: !!m.track_batches,
     });
     setShowModal(true);
   };
 
   const reload = () => { refetch(); levelsQ.refetch(); };
 
+  // The track_batches column exists once migration 0022 has run; until
+  // then, don't send it (Postgres would reject the whole save).
+  const schemaHasBatches = (rows ?? []).some(r => 'track_batches' in r);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { openingQty, openingCost, barcode, ...editable } = form;
-    const payload = { ...editable, barcode: barcode.trim() || null };
+    const { openingQty, openingCost, barcode, track_batches, ...editable } = form;
+    const payload = {
+      ...editable, barcode: barcode.trim() || null,
+      ...(schemaHasBatches || track_batches ? { track_batches } : {}),
+    };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (!res) {
       toast.error((editRow ? updateMut.error : createMut.error) ?? 'Something went wrong.');
@@ -249,6 +262,21 @@ export default function Inventory() {
                     <button type="button" className="btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, barcode: generateBarcode() }))} title="Generate a code"><Wand2 size={14} /></button>
                   </div>
                 </div>
+
+                <hr className="divider" />
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: tracking || form.track_batches ? 'pointer' : 'not-allowed' }}>
+                  <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={form.track_batches}
+                         disabled={!tracking && !form.track_batches}
+                         onChange={e => setForm(f => ({ ...f, track_batches: e.target.checked }))} />
+                  <span>
+                    Track supplier batch numbers and expiry
+                    <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>
+                      {tracking
+                        ? 'Purchases of this material ask for a batch number and expiry date, and production uses the earliest-expiry batch first.'
+                        : `Batch and expiry tracking is on the ${planFor('batch_tracking')} plan and above.`}
+                    </small>
+                  </span>
+                </label>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -268,6 +296,7 @@ export default function Inventory() {
           unit={adjustRow.unit}
           qtyAt={multi ? qtyAt(adjustRow.id) : () => adjustRow.qty_balance}
           canChooseBranch={isAdmin}
+          tracksBatches={!!adjustRow.track_batches}
           onClose={() => setAdjustRow(null)}
           onDone={() => { setAdjustRow(null); reload(); }}
         />

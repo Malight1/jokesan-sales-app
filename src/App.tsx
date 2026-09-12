@@ -34,6 +34,7 @@ const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
+const Batches = lazy(() => import('./pages/Batches'));
 // Development-only design preview of the three role dashboards (sample
 // data, no sign-in). The constant condition is resolved at build time, so
 // the route and its chunk are dropped from production builds.
@@ -78,6 +79,7 @@ export default function App() {
                         <Route path="/platform" element={<SuperAdmin />} />
                         <Route path="/match-payment" element={<MatchPayment />} />
                         <Route path="/transfers" element={<Transfers />} />
+                        <Route path="/batches" element={<Batches />} />
                         <Route path="/profile" element={<Profile />} />
                         <Route path="/settings" element={<Settings />} />
                       </Routes>

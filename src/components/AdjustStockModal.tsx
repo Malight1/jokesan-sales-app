@@ -6,6 +6,7 @@ import { stock } from '../lib/api';
 import { useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useBranches } from '../lib/useBranches';
+import { addDays } from '../lib/batches';
 
 interface Props {
   kind: 'material' | 'finished_good';
@@ -16,6 +17,10 @@ interface Props {
   qtyAt: (branchId: string) => number;
   /** Admins in a multi-branch company may adjust any branch. */
   canChooseBranch?: boolean;
+  /** The item tracks batches: ask for batch number and dates when adding. */
+  tracksBatches?: boolean;
+  /** Product shelf life, to fill the expiry from the manufacture date. */
+  shelfLifeDays?: number | null;
   onClose: () => void;
   onDone: () => void;
 }
@@ -27,7 +32,7 @@ const REMOVE_REASONS = ['Damaged', 'Expired', 'Missing in stock count', 'Used in
 // one door for everything that isn't a purchase, production run, sale or
 // transfer: opening balances, and whatever a physical count turns up.
 export default function AdjustStockModal({
-  kind, productId, productName, unit, qtyAt, canChooseBranch, onClose, onDone,
+  kind, productId, productName, unit, qtyAt, canChooseBranch, tracksBatches, shelfLifeDays, onClose, onDone,
 }: Props) {
   const toast = useToast();
   const { multi, active, myBranchId, nameOf } = useBranches();
@@ -39,23 +44,33 @@ export default function AdjustStockModal({
   const [unitCost, setUnitCost] = useState<number | ''>('');
   const [reason, setReason] = useState(ADD_REASONS[0]);
   const [note, setNote] = useState('');
+  const [batchNo, setBatchNo] = useState('');
+  const [mfg, setMfg] = useState('');
+  const [expiry, setExpiry] = useState('');
 
   const effectiveBranch = branchId || myBranchId || '';
   const now = effectiveBranch ? qtyAt(effectiveBranch) : 0;
   const after = direction === 'add' ? now + qty : now - qty;
   const reasons = direction === 'add' ? ADD_REASONS : REMOVE_REASONS;
   const u = unit ? ` ${unit}` : '';
+  const askBatch = tracksBatches && direction === 'add';
 
   const problem = useMemo(() => {
     if (!qty || qty <= 0) return 'Enter a quantity above zero.';
     if (direction === 'remove' && qty > now) return `Only ${now.toLocaleString()}${u} here to remove.`;
     if (reason === 'Other' && !note.trim()) return 'Say briefly what happened.';
+    if (askBatch && mfg && expiry && expiry <= mfg) return 'The expiry date must be after the manufacture date.';
     return null;
-  }, [qty, direction, now, u, reason, note]);
+  }, [qty, direction, now, u, reason, note, askBatch, mfg, expiry]);
 
   const switchDirection = (d: 'add' | 'remove') => {
     setDirection(d);
     setReason((d === 'add' ? ADD_REASONS : REMOVE_REASONS)[0]);
+  };
+
+  const onMfg = (v: string) => {
+    setMfg(v);
+    if (v && shelfLifeDays && !expiry) setExpiry(addDays(v, shelfLifeDays));
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -68,6 +83,11 @@ export default function AdjustStockModal({
       qtyDelta: direction === 'add' ? qty : -qty,
       unitCost: direction === 'add' && unitCost !== '' ? Number(unitCost) : null,
       reason: note.trim() ? `${reason} — ${note.trim()}` : reason,
+      ...(askBatch ? {
+        batchNo: batchNo.trim() || null,
+        mfg: kind === 'finished_good' ? mfg || null : null,
+        expiry: expiry || null,
+      } : {}),
     });
     if (res !== null) {
       toast.success(`${productName}: ${direction === 'add' ? 'added' : 'removed'} ${qty.toLocaleString()}${u}${multi ? ` at ${nameOf(effectiveBranch)}` : ''}.`);
@@ -130,6 +150,33 @@ export default function AdjustStockModal({
                 profit on these units will be worked out from.
               </small>
             </div>
+          )}
+
+          {askBatch && (
+            <>
+              <div className="form-group">
+                <label>{kind === 'material' ? "Supplier's batch number" : 'Batch number'} (as printed on the pack)</label>
+                <input value={batchNo} onChange={e => setBatchNo(e.target.value)} placeholder="Optional" maxLength={40} />
+              </div>
+              <div className="grid-2">
+                {kind === 'finished_good' && (
+                  <div className="form-group">
+                    <label>Made on</label>
+                    <input type="date" value={mfg} onChange={e => onMfg(e.target.value)} />
+                  </div>
+                )}
+                <div className="form-group">
+                  <label>Expires on</label>
+                  <input type="date" value={expiry} onChange={e => setExpiry(e.target.value)} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {direction === 'remove' && tracksBatches && (
+            <small style={{ display: 'block', color: '#64748b', fontSize: '0.78rem', marginBottom: '0.75rem' }}>
+              This takes stock from the oldest batches first. To write off one particular batch, use Batches.
+            </small>
           )}
 
           <div className="form-group">

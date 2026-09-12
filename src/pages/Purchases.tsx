@@ -18,7 +18,8 @@ const statusMap: Record<string, { label: string; cls: string }> = {
   unpaid: { label: 'Unpaid', cls: 'badge-danger' },
 };
 
-interface LineItem { material_id: string; qty: number; cost_price: number; }
+// Supplier batch and expiry only show for materials that track them (0022).
+interface LineItem { material_id: string; qty: number; cost_price: number; supplier_batch_no: string; expiry_date: string; }
 
 export default function Purchases() {
   const toast = useToast();
@@ -46,7 +47,8 @@ export default function Purchases() {
   const [payAmount, setPayAmount] = useState(0);
   const [payType, setPayType] = useState('');
 
-  const blankItem = (): LineItem => ({ material_id: '', qty: 1, cost_price: 0 });
+  const blankItem = (): LineItem => ({ material_id: '', qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
+  const tracksBatches = (materialId: string) => !!materials?.find(m => m.id === materialId)?.track_batches;
   const [form, setForm] = useState({
     supplierId: '', date: new Date().toISOString().split('T')[0], paymentTypeId: '', amountPaid: 0,
     items: [blankItem()],
@@ -79,7 +81,11 @@ export default function Purchases() {
       date: form.date,
       paymentTypeId: form.paymentTypeId || null,
       amountPaid: Number(form.amountPaid) || 0,
-      items: validItems.map(i => ({ material_id: i.material_id, qty: Number(i.qty), cost_price: Number(i.cost_price) })),
+      items: validItems.map(i => ({
+        material_id: i.material_id, qty: Number(i.qty), cost_price: Number(i.cost_price),
+        ...(i.supplier_batch_no.trim() ? { supplier_batch_no: i.supplier_batch_no.trim() } : {}),
+        ...(i.expiry_date ? { expiry_date: i.expiry_date } : {}),
+      })),
     });
     if (res) {
       toast.success('Purchase recorded — material stock updated.');
@@ -193,24 +199,39 @@ export default function Purchases() {
 
                 <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>Items</p>
                 {form.items.map((item, idx) => (
-                  <div key={idx} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr auto', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
-                    <div className="form-group">
-                      <label>Material</label>
-                      <select value={item.material_id} onChange={e => updateItem(idx, 'material_id', e.target.value)}>
-                        <option value="">— select —</option>
-                        {materials?.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ` (${m.unit})` : ''}</option>)}
-                      </select>
+                  <div key={idx}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr auto', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
+                      <div className="form-group">
+                        <label>Material</label>
+                        <select value={item.material_id} onChange={e => updateItem(idx, 'material_id', e.target.value)}>
+                          <option value="">— select —</option>
+                          {materials?.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ` (${m.unit})` : ''}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>Qty</label>
+                        <NumberInput value={item.qty} onChange={v => updateItem(idx, 'qty', v)} />
+                      </div>
+                      <div className="form-group">
+                        <label>Unit Cost (₦)</label>
+                        <NumberInput value={item.cost_price} onChange={v => updateItem(idx, 'cost_price', v)} />
+                      </div>
+                      {form.items.length > 1 && (
+                        <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }}><X size={14} /></button>
+                      )}
                     </div>
-                    <div className="form-group">
-                      <label>Qty</label>
-                      <NumberInput value={item.qty} onChange={v => updateItem(idx, 'qty', v)} />
-                    </div>
-                    <div className="form-group">
-                      <label>Unit Cost (₦)</label>
-                      <NumberInput value={item.cost_price} onChange={v => updateItem(idx, 'cost_price', v)} />
-                    </div>
-                    {form.items.length > 1 && (
-                      <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }}><X size={14} /></button>
+                    {tracksBatches(item.material_id) && (
+                      <div className="grid-2" style={{ marginTop: '-0.35rem', marginBottom: '0.5rem' }}>
+                        <div className="form-group">
+                          <label>Supplier's batch no.</label>
+                          <input value={item.supplier_batch_no} maxLength={40} placeholder="As printed on the bag or drum"
+                                 onChange={e => updateItem(idx, 'supplier_batch_no', e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Expires on</label>
+                          <input type="date" value={item.expiry_date} onChange={e => updateItem(idx, 'expiry_date', e.target.value)} />
+                        </div>
+                      </div>
                     )}
                   </div>
                 ))}

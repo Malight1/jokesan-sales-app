@@ -31,6 +31,9 @@ export interface Tenant {
   // Set false by the platform owner's suspend button. Was never selected,
   // so the app could not tell a suspended tenant from a live one.
   is_active: boolean;
+  // Batch/expiry settings (migration 0022). Optional until it has run.
+  expiry_warning_days?: number;
+  allow_expired_sale?: boolean;
 }
 
 interface AuthState {
@@ -72,7 +75,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (prof?.tenant_id) {
       const { data: ten } = await supabase
         .from('tenants')
-        .select('id, name, type, plan, currency, logo_url, vat_enabled, vat_rate, tin, trial_ends_at, plan_expires_at, is_active')
+        // '*' rather than a column list: a listed column that a not-yet-run
+        // migration adds would fail the whole query and sign everyone out.
+        .select('*')
         .eq('id', prof.tenant_id)
         .single();
       setTenant(ten as Tenant | null);

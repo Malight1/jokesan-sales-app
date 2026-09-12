@@ -1,10 +1,12 @@
 import React from 'react';
 import { X, RefreshCcw, Trash2, CloudOff, CheckCircle2 } from 'lucide-react';
-import { QueuedSale, removeFromQueue, flushQueue } from '../lib/offlineQueue';
+import { QueuedItem, removeFromQueue, flushQueue } from '../lib/offlineQueue';
 import { useToast } from '../lib/ToastContext';
 import Modal from './Modal';
 
-export default function PendingSyncPanel({ queue, online, onClose }: { queue: QueuedSale[]; online: boolean; onClose: () => void }) {
+const items = (n: number) => `${n} item${n !== 1 ? 's' : ''}`;
+
+export default function PendingSyncPanel({ queue, online, onClose }: { queue: QueuedItem[]; online: boolean; onClose: () => void }) {
   const toast = useToast();
   const [syncing, setSyncing] = React.useState(false);
 
@@ -13,14 +15,14 @@ export default function PendingSyncPanel({ queue, online, onClose }: { queue: Qu
     setSyncing(true);
     const { synced, failed } = await flushQueue();
     setSyncing(false);
-    if (synced > 0) toast.success(`${synced} sale${synced !== 1 ? 's' : ''} synced.`);
-    if (failed > 0) toast.error(`${failed} sale${failed !== 1 ? 's' : ''} failed — review below.`);
+    if (synced > 0) toast.success(`${items(synced)} synced.`);
+    if (failed > 0) toast.error(`${items(failed)} failed — review below.`);
     if (synced === 0 && failed === 0) toast.info('Nothing to sync.');
   };
 
   const discard = (id: string) => {
     removeFromQueue(id);
-    toast.success('Discarded — this sale will not be recorded.');
+    toast.success('Discarded — this will not be recorded.');
   };
 
   return (
@@ -34,7 +36,7 @@ export default function PendingSyncPanel({ queue, online, onClose }: { queue: Qu
         <div className="modal-body">
           {!online && (
             <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
-              You're offline. These sales are saved on this device and will sync automatically once you're back online.
+              You're offline. These sales and payments are saved on this device and will sync automatically once you're back online.
             </div>
           )}
           {queue.length === 0 ? (

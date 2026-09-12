@@ -424,6 +424,259 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 21. invoice numbers (0021) ----------
+do $$
+declare v_a uuid; v_b uuid; v_c uuid; v_na text; v_nb text; v_nc text; v_n int; v_d int;
+begin
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(t_id('soap'), 1, 60)) into v_a;
+  execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(t_id('soap'), 1, 60)) into v_b;
+  perform t_err('(setup) an oversold sale fails',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb)', t_items(t_id('soap'), 9999, 60)), 'Only');
+  execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(t_id('soap'), 1, 60)) into v_c;
+  perform t_su();
+  select doc_no into v_na from sales_orders where id = v_a;
+  select doc_no into v_nb from sales_orders where id = v_b;
+  select doc_no into v_nc from sales_orders where id = v_c;
+
+  perform t_rec('every sale gets a server-issued invoice number (INV-000123)', v_na ~ '^INV-[0-9]{6}$', v_na);
+  perform t_rec('invoice numbers run in sequence', right(v_nb, 6)::int = right(v_na, 6)::int + 1, v_na || ' → ' || v_nb);
+  perform t_rec('a sale that fails gives its number back (no gap)', right(v_nc, 6)::int = right(v_nb, 6)::int + 1, v_nb || ' → ' || v_nc);
+  select count(*), count(distinct doc_no) into v_n, v_d from sales_orders where tenant_id = t_id('tenant');
+  perform t_rec('no two sales in a company share a number', v_n = v_d and v_n > 0, format('%s sales, %s numbers', v_n, v_d));
+  perform t_rec('each company has its own sequence (legacy company starts at INV-000001)',
+    exists (select 1 from sales_orders so join profiles p on p.tenant_id = so.tenant_id
+             where p.id = '00000000-0000-0000-0000-00000000000a' and so.doc_no = 'INV-000001'));
+  perform t_err('an issued invoice number can''t be changed, even from the SQL editor',
+    format('update sales_orders set doc_no = %L where id = %L::uuid', 'INV-999999', v_a), 'can''t be changed');
+  perform t_rec('voiding a sale leaves an audit entry',
+    exists (select 1 from audit_logs where action = 'void' and entity = 'sales_orders' and entity_id = t_id('abuja_sale')::text));
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('cashier cannot rebrand invoice numbers', $q$select public.set_doc_prefix('INV', 'X-')$q$, 'Only an admin');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('owner brands invoice numbers JKS-INV-', $q$select public.set_doc_prefix('INV', 'JKS-INV-')$q$);
+  execute format('select public.create_sale(null, current_date, null, 60, %L::jsonb)', t_items(t_id('soap'), 1, 60)) into v_a;
+  perform t_su();
+  select doc_no into v_na from sales_orders where id = v_a;
+  perform t_rec('the new prefix applies to the next invoice and the count carries on',
+    v_na like 'JKS-INV-%' and right(v_na, 6)::int = right(v_nc, 6)::int + 1, v_na);
+end $$;
+
+-- ---------- 22. plan gating (0021) ----------
+do $$
+begin
+  update tenants set plan = 'starter' where id = t_id('tenant');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('Starter plan cannot switch on expiry tracking',
+    format('update finished_goods set track_batches = true where id = %L::uuid', t_id('soap')), 'Growth plan');
+  perform t_err('Starter plan cannot switch on earliest-expiry-first',
+    format('update finished_goods set pick_rule = %L where id = %L::uuid', 'fefo', t_id('soap')), 'Growth plan');
+  perform t_ok('Starter plan can still edit the product itself',
+    format('update finished_goods set nafdac_no = %L where id = %L::uuid', 'A1-0000', t_id('soap')));
+  perform t_su();
+  update tenants set plan = 'growth' where id = t_id('tenant');
+end $$;
+
+-- ---------- 23. batch numbers and expiry (0022) ----------
+do $$
+declare
+  v_mats text := jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 5))::text;
+  v_run uuid; v_a text; v_sale uuid; v_q numeric; v_s numeric; v_n int; v_tr jsonb; v_ov jsonb;
+begin
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('owner switches on expiry tracking and earliest-expiry-first for soap',
+    format('update finished_goods set track_batches = true, shelf_life_days = 365, pick_rule = %L, nafdac_no = %L where id = %L::uuid',
+      'fefo', 'A1-1234', t_id('soap')));
+
+  -- Storekeeper makes two batches at Lagos: one auto-numbered, one typed in
+  -- with an earlier expiry.
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  execute format('select public.record_production(%L::uuid, current_date, 0, 10, %L::jsonb)', t_id('soap'), v_mats) into v_run;
+  perform t_ok('storekeeper records a batch with its own number and dates',
+    format('select public.record_production(%L::uuid, current_date, 0, 10, %L::jsonb, null, %L, current_date - 10, current_date + 30)',
+      t_id('soap'), v_mats, 'B-OLD'));
+  perform t_err('a batch number can''t be used twice for the same product',
+    format('select public.record_production(%L::uuid, current_date, 0, 1, %L::jsonb, null, %L)', t_id('soap'), v_mats, 'b-old'),
+    'already used');
+  perform t_err('expiry before manufacture is refused',
+    format('select public.record_production(%L::uuid, current_date, 0, 1, %L::jsonb, null, %L, current_date, current_date - 1)',
+      t_id('soap'), v_mats, 'B-X'), 'after the manufacture date');
+  perform t_err('a manufacture date in the future is refused',
+    format('select public.record_production(%L::uuid, current_date, 0, 1, %L::jsonb, null, %L, current_date + 5)',
+      t_id('soap'), v_mats, 'B-Y'), 'future');
+  perform t_su();
+  update finished_goods set shelf_life_days = null where id = t_id('soap');
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('a tracked product with no shelf life needs an expiry date',
+    format('select public.record_production(%L::uuid, current_date, 0, 1, %L::jsonb, null, %L)', t_id('soap'), v_mats, 'B-Z'),
+    'Enter an expiry date');
+  perform t_su();
+  update finished_goods set shelf_life_days = 365 where id = t_id('soap');
+
+  select batch_no into v_a from fg_batches where production_run_id = v_run;
+  perform t_put('batch_a', (select id from fg_batches where production_run_id = v_run));
+  perform t_put('batch_b', (select id from fg_batches where batch_no = 'B-OLD'));
+  -- Section 3's run was the first soap batch today (-01); this is the second.
+  perform t_rec('auto batch numbers are PREFIX-YYMMDD-NN and count up through the day (-01, -02)',
+    v_a = 'JOKE-' || to_char(current_date, 'YYMMDD') || '-02'
+    and exists (select 1 from fg_batches where batch_no = 'JOKE-' || to_char(current_date, 'YYMMDD') || '-01'), v_a);
+  perform t_rec('auto expiry = manufacture date + shelf life (365 days)',
+    (select expiry_date = current_date + 365 and mfg_date = current_date from fg_batches where production_run_id = v_run));
+  perform t_rec('the production run carries its batch number',
+    (select batch_no = v_a from production_runs where id = v_run));
+
+  -- FEFO: B-OLD (expires in 30 days) goes before the auto batch and the
+  -- older un-dated stock.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, null, 0, %L::jsonb, 0, %L::uuid)',
+    t_items(t_id('soap'), 5, 60), t_id('lagos')) into v_sale;
+  perform t_put('fefo_sale', v_sale);
+  perform t_su();
+  perform t_rec('earliest expiry first: the sale drew from B-OLD, not the oldest stock',
+    (select bool_and(fb.batch_no = 'B-OLD') from sales_consumption sc
+       join sale_items si on si.id = sc.sale_item_id join fg_batches fb on fb.id = sc.fg_batch_id
+      where si.sales_order_id = v_sale));
+
+  -- B-OLD now expires.
+  update fg_batches set expiry_date = current_date - 1 where id = t_id('batch_b');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, null, 0, %L::jsonb, 0, %L::uuid)',
+    t_items(t_id('soap'), 3, 60), t_id('lagos')) into v_sale;
+  perform t_su();
+  perform t_rec('expired stock is skipped: the next sale drew from the next batch',
+    (select bool_and(fb.batch_no = v_a) from sales_consumption sc
+       join sale_items si on si.id = sc.sale_item_id join fg_batches fb on fb.id = sc.fg_batch_id
+      where si.sales_order_id = v_sale));
+
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  select qty, sellable_qty into v_q, v_s from public.stock_levels(t_id('lagos')) where product_id = t_id('soap');
+  perform t_rec('stock levels separate what is on the shelf from what can be sold (5 expired)',
+    v_q - v_s = 5, format('qty=%s sellable=%s', v_q, v_s));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('overselling says how much is blocked by expiry',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb, 0, %L::uuid)',
+      t_items(t_id('soap'), v_s + 2, 60), t_id('lagos')), 'expired, recalled or on hold');
+  perform t_err('an expired batch cannot be sold even when picked by hand',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb, 0, %L::uuid)',
+      jsonb_build_array(jsonb_build_object('finished_good_id', t_id('soap'), 'quantity', 1, 'unit_price', 60,
+        'fg_batch_id', t_id('batch_b')))::text, t_id('lagos')), 'expired on');
+  perform t_su();
+  update tenants set allow_expired_sale = true where id = t_id('tenant');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('a company that allows it can sell an expired batch by hand',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb, 0, %L::uuid)',
+      jsonb_build_array(jsonb_build_object('finished_good_id', t_id('soap'), 'quantity', 1, 'unit_price', 60,
+        'fg_batch_id', t_id('batch_b')))::text, t_id('lagos')));
+  perform t_su();
+  update tenants set allow_expired_sale = false where id = t_id('tenant');
+  perform t_rec('the hand-picked sale came out of that batch (5 → 4)',
+    (select qty_remaining = 4 from fg_batches where id = t_id('batch_b')));
+
+  -- Moving one batch to Abuja keeps its number and dates.
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_ok('storekeeper sends 2 of the auto batch to Abuja',
+    format('select public.transfer_stock(%L::uuid, %L::uuid, %L, %L::uuid, 2, %L, %L::uuid)',
+      t_id('lagos'), t_id('abuja'), 'finished_good', t_id('soap'), 'batch move', t_id('batch_a')));
+  select sellable_qty into v_s from public.stock_levels(t_id('lagos')) where product_id = t_id('soap');
+  perform t_err('a plain transfer won''t ship expired stock',
+    format('select public.transfer_stock(%L::uuid, %L::uuid, %L, %L::uuid, %s)',
+      t_id('lagos'), t_id('abuja'), 'finished_good', t_id('soap'), v_s + 1), 'expired, recalled or on hold');
+  perform t_su();
+  perform t_put('batch_a_abuja', (select id from fg_batches where branch_id = t_id('abuja') and batch_no = v_a));
+  perform t_rec('the batch arrives at Abuja with the same number and expiry',
+    (select qty = 2 and origin = 'transfer' and expiry_date = current_date + 365 from fg_batches where id = t_id('batch_a_abuja')));
+
+  -- Recall.
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('storekeeper cannot recall a batch',
+    format('select public.set_batch_status(%L::uuid, %L, %L, %L)', t_id('soap'), v_a, 'recalled', 'x'), 'Only an admin');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('a recall needs a reason',
+    format('select public.set_batch_status(%L::uuid, %L, %L)', t_id('soap'), v_a, 'recalled'), 'reason');
+  execute format('select public.set_batch_status(%L::uuid, %L, %L, %L)', t_id('soap'), v_a, 'recalled', 'Customer complaint')
+    into v_n;
+  perform t_su();
+  perform t_rec('a recall reaches every branch the batch went to (2 layers)', v_n = 2, v_n::text);
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('Abuja cashier cannot sell the recalled batch',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb)',
+      jsonb_build_array(jsonb_build_object('finished_good_id', t_id('soap'), 'quantity', 1, 'unit_price', 60,
+        'fg_batch_id', t_id('batch_a_abuja')))::text), 'recalled');
+  perform t_su();
+  perform t_rec('the recall is in the audit log',
+    exists (select 1 from audit_logs where action = 'batch_recalled' and entity_id = v_a));
+
+  -- Trace.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_tr := public.batch_trace(t_id('soap'), v_a);
+  perform t_rec('trace: shows the caustic soda that went into the batch',
+    v_tr->'sources' @> '[{"material":"Caustic Soda"}]', (v_tr->'sources')::text);
+  perform t_rec('trace: shows who got it (3 units, walk-in) and where the rest is (2 branches)',
+    (v_tr->>'sold_qty')::numeric = 3 and v_tr->'sales'->0->>'customer' = 'Walk-in'
+    and jsonb_array_length(v_tr->'stock') = 2 and v_tr->>'status' = 'recalled', v_tr::text);
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  v_tr := public.batch_trace(t_id('soap'), v_a);
+  perform t_rec('storekeeper''s trace leaves out customer names and phones',
+    not (v_tr->>'shows_customers')::boolean and v_tr->'sales'->0->'customer' = 'null'::jsonb, v_tr::text);
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('cashier cannot trace a batch',
+    format('select public.batch_trace(%L::uuid, %L)', t_id('soap'), v_a), 'Only admin');
+
+  -- What's expiring.
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  v_ov := public.expiry_overview();
+  perform t_rec('storekeeper sees the expired batch and the recalled one at Lagos, without money',
+    (v_ov->>'expired_count')::int >= 1 and (v_ov->>'on_hold_count')::int >= 1
+    and v_ov->'expired_value' = 'null'::jsonb
+    and exists (select 1 from jsonb_array_elements(v_ov->'items') i where i->>'batch_no' = 'B-OLD'), v_ov::text);
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_ov := public.expiry_overview();
+  perform t_rec('bookkeeper sees the money tied up in expired stock', (v_ov->>'expired_value')::numeric > 0, v_ov::text);
+
+  -- Voids go back to the exact batch; write-offs empty exactly one batch.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.void_sale(t_id('fefo_sale'));
+  perform t_su();
+  perform t_rec('voiding the earlier sale puts its 5 back into B-OLD (4 → 9)',
+    (select qty_remaining = 9 from fg_batches where id = t_id('batch_b')));
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('storekeeper cannot write off a batch sitting at another branch',
+    format('select public.write_off_batch(%L, %L::uuid, %L)', 'finished_good', t_id('batch_a_abuja'), 'Recalled'), 'own branch');
+  perform t_ok('storekeeper writes off the expired batch in one go',
+    format('select public.write_off_batch(%L, %L::uuid)', 'finished_good', t_id('batch_b')));
+  perform t_su();
+  perform t_rec('the write-off emptied that batch and left the others alone',
+    (select qty_remaining = 0 from fg_batches where id = t_id('batch_b'))
+    and (select qty_remaining = 5 from fg_batches where id = t_id('batch_a')));
+  perform t_rec('the write-off is recorded against the batch with its FIFO cost (9 × ₦25)',
+    exists (select 1 from stock_adjustments where batch_id = t_id('batch_b') and qty_delta = -9 and total_cost = 225));
+  perform t_rec('the write-off is in the audit log',
+    exists (select 1 from audit_logs where action = 'write_off' and entity_id = t_id('batch_b')::text));
+
+  -- Suppliers' batches and labelled opening stock.
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_ok('a purchase records the supplier''s batch number and expiry',
+    format('select public.create_purchase(null, current_date, null, 0, %L::jsonb)',
+      jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 10, 'cost_price', 60,
+        'supplier_batch_no', 'SUP-9', 'expiry_date', (current_date + 200)::text))::text));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('opening stock can carry its batch number and expiry',
+    format('select public.adjust_stock(%L::uuid, %L, %L::uuid, 6, 30, %L, null, %L, current_date + 100)',
+      t_id('abuja'), 'finished_good', t_id('soap'), 'Opening balance', 'OPEN-1'));
+  perform t_err('opening stock with expiry before manufacture is refused',
+    format('select public.adjust_stock(%L::uuid, %L, %L::uuid, 6, 30, %L, null, %L, current_date - 1, current_date)',
+      t_id('abuja'), 'finished_good', t_id('soap'), 'Opening balance', 'OPEN-2'), 'after the manufacture');
+  perform t_err('a batch can only be picked when removing stock',
+    format('select public.adjust_stock(%L::uuid, %L, %L::uuid, 5, null, %L, %L::uuid)',
+      t_id('abuja'), 'finished_good', t_id('soap'), 'x', t_id('batch_a_abuja')), 'only when removing');
+  perform t_su();
+  perform t_rec('supplier batch and expiry are stored on the material layer',
+    exists (select 1 from purchase_items where supplier_batch_no = 'SUP-9' and expiry_date = current_date + 200));
+  perform t_rec('labelled opening stock keeps its batch and expiry at Abuja',
+    exists (select 1 from fg_batches where batch_no = 'OPEN-1' and expiry_date = current_date + 100 and branch_id = t_id('abuja')));
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

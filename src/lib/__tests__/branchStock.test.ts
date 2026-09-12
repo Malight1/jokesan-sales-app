@@ -45,6 +45,31 @@ describe('lowStockRows', () => {
   });
 });
 
+describe('sellable stock (migration 0022)', () => {
+  // 25 on the shelf at Lagos, but 20 of them expired or on hold.
+  const mixed: StockLevel[] = [{ ...row('lagos', 'soap', 'Soap', 25, 10), sellable_qty: 5 }];
+
+  it('counts on-hand and sellable separately', () => {
+    expect(qtyByProduct(mixed, 'lagos').get('soap')).toBe(25);
+    expect(qtyByProduct(mixed, 'lagos', 'sellable').get('soap')).toBe(5);
+  });
+
+  it('treats a shelf of expired stock as low (or out), not healthy', () => {
+    expect(lowStockRows(mixed)).toHaveLength(1);
+    expect(lowStockRows([{ ...mixed[0], sellable_qty: 0 }])[0].product_id).toBe('soap');
+  });
+
+  it('falls back to on-hand for rows cached before the migration', () => {
+    expect(qtyByProduct([row('lagos', 'soap', 'Soap', 12)], 'lagos', 'sellable').get('soap')).toBe(12);
+  });
+
+  it('an offline sale takes from sellable stock too', () => {
+    const after = decrementAt(mixed, 'lagos', [{ productId: 'soap', qty: 3 }]);
+    expect(after[0].qty).toBe(22);
+    expect(after[0].sellable_qty).toBe(2);
+  });
+});
+
 describe('decrementAt', () => {
   it('only touches the branch the sale happened at', () => {
     const after = decrementAt(levels, 'abuja', [{ productId: 'soap', qty: 4 }]);

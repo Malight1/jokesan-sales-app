@@ -4,6 +4,11 @@ export interface LabelItem {
   name: string;
   barcode: string;
   priceLabel?: string; // e.g. "₦2,400" — shown under the barcode
+  // Batch details NAFDAC wants on the pack (migration 0022). Dates as MM/YYYY.
+  batchNo?: string | null;
+  mfg?: string | null;
+  expiry?: string | null;
+  nafdacNo?: string | null;
 }
 
 // Renders a Code128 barcode to a data URL via an offscreen canvas.
@@ -15,8 +20,19 @@ function barcodeDataUrl(JsBarcode: (el: HTMLCanvasElement, text: string, opts: o
   return canvas.toDataURL('image/png');
 }
 
+/** The small print under the barcode: batch, dates, NAFDAC number. */
+export function batchLines(item: LabelItem): string[] {
+  const lines: string[] = [];
+  if (item.batchNo) lines.push(`Batch: ${item.batchNo}`);
+  const dates = [item.mfg ? `MFD: ${item.mfg}` : '', item.expiry ? `EXP: ${item.expiry}` : ''].filter(Boolean).join('   ');
+  if (dates) lines.push(dates);
+  if (item.nafdacNo) lines.push(`NAFDAC Reg. No: ${item.nafdacNo}`);
+  return lines;
+}
+
 // Prints a sheet of small barcode labels (3 per row) — for sticking on
-// shelves/products so the phone camera can scan them at the counter.
+// shelves/products so the phone camera can scan them at the counter. With
+// batch details the labels grow a little to fit them.
 export async function printBarcodeLabels(items: LabelItem[], title = 'Barcode Labels') {
   const [{ default: jsPDF }, { default: JsBarcode }] = await Promise.all([
     import('jspdf'),
@@ -27,7 +43,8 @@ export async function printBarcodeLabels(items: LabelItem[], title = 'Barcode La
   const margin = 10;
   const cols = 3;
   const cellW = (pageW - margin * 2) / cols;
-  const cellH = 30;
+  const withBatch = items.some(i => batchLines(i).length > 0);
+  const cellH = withBatch ? 42 : 30;
   let x = margin, y = margin;
   let col = 0;
 
@@ -54,6 +71,12 @@ export async function printBarcodeLabels(items: LabelItem[], title = 'Barcode La
     } catch {
       doc.setFontSize(7);
       doc.text(item.barcode, x + 2, y + 14);
+    }
+
+    const extra = batchLines(item);
+    if (extra.length) {
+      doc.setFontSize(7);
+      extra.forEach((line, i) => doc.text(line, x + 2, y + 25 + i * 3.6));
     }
 
     if (item.priceLabel) {

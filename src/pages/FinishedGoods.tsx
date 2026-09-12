@@ -13,6 +13,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
+import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
@@ -22,6 +23,8 @@ const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
 const emptyForm = {
   name: '', unit: 'pcs', selling_price: 0, min_stock_level: 10, default_markup: 1.5, barcode: '',
   openingQty: 0, openingCost: 0,
+  // Batch and expiry (migration 0022)
+  track_batches: false, shelf_life_days: 0, pick_rule: 'fifo' as 'fifo' | 'fefo', batch_prefix: '', nafdac_no: '',
 };
 
 export default function FinishedGoods() {
@@ -29,9 +32,10 @@ export default function FinishedGoods() {
   // A cashier can see products (the till needs them) but not change them —
   // materials/finished_goods writes are admin+inventory in the database
   // (migration 0017). Hide the controls rather than fail on save.
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const canEditStock = isAdmin || profile?.role === 'inventory';
+  const tracking = hasFeature(tenant?.plan, 'batch_tracking');
   const { multi, myBranchId, myBranchName } = useBranches();
   const { data: rows, loading, error, refetch } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(null), []);
@@ -59,16 +63,32 @@ export default function FinishedGoods() {
     setForm({
       name: g.name, unit: g.unit ?? 'pcs', selling_price: g.selling_price, min_stock_level: g.min_stock_level,
       default_markup: g.default_markup, barcode: g.barcode ?? '', openingQty: 0, openingCost: 0,
+      track_batches: !!g.track_batches, shelf_life_days: g.shelf_life_days ?? 0, pick_rule: g.pick_rule ?? 'fifo',
+      batch_prefix: g.batch_prefix ?? '', nafdac_no: g.nafdac_no ?? '',
     });
     setShowModal(true);
   };
 
   const reload = () => { refetch(); levelsQ.refetch(); };
 
+  // Batch columns exist once migration 0022 has run; until then, don't send
+  // them (Postgres would reject the whole save).
+  const schemaHasBatches = (rows ?? []).some(r => 'track_batches' in r);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { openingQty, openingCost, barcode, ...editable } = form;
-    const payload = { ...editable, barcode: barcode.trim() || null };
+    const { openingQty, openingCost, barcode, track_batches, shelf_life_days, pick_rule, batch_prefix, nafdac_no, ...editable } = form;
+    const batchFields = {
+      track_batches, pick_rule,
+      shelf_life_days: shelf_life_days > 0 ? Math.round(shelf_life_days) : null,
+      batch_prefix: batch_prefix.trim() || null,
+      nafdac_no: nafdac_no.trim() || null,
+    };
+    const touchedBatch = track_batches || pick_rule !== 'fifo' || shelf_life_days > 0 || !!batch_prefix.trim() || !!nafdac_no.trim();
+    const payload = {
+      ...editable, barcode: barcode.trim() || null,
+      ...(schemaHasBatches || touchedBatch ? batchFields : {}),
+    };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (!res) {
       toast.error((editRow ? updateMut.error : createMut.error) ?? 'Something went wrong.');
@@ -222,6 +242,54 @@ export default function FinishedGoods() {
                     <button type="button" className="btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, barcode: generateBarcode() }))} title="Generate a code"><Wand2 size={14} /></button>
                   </div>
                 </div>
+
+                <hr className="divider" />
+                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>Batches and expiry</p>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: tracking || form.track_batches ? 'pointer' : 'not-allowed', marginBottom: '0.75rem' }}>
+                  <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={form.track_batches}
+                         disabled={!tracking && !form.track_batches}
+                         onChange={e => setForm(f => ({ ...f, track_batches: e.target.checked }))} />
+                  <span>
+                    Track expiry dates for this product
+                    <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>
+                      {tracking
+                        ? 'Every production run then needs an expiry date, and expired stock can’t be sold.'
+                        : `Expiry tracking is on the ${planFor('batch_tracking')} plan and above.`}
+                    </small>
+                  </span>
+                </label>
+                {form.track_batches && (
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label>Shelf life (days)</label>
+                      <NumberInput value={form.shelf_life_days} onChange={v => setForm(f => ({ ...f, shelf_life_days: v }))} />
+                      <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Fills in the expiry date for each batch. 0 to type it each time.</small>
+                    </div>
+                    <div className="form-group">
+                      <label>Which stock sells first</label>
+                      <select value={form.pick_rule} disabled={!tracking && form.pick_rule !== 'fefo'}
+                              onChange={e => setForm(f => ({ ...f, pick_rule: e.target.value as 'fifo' | 'fefo' }))}>
+                        <option value="fifo">Oldest made first</option>
+                        <option value="fefo">Earliest expiry first</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label>Batch number prefix</label>
+                    <input value={form.batch_prefix} maxLength={10} placeholder="e.g. LSOAP"
+                           onChange={e => setForm(f => ({ ...f, batch_prefix: e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase() }))} />
+                    <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                      Batches are numbered {(form.batch_prefix || form.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || 'PREFIX')}-YYMMDD-01
+                    </small>
+                  </div>
+                  <div className="form-group">
+                    <label>NAFDAC Reg. No.</label>
+                    <input value={form.nafdac_no} maxLength={30} placeholder="e.g. A1-1234" onChange={e => setForm(f => ({ ...f, nafdac_no: e.target.value }))} />
+                    <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Printed on batch labels.</small>
+                  </div>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -241,6 +309,8 @@ export default function FinishedGoods() {
           unit={adjustRow.unit}
           qtyAt={multi ? qtyAt(adjustRow.id) : () => adjustRow.qty_balance}
           canChooseBranch={isAdmin}
+          tracksBatches={!!adjustRow.track_batches}
+          shelfLifeDays={adjustRow.shelf_life_days}
           onClose={() => setAdjustRow(null)}
           onDone={() => { setAdjustRow(null); reload(); }}
         />

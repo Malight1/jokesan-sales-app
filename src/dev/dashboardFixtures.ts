@@ -1,4 +1,4 @@
-import { DashboardSummary } from '../lib/api';
+import { DashboardSummary, ExpiryOverview } from '../lib/api';
 
 // Sample payloads shaped exactly like dashboard_summary() returns them, one
 // per role. Used by the dashboard render tests and the development-only
@@ -86,6 +86,27 @@ export const inventoryFixture: DashboardSummary = {
     { id: 908, type: 'PRODUCTION', qty: 240, kind: 'finished_good', at: iso(1), name: 'Dishwash 500ml' },
     { id: 907, type: 'PRODUCTION', qty: -36, kind: 'material', at: iso(1), name: 'Caustic Soda' },
     { id: 901, type: 'PURCHASE', qty: 120, kind: 'material', at: iso(3), name: 'Palm Kernel Oil' },
+  ],
+};
+
+// expiry_overview() as the owner sees it (money included); the storekeeper's
+// screen never renders the value fields.
+export const expiryFixture: ExpiryOverview = {
+  warning_days: 60,
+  expired_count: 1,
+  expiring_count: 2,
+  on_hold_count: 1,
+  expired_value: 84000,
+  expiring_value: 212500,
+  items: [
+    { batch_id: 'x1', product_id: 'p1', name: 'Hand Wash 250ml', unit: 'pcs', batch_no: 'HAND-251012-01',
+      branch_id: 'branch-lagos', branch: 'Lagos (Ikeja)', qty: 24, expiry_date: iso(3), days_left: -3, status: 'available', value: 84000 },
+    { batch_id: 'x2', product_id: 'p2', name: 'Liquid Soap 1L', unit: 'pcs', batch_no: 'LSOA-260801-02',
+      branch_id: 'branch-abuja', branch: 'Abuja (Wuse)', qty: 12, expiry_date: iso(-400), days_left: 400, status: 'recalled', value: 30000 },
+    { batch_id: 'x3', product_id: 'p3', name: 'Dishwash 500ml', unit: 'pcs', batch_no: 'DISH-260315-01',
+      branch_id: 'branch-lagos', branch: 'Lagos (Ikeja)', qty: 60, expiry_date: iso(-12), days_left: 12, status: 'available', value: 120000 },
+    { batch_id: 'x4', product_id: 'p1', name: 'Hand Wash 250ml', unit: 'pcs', batch_no: 'HAND-260401-01',
+      branch_id: 'branch-lagos', branch: 'Lagos (Ikeja)', qty: 40, expiry_date: iso(-41), days_left: 41, status: 'available', value: 92500 },
   ],
 };
 

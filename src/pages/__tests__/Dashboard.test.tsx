@@ -2,8 +2,8 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { DashboardView } from '../Dashboard';
-import { cashierFixture, inventoryFixture, ownerFixture } from '../../dev/dashboardFixtures';
-import { DashboardSummary } from '../../lib/api';
+import { cashierFixture, inventoryFixture, ownerFixture, expiryFixture } from '../../dev/dashboardFixtures';
+import { DashboardSummary, ExpiryOverview } from '../../lib/api';
 
 jest.mock('../../lib/supabase', () => ({ supabase: { rpc: jest.fn(), from: jest.fn() } }));
 jest.mock('../../lib/AuthContext', () => ({
@@ -17,8 +17,8 @@ jest.mock('../../lib/ToastContext', () => ({
 class NoopResizeObserver { observe() {} unobserve() {} disconnect() {} }
 (global as any).ResizeObserver = (global as any).ResizeObserver ?? NoopResizeObserver;
 
-const renderView = (d: DashboardSummary) =>
-  render(<MemoryRouter><DashboardView d={d} onRefresh={() => {}} /></MemoryRouter>);
+const renderView = (d: DashboardSummary, expiry?: ExpiryOverview | null) =>
+  render(<MemoryRouter><DashboardView d={d} onRefresh={() => {}} expiry={expiry} /></MemoryRouter>);
 
 describe('role dashboards', () => {
   it('cashier gets a till: their own takings and two big actions', () => {
@@ -76,6 +76,27 @@ describe('role dashboards', () => {
   ])('%s dashboard has no em or en dashes in visible text', (_name, fixture) => {
     const { container } = renderView(fixture);
     expect(container.textContent).not.toMatch(/[–—]/);
+  });
+
+  it('owner is told about expired, held and expiring batches, with the money at stake', () => {
+    renderView(ownerFixture, expiryFixture);
+    expect(screen.getByText('1 batch past expiry')).toBeInTheDocument();
+    expect(screen.getByText("₦84,000 of stock that can't be sold")).toBeInTheDocument();
+    expect(screen.getByText('1 batch on hold or recalled')).toBeInTheDocument();
+    expect(screen.getByText('2 batches expire within 60 days')).toBeInTheDocument();
+  });
+
+  it('storekeeper sees which batches to pull, still without any money', () => {
+    const { container } = renderView(inventoryFixture, expiryFixture);
+    expect(screen.getByText('Expiry')).toBeInTheDocument();
+    expect(screen.getByText('Expired 3 days ago')).toBeInTheDocument();
+    expect(screen.getByText('Recalled')).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/₦/);
+  });
+
+  it('a database without expiry data still renders every dashboard', () => {
+    renderView(ownerFixture, null);
+    expect(screen.queryByText(/past expiry/)).not.toBeInTheDocument();
   });
 
   it('shows friendly empty states rather than blank panels', () => {

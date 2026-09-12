@@ -9,6 +9,7 @@ import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
 import { generateInvoicePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
+import { enqueuePayment } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -119,17 +120,32 @@ export default function Sales() {
   const submitPayment = async () => {
     if (!payFor) return;
     if (payAmount <= 0) { toast.error('Enter a payment amount.'); return; }
+    // No network: keep the payment on this device and replay it through
+    // the server's checks (no overpaying, no voided sales) on reconnect.
+    const queueIt = () => {
+      enqueuePayment(
+        { saleId: payFor.id, amount: Number(payAmount), paymentTypeId: payType || null },
+        `Payment ${fmt(Number(payAmount))} — ${customerName(payFor.customer_id)} (${invoiceNo(payFor)})`,
+      );
+      toast.info('Offline — payment saved on this device and will sync automatically.');
+      setPayFor(null);
+    };
+    if (!navigator.onLine) { queueIt(); return; }
     const ok = await payMut.mutate(payFor.id, Number(payAmount), payType || null);
     if (ok !== null) {
       toast.success('Payment recorded.');
       setPayFor(null);
       refetch();
+    } else if (!navigator.onLine) {
+      queueIt();
     } else if (payMut.error) {
       toast.error(payMut.error);
     }
   };
 
-  const invoiceNo = (s: SalesOrder) => 'INV-' + s.id.slice(0, 8).toUpperCase();
+  // Server-issued since migration 0021; the fallback covers a database that
+  // hasn't run it yet.
+  const invoiceNo = (s: SalesOrder) => s.doc_no || 'INV-' + s.id.slice(0, 8).toUpperCase();
 
   const downloadInvoice = async (s: SalesOrder) => {
     try {
@@ -188,6 +204,8 @@ export default function Sales() {
   };
 
   const columns: Column<SalesOrder>[] = [
+    { key: 'doc_no', header: 'Invoice', value: s => invoiceNo(s),
+      render: s => <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{invoiceNo(s)}</span> },
     { key: 'transaction_date', header: 'Date', value: s => s.transaction_date },
     { key: 'customer', header: 'Customer', value: s => customerName(s.customer_id) },
     { key: 'total_amount', header: 'Total', align: 'right', value: s => s.total_amount, render: s => fmt(s.total_amount) },
@@ -226,8 +244,8 @@ export default function Sales() {
         error={error}
         onRetry={refetch}
         getRowKey={s => s.id}
-        searchKeys={[s => customerName(s.customer_id), s => s.transaction_date]}
-        searchPlaceholder="Search by customer…"
+        searchKeys={[s => customerName(s.customer_id), s => s.transaction_date, s => invoiceNo(s)]}
+        searchPlaceholder="Search by customer or invoice…"
         exportName="sales"
         exportTitle="Sales Orders"
         rowActions={rowActions}

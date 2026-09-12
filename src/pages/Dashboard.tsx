@@ -7,7 +7,10 @@ import {
 import {
   AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { dashboard, customers as customersApi, DashboardSummary, LowStockItem } from '../lib/api';
+import {
+  dashboard, customers as customersApi, batches as batchesApi, DashboardSummary, LowStockItem, ExpiryOverview,
+} from '../lib/api';
+import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
 import { whatsappLink } from '../lib/whatsapp';
@@ -320,7 +323,36 @@ const MOVEMENT: Record<string, string> = {
   PURCHASE: 'Bought in', PRODUCTION: 'Produced', SALE: 'Sold', ADJUSTMENT: 'Adjusted', TRANSFER: 'Transfer',
 };
 
-export function InventoryDashboard({ d }: { d: DashboardSummary }) {
+// Batches that expire soon, have expired, or are held (migration 0022).
+// Quantities only, so it's safe on the storekeeper's money-free screen.
+function ExpiryList({ items, showBranch }: { items: ExpiryOverview['items']; showBranch: boolean }) {
+  return (
+    <ul className="db-list">
+      {items.map(i => {
+        const held = i.status !== 'available';
+        const expired = !held && num(i.days_left) < 0;
+        return (
+          <li key={i.batch_id}>
+            <div className="db-list-main">
+              <span className="db-list-title">{i.name}</span>
+              <span className="db-list-meta">
+                {i.batch_no ? `Batch ${i.batch_no}` : 'Unnumbered stock'}{showBranch ? `, ${i.branch}` : ''}
+              </span>
+            </div>
+            <div className="db-list-end">
+              <span className="db-num">{count(i.qty)}{i.unit ? ` ${i.unit}` : ''}</span>
+              <span className={`db-status ${held || expired ? 'unpaid' : 'part'}`}>
+                {held ? BATCH_STATUS[i.status] : expiryLabel(i.expiry_date)}
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function InventoryDashboard({ d, expiry }: { d: DashboardSummary; expiry?: ExpiryOverview | null }) {
   const multi = !!d.multi_branch;
   const total = num(d.stock_items);
   const out = num(d.out_of_stock_count);
@@ -370,6 +402,16 @@ export function InventoryDashboard({ d }: { d: DashboardSummary }) {
         </Panel>
 
         <div className="db-stack">
+          {expiry && expiry.items.length > 0 && (
+            <Panel
+              title="Expiry"
+              sub={`Expired, held, or expiring within ${expiry.warning_days} days`}
+              action={<Link to="/batches" className="db-link">Batches <ArrowRight size={14} aria-hidden="true" /></Link>}
+            >
+              <ExpiryList items={expiry.items.slice(0, 5)} showBranch={multi} />
+            </Panel>
+          )}
+
           <Panel title="This month">
             <div className="db-pair">
               <Figure bare label="Produced" value={count(d.production_this_month)}
@@ -412,7 +454,9 @@ export function InventoryDashboard({ d }: { d: DashboardSummary }) {
 // OWNER / ACCOUNTS: the business. Month to date against the same days
 // last month, then what needs attention, then how each branch is doing.
 // ------------------------------------------------------------------
-export function OwnerDashboard({ d, onReminded }: { d: DashboardSummary; onReminded: () => void }) {
+export function OwnerDashboard({ d, onReminded, expiry }: {
+  d: DashboardSummary; onReminded: () => void; expiry?: ExpiryOverview | null;
+}) {
   const { tenant } = useAuth();
   const toast = useToast();
   const remindMut = useMutation(customersApi.markReminded);
@@ -429,6 +473,10 @@ export function OwnerDashboard({ d, onReminded }: { d: DashboardSummary; onRemin
   const maxMonth = Math.max(1, ...branches.map(b => num(b.month)));
   const lowTotal = num(d.low_goods_count) + num(d.low_materials_count);
   const reminders = (d.reminders ?? []).slice(0, 4);
+  const expired = num(expiry?.expired_count);
+  const expiring = num(expiry?.expiring_count);
+  const held = num(expiry?.on_hold_count);
+  const nothingNeeded = reminders.length === 0 && lowTotal === 0 && expired + expiring + held === 0;
 
   const sendReminder = async (r: { id: string; name: string; phone: string | null; balance: number }) => {
     const lines = [
@@ -505,8 +553,41 @@ export function OwnerDashboard({ d, onReminded }: { d: DashboardSummary; onRemin
         </Panel>
 
         <Panel title="Needs your attention">
-          {reminders.length === 0 && lowTotal === 0 ? <Empty text="Nothing needs you right now." /> : (
+          {nothingNeeded ? <Empty text="Nothing needs you right now." /> : (
             <ul className="db-list">
+              {expired > 0 && (
+                <li>
+                  <div className="db-list-main">
+                    <span className="db-list-title">{plural(expired, 'batch', 'batches')} past expiry</span>
+                    <span className="db-list-meta">{naira(expiry?.expired_value)} of stock that can't be sold</span>
+                  </div>
+                  <div className="db-list-end">
+                    <Link to="/batches" className="db-btn db-btn-secondary db-btn-sm">Review</Link>
+                  </div>
+                </li>
+              )}
+              {held > 0 && (
+                <li>
+                  <div className="db-list-main">
+                    <span className="db-list-title">{plural(held, 'batch', 'batches')} on hold or recalled</span>
+                    <span className="db-list-meta">Not for sale at any branch</span>
+                  </div>
+                  <div className="db-list-end">
+                    <Link to="/batches" className="db-btn db-btn-secondary db-btn-sm">Review</Link>
+                  </div>
+                </li>
+              )}
+              {expiring > 0 && (
+                <li>
+                  <div className="db-list-main">
+                    <span className="db-list-title">{plural(expiring, 'batch', 'batches')} expire within {num(expiry?.warning_days)} days</span>
+                    <span className="db-list-meta">{naira(expiry?.expiring_value)} to sell or move first</span>
+                  </div>
+                  <div className="db-list-end">
+                    <Link to="/batches" className="db-btn db-btn-secondary db-btn-sm">Review</Link>
+                  </div>
+                </li>
+              )}
               {reminders.map(r => (
                 <li key={r.id}>
                   <div className="db-list-main">
@@ -604,16 +685,22 @@ export function OwnerDashboard({ d, onReminded }: { d: DashboardSummary; onRemin
 }
 
 // Picks the view for the role the SERVER says this person has.
-export function DashboardView({ d, onRefresh }: { d: DashboardSummary; onRefresh: () => void }) {
+export function DashboardView({ d, onRefresh, expiry }: {
+  d: DashboardSummary; onRefresh: () => void; expiry?: ExpiryOverview | null;
+}) {
   if (d.role === 'sales') return <CashierDashboard d={d} />;
-  if (d.role === 'inventory') return <InventoryDashboard d={d} />;
-  return <OwnerDashboard d={d} onReminded={onRefresh} />;
+  if (d.role === 'inventory') return <InventoryDashboard d={d} expiry={expiry} />;
+  return <OwnerDashboard d={d} onReminded={onRefresh} expiry={expiry} />;
 }
 
 export default function Dashboard() {
   const { tenant } = useAuth();
   const { data, loading, error, refetch, isOffline } =
     useQuery<DashboardSummary>(() => dashboard.summary(), [], { cacheKey: 'dashboard-summary' });
+  // Separate from the summary so a database without migration 0022 still
+  // gets its dashboard — just without the expiry panel.
+  const expiryQ = useQuery<ExpiryOverview | null>(() => batchesApi.expiry().catch(() => null), [],
+    { cacheKey: 'dashboard-expiry' });
 
   if (loading && !data) return <DashboardSkeleton />;
   if (error && !data) return <ErrorState message={error} onRetry={refetch} />;
@@ -634,7 +721,7 @@ export default function Dashboard() {
           {data.role === 'admin' && <Link className="db-btn db-btn-primary db-btn-sm" to="/settings">Choose a plan</Link>}
         </div>
       )}
-      <DashboardView d={data} onRefresh={refetch} />
+      <DashboardView d={data} onRefresh={refetch} expiry={expiryQ.data} />
     </>
   );
 }

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
-  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi,
+  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi,
   TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch,
 } from '../lib/api';
@@ -269,6 +269,14 @@ function BusinessTab() {
   const [vatEnabled, setVatEnabled] = useState(tenant?.vat_enabled ?? false);
   const [vatRate, setVatRate] = useState(tenant?.vat_rate ?? 7.5);
   const [tin, setTin] = useState(tenant?.tin ?? '');
+  // Invoice numbering and expiry settings (migrations 0021/0022). Only
+  // offered once the database has them.
+  const hasExpirySettings = tenant?.expiry_warning_days !== undefined;
+  const [warnDays, setWarnDays] = useState(tenant?.expiry_warning_days ?? 60);
+  const [allowExpired, setAllowExpired] = useState(!!tenant?.allow_expired_sale);
+  const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
+  const [invPrefix, setInvPrefix] = useState<string | null>(null);
+  const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -296,9 +304,25 @@ function BusinessTab() {
   const submitBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tenant) return;
-    const res = await saveBiz.mutate(tenant.id, { name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null });
-    if (res !== null) { toast.success('Business updated.'); refresh(); }
-    else toast.error(saveBiz.error ?? 'Update failed.');
+    const days = Math.round(Number(warnDays) || 0);
+    if (hasExpirySettings && (days < 1 || days > 730)) { toast.error('Expiry warning must be between 1 and 730 days.'); return; }
+    const res = await saveBiz.mutate(tenant.id, {
+      name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null,
+      ...(hasExpirySettings ? { expiry_warning_days: days, allow_expired_sale: allowExpired } : {}),
+    });
+    if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
+    if (invPrefix !== null && invPrefix.trim() !== (prefixQ.data ?? 'INV-')) {
+      try {
+        await docs.setPrefix('INV', invPrefix.trim());
+        prefixQ.refetch();
+      } catch (err: any) {
+        toast.error(`Business saved, but the invoice prefix wasn't: ${err?.message ?? 'unknown error'}`);
+        refresh();
+        return;
+      }
+    }
+    toast.success('Business updated.');
+    refresh();
   };
 
   const submitProfile = async (e: React.FormEvent) => {
@@ -371,6 +395,37 @@ function BusinessTab() {
                 <input value={tin} onChange={e => setTin(e.target.value)} placeholder="e.g. 01234567-0001" />
               </div>
             </div>
+          )}
+
+          {!prefixQ.loading && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label htmlFor="inv-prefix">Invoice number prefix</label>
+                <input id="inv-prefix" value={shownPrefix} maxLength={12}
+                       onChange={e => setInvPrefix(e.target.value.replace(/[^A-Za-z0-9/_-]/g, '').toUpperCase())} />
+                <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                  Next invoice looks like {shownPrefix || 'INV-'}000123. The count carries on; numbers already issued never change.
+                </small>
+              </div>
+            </>
+          )}
+
+          {hasExpirySettings && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label htmlFor="warn-days">Warn me about expiry this many days ahead</label>
+                <NumberInput id="warn-days" value={warnDays} onChange={setWarnDays} />
+              </div>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginBottom: '0.75rem' }}>
+                <input type="checkbox" checked={allowExpired} onChange={e => setAllowExpired(e.target.checked)} style={{ width: 'auto', marginTop: 3 }} />
+                <span>
+                  Allow the till to sell expired stock
+                  <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>Not recommended. NAFDAC can sanction the sale of expired products.</small>
+                </span>
+              </label>
+            </>
           )}
 
           <button className="btn-primary" type="submit" disabled={saveBiz.pending}>

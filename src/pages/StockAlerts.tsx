@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2, Search, Repeat } from 'lucide-react';
+import { AlertTriangle, XCircle, ShoppingCart, FlaskConical, X, Edit2, Search, Repeat, CalendarClock, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { materials as materialsApi, finishedGoods as goodsApi, stock, StockLevel } from '../lib/api';
+import { materials as materialsApi, finishedGoods as goodsApi, stock, batches as batchesApi, StockLevel, ExpiryOverview, ExpiryItem } from '../lib/api';
+import { sellable } from '../lib/branchStock';
+import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -32,6 +34,9 @@ export default function StockAlerts() {
   const { multi, myBranchId, myBranchName } = useBranches();
 
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(seeAll ? null : myBranchId), [seeAll, myBranchId]);
+  // Expired, expiring and held batches (0022). A database that hasn't run
+  // the migration just has no expiry section.
+  const expiryQ = useQuery<ExpiryOverview | null>(() => batchesApi.expiry().catch(() => null), []);
   const saveMat = useMutation(materialsApi.setMinLevel);
   const saveGood = useMutation(goodsApi.setMinLevel);
 
@@ -46,15 +51,19 @@ export default function StockAlerts() {
     [levelsQ.data, q, showBranch],
   );
 
-  const isOut = (l: StockLevel) => Number(l.qty) <= 0;
-  const isLow = (l: StockLevel) => Number(l.qty) > 0 && Number(l.qty) <= Number(l.min_level);
+  // Judged on what can be SOLD: a shelf of expired soap is out of stock.
+  const isOut = (l: StockLevel) => sellable(l) <= 0;
+  const isLow = (l: StockLevel) => sellable(l) > 0 && sellable(l) <= Number(l.min_level);
   const groups = [
     { key: 'out-fg', tone: 'danger',  title: 'Out of Stock — Finished Goods', items: rows.filter(l => l.product_kind === 'finished_good' && isOut(l)) },
     { key: 'low-fg', tone: 'warning', title: 'Low Stock — Finished Goods',    items: rows.filter(l => l.product_kind === 'finished_good' && isLow(l)) },
     { key: 'out-m',  tone: 'danger',  title: 'Out of Stock — Raw Materials',  items: rows.filter(l => l.product_kind === 'material' && isOut(l)) },
     { key: 'low-m',  tone: 'warning', title: 'Low Stock — Raw Materials',     items: rows.filter(l => l.product_kind === 'material' && isLow(l)) },
   ];
-  const totalAlerts = groups.reduce((s, g) => s + g.items.length, 0);
+  const expiryItems: ExpiryItem[] = (expiryQ.data?.items ?? []).filter(i =>
+    !q || i.name.toLowerCase().includes(q) || (i.batch_no ?? '').toLowerCase().includes(q)
+    || (showBranch && i.branch.toLowerCase().includes(q)));
+  const totalAlerts = groups.reduce((s, g) => s + g.items.length, 0) + expiryItems.length;
 
   const scope = !multi ? '' : seeAll ? ' across all branches' : ` at ${myBranchName}`;
 
@@ -88,8 +97,13 @@ export default function StockAlerts() {
           <div className="stock-bar-track">
             <div className={`stock-bar-fill ${out ? 'danger' : 'warning'}`} style={{ width: `${out ? 0 : pct(Number(l.qty), Number(l.min_level))}%` }} />
           </div>
-          <span className="stock-qty">{num(l.qty)} / {num(l.min_level)} {unit}</span>
+          <span className="stock-qty">{num(sellable(l))} / {num(l.min_level)} {unit}</span>
         </div>
+        {Number(l.qty) > sellable(l) && (
+          <div className="item-meta" style={{ marginTop: '-0.25rem', marginBottom: '0.5rem' }}>
+            {num(Number(l.qty) - sellable(l))} {unit} more on the shelf are expired or on hold
+          </div>
+        )}
         <div className="alert-actions">
           {l.product_kind === 'finished_good'
             ? canAccess(role, '/production') && (
@@ -137,6 +151,44 @@ export default function StockAlerts() {
             ? <>Nothing matching “{search}” needs attention. <button className="btn-ghost btn-sm" onClick={() => setSearch('')}>Clear search</button></>
             : `No low stock or out-of-stock items${scope} at the moment.`}</p>
         </div>
+      )}
+
+      {expiryItems.length > 0 && (
+        <section className="alert-section">
+          <div className="section-header danger">
+            <CalendarClock size={16} />
+            <h3>Expiry — batches to act on ({expiryItems.length})</h3>
+          </div>
+          <div className="alert-cards">
+            {expiryItems.map(i => {
+              const held = i.status !== 'available';
+              const expired = !held && (i.days_left ?? 1) < 0;
+              return (
+                <div className={`alert-card ${held || expired ? 'out-of-stock' : 'low-stock'}`} key={i.batch_id}>
+                  <div className="alert-card-top">
+                    <div>
+                      <div className="item-name">{i.name}</div>
+                      <div className="item-meta">
+                        {i.batch_no ? `Batch ${i.batch_no}` : 'Unnumbered stock'}{showBranch ? ` · ${i.branch}` : ''} · {num(i.qty)} {i.unit ?? ''}
+                      </div>
+                    </div>
+                    <span className={held || expired ? 'badge-danger' : 'badge-warning'}>
+                      {held ? BATCH_STATUS[i.status] : expiryLabel(i.expiry_date)}
+                    </span>
+                  </div>
+                  <div className="item-meta" style={{ marginBottom: '0.6rem' }}>
+                    {held ? 'Not for sale at any branch.' : expired ? 'Take it off the shelf — the till won’t sell it.' : 'Sell or move this batch first.'}
+                  </div>
+                  {canAccess(role, '/batches') && (
+                    <div className="alert-actions">
+                      <button className="btn-primary btn-sm" onClick={() => navigate('/batches')}><Layers size={13} /> Open batches</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {groups.filter(g => g.items.length > 0).map(g => (

@@ -96,14 +96,18 @@ export default function POS() {
   const [tendered, setTendered] = useState(0);
   const [payMode, setPayMode] = useState<'full' | 'part' | 'credit'>('full');
   const [showKeypad, setShowKeypad] = useState(false);
-  const [done, setDone] = useState<{ total: number; paid: number; subtotal: number; vat: number; vatRate: number; offline?: boolean } | null>(null);
+  const [done, setDone] = useState<{
+    total: number; paid: number; subtotal: number; vat: number; vatRate: number;
+    offline?: boolean; docNo?: string | null;
+  } | null>(null);
 
   const goods = useMemo(() => goodsQ.data ?? [], [goodsQ.data]);
-  // What THIS branch holds. The company total on the product row would let
-  // the Lagos till try to sell stock that's sitting in Abuja — the server
-  // refuses that now, so the till must show the same number it enforces.
+  // What THIS branch can sell. The company total on the product row would
+  // let the Lagos till try to sell stock that's sitting in Abuja, and
+  // expired or recalled stock can't be sold at all (0022) — the server
+  // refuses both, so the till must show the same number it enforces.
   const here = useMemo(
-    () => qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), myBranchId),
+    () => qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), myBranchId, 'sellable'),
     [levelsQ.data, myBranchId],
   );
   const avail = (g: FinishedGood) => (levelsQ.data ? here.get(g.id) ?? 0 : g.qty_balance);
@@ -169,8 +173,11 @@ export default function POS() {
     };
     setCheckingOut(true);
     try {
-      await salesApi.create(payload);
-      setDone({ total, paid, subtotal, vat: vatAmt, vatRate });
+      const saleId = await salesApi.create(payload);
+      // The server issues the invoice number (0021); the receipt must carry
+      // the same one the Sales page and the tax records show.
+      const docNo = await salesApi.docNo(saleId).catch(() => null);
+      setDone({ total, paid, subtotal, vat: vatAmt, vatRate, docNo });
       goodsQ.refetch();
       levelsQ.refetch();
     } catch (e: any) {
@@ -205,11 +212,12 @@ export default function POS() {
   if (done) {
     const cust = custQ.data?.find(c => c.id === customerId);
     const receiptItems = cart.map(l => ({ name: l.good.name, qty: l.qty, unitPrice: l.good.selling_price, amount: l.qty * l.good.selling_price }));
-    const invNo = 'INV-' + Date.now().toString().slice(-8);
+    // Offline, the number is issued when the sale syncs.
+    const invNo = done.docNo ?? (done.offline ? 'Pending sync' : 'Receipt');
     const sendWa = () => {
       const lines = [
         `Hello ${customerId ? customerName(customerId) : 'there'}! 🧾`, '',
-        `*${tenant?.name ?? 'Receipt'}*`,
+        `*${tenant?.name ?? 'Receipt'}*${done.docNo ? ` · ${done.docNo}` : ''}`,
         `Total: ₦${done.total.toLocaleString()}`,
         `Paid: ₦${done.paid.toLocaleString()}`,
         done.total - done.paid > 0 ? `Balance: ₦${(done.total - done.paid).toLocaleString()}` : `Status: PAID ✅`,
@@ -234,6 +242,7 @@ export default function POS() {
       <div className="pos-success">
         {done.offline ? <CloudOff size={54} color="#d97706" /> : <CheckCircle2 size={54} color="#16a34a" />}
         <h1 style={done.offline ? { color: '#d97706' } : undefined}>{done.offline ? 'Saved Offline' : 'Sale Complete'}</h1>
+        {done.docNo && <p style={{ color: '#64748b', fontSize: '0.9rem', fontVariantNumeric: 'tabular-nums' }}>Invoice {done.docNo}</p>}
         {done.offline && <p style={{ color: '#64748b', fontSize: '0.85rem', maxWidth: 320, textAlign: 'center' }}>No network right now — this sale is queued on this device and will sync automatically the moment you're back online.</p>}
         <div className="success-figures">
           <div><span>Total</span><strong>{fmt(done.total)}</strong></div>

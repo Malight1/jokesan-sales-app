@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DashboardView } from '../pages/Dashboard';
-import { cashierFixture, inventoryFixture, ownerFixture } from './dashboardFixtures';
+import { cashierFixture, inventoryFixture, ownerFixture, expiryFixture } from './dashboardFixtures';
 
 // DEVELOPMENT ONLY. App.tsx registers this route only when NODE_ENV is
 // 'development', so it's stripped from production builds. It renders the
@@ -33,7 +33,7 @@ export default function DashboardPreview() {
           </label>
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#64748b' }}>Development preview, sample data</span>
         </div>
-        <DashboardView d={d} onRefresh={() => {}} />
+        <DashboardView d={d} onRefresh={() => {}} expiry={expiryFixture} />
       </div>
     </div>
   );
