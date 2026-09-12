@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban } from 'lucide-react';
-import { purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, lookups, PurchaseOrder, Supplier, Material, Lookup } from '../lib/api';
+import React, { useEffect, useState } from 'react';
+import { Plus, X, Eye, Wallet, Ban, Undo2 } from 'lucide-react';
+import {
+  purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, lookups,
+  returns as returnsApi, PurchaseOrder, Supplier, Material, Lookup,
+} from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -11,6 +14,12 @@ import NumberInput from '../components/NumberInput';
 import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+// A supplier return can push balance below zero — that's not a debt anymore,
+// it's a credit the supplier owes back (in cash or on the next delivery).
+function BalanceFigure({ balance }: { balance: number }) {
+  if (balance < 0) return <span style={{ color: '#16a34a', fontWeight: 600 }}>Supplier owes {fmt(-balance)}</span>;
+  return <span style={{ color: balance > 0 ? '#dc2626' : 'inherit', fontWeight: balance > 0 ? 600 : 400 }}>{fmt(balance)}</span>;
+}
 
 const statusMap: Record<string, { label: string; cls: string }> = {
   full: { label: 'Full Payment', cls: 'badge-success' },
@@ -31,6 +40,7 @@ export default function Purchases() {
   // Recording a purchase is admin+inventory; accounts can still see them
   // and settle supplier payments.
   const canCreatePurchase = isAdmin || profile?.role === 'inventory';
+  const canReturn = isAdmin || profile?.role === 'inventory' || profile?.role === 'accounts';
   const { data: rows, loading, error, refetch } = useQuery<PurchaseOrder[]>(() => purchasesApi.list(), []);
   const { data: suppliers } = useQuery<Supplier[]>(() => suppliersApi.list(), []);
   const { data: materials } = useQuery<Material[]>(() => materialsApi.list(), []);
@@ -46,6 +56,7 @@ export default function Purchases() {
   const [payFor, setPayFor] = useState<PurchaseOrder | null>(null);
   const [payAmount, setPayAmount] = useState(0);
   const [payType, setPayType] = useState('');
+  const [returnFor, setReturnFor] = useState<PurchaseOrder | null>(null);
 
   const blankItem = (): LineItem => ({ material_id: '', qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
   const tracksBatches = (materialId: string) => !!materials?.find(m => m.id === materialId)?.track_batches;
@@ -134,8 +145,7 @@ export default function Purchases() {
     { key: 'supplier', header: 'Supplier', value: p => supplierName(p.supplier_id) },
     { key: 'total_amount', header: 'Total', align: 'right', value: p => p.total_amount, render: p => fmt(p.total_amount) },
     { key: 'total_paid', header: 'Paid', align: 'right', value: p => p.total_paid, render: p => fmt(p.total_paid) },
-    { key: 'balance', header: 'Balance', align: 'right', value: p => p.balance,
-      render: p => <span style={{ color: p.balance > 0 ? '#dc2626' : 'inherit', fontWeight: p.balance > 0 ? 600 : 400 }}>{fmt(p.balance)}</span> },
+    { key: 'balance', header: 'Balance', align: 'right', value: p => p.balance, render: p => <BalanceFigure balance={p.balance} /> },
     { key: 'payment_status', header: 'Status', value: p => p.voided ? 'Voided' : (statusMap[p.payment_status]?.label ?? p.payment_status),
       render: p => p.voided
         ? <span className="badge-gray" style={{ textDecoration: 'line-through' }}>Voided</span>
@@ -144,6 +154,7 @@ export default function Purchases() {
 
   const rowActions: RowAction<PurchaseOrder>[] = [
     { icon: <Wallet size={15} />, label: 'Record payment', onClick: openPay, show: p => p.balance > 0 && !p.voided },
+    { icon: <Undo2 size={15} />, label: 'Return to supplier', onClick: setReturnFor, show: p => !p.voided && canReturn },
     { icon: <Eye size={15} />, label: 'View', onClick: p => setViewId(p.id) },
     { icon: <Ban size={15} />, label: 'Void purchase', onClick: setVoidFor, show: p => !p.voided && isAdmin, variant: 'danger' },
   ];
@@ -317,7 +328,113 @@ export default function Purchases() {
           onCancel={() => setVoidFor(null)}
         />
       )}
+
+      {returnFor && (
+        <SupplierReturnModal
+          purchase={returnFor}
+          materialName={(id: string) => materials?.find(m => m.id === id)?.name ?? '—'}
+          onClose={() => setReturnFor(null)}
+          onDone={() => { setReturnFor(null); refetch(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ---- Return goods to the supplier (partial, from one exact batch) ----
+interface SupplierReturnLine { purchase_item_id: string; material_id: string; label: string; cost_price: number; max: number; qty: number; }
+function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
+  purchase: PurchaseOrder;
+  materialName: (id: string) => string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { data, loading, error } = useQuery<any>(() => purchasesApi.detail(purchase.id), [purchase.id]);
+  const createMut = useMutation(returnsApi.purchases.create);
+  const [lines, setLines] = useState<SupplierReturnLine[] | null>(null);
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    if (data && lines === null) {
+      setLines((data.purchase_items ?? [])
+        .filter((i: any) => Number(i.qty_remaining) > 0)
+        .map((i: any) => ({
+          purchase_item_id: i.id, material_id: i.material_id, label: materialName(i.material_id),
+          cost_price: i.cost_price, max: Number(i.qty_remaining), qty: 0,
+        })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const active = (lines ?? []).filter(l => l.qty > 0);
+  const total = active.reduce((s, l) => s + l.qty * l.cost_price, 0);
+  const newBalance = purchase.balance - total;
+
+  const setLine = (idx: number, qty: number) =>
+    setLines(ls => ls ? ls.map((l, i) => i === idx ? { ...l, qty } : l) : ls);
+
+  const submit = async () => {
+    if (active.length === 0) { toast.error('Set a quantity to return.'); return; }
+    const res = await createMut.mutate({
+      purchaseId: purchase.id,
+      items: active.map(l => ({ purchaseItemId: l.purchase_item_id, qty: l.qty })),
+      reason: reason.trim() || null,
+    });
+    if (res === null) { toast.error(createMut.error ?? 'Could not record the return.'); return; }
+    toast.success('Return to supplier recorded — stock and balance updated.');
+    onDone();
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={520}>
+      <div className="modal-header">
+        <h2>Return to supplier</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <div className="modal-body">
+        {loading && <Loading />}
+        {error && <ErrorState message={error} />}
+        {createMut.error && <ErrorState message={createMut.error} />}
+        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Nothing from this purchase is still unused — it's all gone into production or another branch.</p>}
+        {lines && lines.length > 0 && (
+          <>
+            {lines.map((l, idx) => (
+              <div key={l.purchase_item_id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.6rem' }}>
+                <div className="form-group">
+                  <label>{l.label}</label>
+                  <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{l.max.toLocaleString()} unused, at {fmt(l.cost_price)} each</small>
+                </div>
+                <div className="form-group">
+                  <label>Qty to return</label>
+                  <NumberInput value={l.qty} onChange={v => setLine(idx, Math.max(0, Math.min(v, l.max)))} />
+                </div>
+              </div>
+            ))}
+            <div className="form-group">
+              <label>Reason</label>
+              <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong grade, damaged in transit" />
+            </div>
+            {active.length > 0 && (
+              <div className="total-row">
+                <strong>Return value: {fmt(total)}</strong>
+                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 4 }}>
+                  {newBalance >= 0
+                    ? <>What you owe drops to {fmt(newBalance)}.</>
+                    : <>Once applied, the supplier will owe you {fmt(-newBalance)}.</>}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={createMut.pending || active.length === 0} onClick={submit}>
+          {createMut.pending ? 'Saving…' : 'Record Return'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -328,6 +445,7 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
   materialName: (id: string) => string;
 }) {
   const { data, loading, error } = useQuery<any>(() => purchasesApi.detail(id), [id]);
+  const { data: returnNotes } = useQuery(() => returnsApi.purchases.forPurchase(id), [id]);
 
   return (
     <Modal onClose={onClose}>
@@ -344,8 +462,23 @@ function PurchaseDetail({ id, onClose, supplierName, materialName }: {
                 <div><span style={{ color: '#94a3b8' }}>Date</span><br /><strong>{data.purchase_date}</strong></div>
                 <div><span style={{ color: '#94a3b8' }}>Supplier</span><br /><strong>{supplierName(data.supplier_id)}</strong></div>
                 <div><span style={{ color: '#94a3b8' }}>Total</span><br /><strong>{fmt(data.total_amount)}</strong></div>
-                <div><span style={{ color: '#94a3b8' }}>Balance</span><br /><strong style={{ color: data.balance > 0 ? '#dc2626' : '#16a34a' }}>{fmt(data.balance)}</strong></div>
+                <div><span style={{ color: '#94a3b8' }}>Balance</span><br /><strong><BalanceFigure balance={data.balance} /></strong></div>
               </div>
+              {returnNotes && returnNotes.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: '0.9rem', margin: '1rem 0 0.5rem' }}>Returned to Supplier</h3>
+                  <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                    <thead><tr style={{ textAlign: 'left', color: '#64748b' }}><th>Date</th><th>Note</th><th>Reason</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {returnNotes.map(r => (
+                        <tr key={r.id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '0.4rem 0' }}>{r.return_date}</td><td>{r.doc_no}</td><td>{r.reason || '—'}</td><td>{fmt(r.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
               <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: '#64748b' }}><th>Material</th><th>Qty</th><th>Remaining</th><th>Unit Cost</th><th>Amount</th></tr>

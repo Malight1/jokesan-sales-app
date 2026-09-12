@@ -77,6 +77,10 @@ export default function Customers() {
     { key: 'address', header: 'Address', value: c => c.address ?? '' },
     { key: 'type', header: 'Type', value: c => typeName(c.customer_type_id),
       render: c => <span className={typeName(c.customer_type_id) === 'Corporate' ? 'badge-primary' : 'badge-gray'}>{typeName(c.customer_type_id)}</span> },
+    { key: 'credit_balance', header: 'Store Credit', align: 'right', value: c => c.credit_balance ?? 0,
+      render: c => (c.credit_balance ?? 0) > 0
+        ? <span style={{ color: '#16a34a', fontWeight: 600 }}>₦{(c.credit_balance ?? 0).toLocaleString()}</span>
+        : <span style={{ color: '#94a3b8' }}>—</span> },
   ];
 
   const rowActions: RowAction<Customer>[] = [

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift } from 'lucide-react';
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding,
-  SalesOrder, Customer, FinishedGood, Lookup,
+  returns as returnsApi, storeCredit,
+  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
-import { generateInvoicePdf } from '../lib/invoice';
+import { generateInvoicePdf, generateCreditNotePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
 import { enqueuePayment } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -19,6 +20,11 @@ import './Sales.scss';
 import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const CONDITIONS: { id: ReturnCondition; label: string; hint: string }[] = [
+  { id: 'resellable', label: 'Resellable', hint: 'Goes back on the shelf' },
+  { id: 'damaged', label: 'Damaged', hint: 'Written off — cost stays a loss' },
+  { id: 'expired', label: 'Expired', hint: 'Written off — cost stays a loss' },
+];
 
 const statusMap: Record<string, { label: string; cls: string }> = {
   full: { label: 'Full Payment', cls: 'badge-success' },
@@ -50,6 +56,8 @@ export default function Sales() {
   const [payFor, setPayFor] = useState<SalesOrder | null>(null);
   const [payAmount, setPayAmount] = useState(0);
   const [payType, setPayType] = useState('');
+  const [returnFor, setReturnFor] = useState<SalesOrder | null>(null);
+  const spendCreditMut = useMutation(storeCredit.spend);
 
   const blankItem = (): LineItem => ({ finished_good_id: '', quantity: 1, unit_price: 0 });
   const [form, setForm] = useState({
@@ -220,6 +228,7 @@ export default function Sales() {
 
   const rowActions: RowAction<SalesOrder>[] = [
     { icon: <Wallet size={15} />, label: 'Record payment', onClick: openPay, show: s => s.balance > 0 && !s.voided },
+    { icon: <Undo2 size={15} />, label: 'Return items', onClick: setReturnFor, show: s => !s.voided },
     { icon: <Eye size={15} />, label: 'View', onClick: s => setViewId(s.id) },
     { icon: <FileText size={15} />, label: 'Download invoice (PDF)', onClick: downloadInvoice, show: s => !s.voided },
     { icon: <MessageCircle size={15} />, label: 'Send receipt via WhatsApp', onClick: sendWhatsAppReceipt, show: s => !s.voided },
@@ -372,10 +381,28 @@ export default function Sales() {
               <button className="close-btn" onClick={() => setPayFor(null)}><X size={18} /></button>
             </div>
             <div className="modal-body">
-              {payMut.error && <ErrorState message={payMut.error} />}
+              {(payMut.error || spendCreditMut.error) && <ErrorState message={payMut.error || spendCreditMut.error || ''} />}
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
                 Outstanding balance: <strong style={{ color: '#dc2626' }}>{fmt(payFor.balance)}</strong>
               </p>
+              {(() => {
+                const cust = customers?.find(c => c.id === payFor.customer_id);
+                const credit = cust?.credit_balance ?? 0;
+                if (!cust || credit <= 0) return null;
+                const spend = Math.min(credit, payFor.balance);
+                return (
+                  <div className="alert alert-info" style={{ fontSize: '0.82rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
+                    <span><Gift size={13} style={{ verticalAlign: -2 }} /> {cust.first_name} has {fmt(credit)} in store credit</span>
+                    <button type="button" className="btn-secondary btn-sm" disabled={spendCreditMut.pending}
+                      onClick={async () => {
+                        const res = await spendCreditMut.mutate(payFor.id, spend);
+                        if (res !== null) { toast.success(`${fmt(spend)} of store credit applied.`); setPayFor(null); refetch(); }
+                      }}>
+                      {spendCreditMut.pending ? 'Applying…' : `Use ${fmt(spend)}`}
+                    </button>
+                  </div>
+                );
+              })()}
               <div className="form-group">
                 <label>Amount (₦)</label>
                 <NumberInput value={payAmount} onChange={setPayAmount} />
@@ -396,7 +423,178 @@ export default function Sales() {
             </div>
         </Modal>
       )}
+
+      {returnFor && (
+        <ReturnModal
+          sale={returnFor}
+          customerName={customerName}
+          productName={productName}
+          companyName={tenant?.name ?? 'My Business'}
+          invoiceNo={invoiceNo(returnFor)}
+          payTypes={payTypes ?? []}
+          hasCustomer={!!returnFor.customer_id}
+          onClose={() => setReturnFor(null)}
+          onDone={() => { setReturnFor(null); refetch(); refetchGoods(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ---- Return items (partial, mixed condition) → a credit note ----
+interface ReturnLine {
+  sale_item_id: string; finished_good_id: string; label: string;
+  unit_price: number; max: number; qty: number; condition: ReturnCondition;
+}
+function ReturnModal({ sale, customerName, productName, companyName, invoiceNo, payTypes, hasCustomer, onClose, onDone }: {
+  sale: SalesOrder;
+  customerName: (id: string | null) => string;
+  productName: (id: string) => string;
+  companyName: string;
+  invoiceNo: string;
+  payTypes: Lookup[];
+  hasCustomer: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { data, loading, error } = useQuery<any>(() => salesApi.detail(sale.id), [sale.id]);
+  const createMut = useMutation(returnsApi.sales.create);
+  const [lines, setLines] = useState<ReturnLine[] | null>(null);
+  const [reason, setReason] = useState('');
+  const [method, setMethod] = useState<'cash' | 'store_credit'>('cash');
+  const [payType, setPayType] = useState(payTypes[0]?.id ?? '');
+
+  // Build the editable line list once the sale's items have loaded.
+  useEffect(() => {
+    if (data && lines === null) {
+      setLines((data.sale_items ?? [])
+        .filter((i: any) => Number(i.quantity) - Number(i.qty_returned ?? 0) > 0)
+        .map((i: any) => ({
+          sale_item_id: i.id, finished_good_id: i.finished_good_id, label: productName(i.finished_good_id),
+          unit_price: i.unit_price, max: Number(i.quantity) - Number(i.qty_returned ?? 0), qty: 0, condition: 'resellable' as ReturnCondition,
+        })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const active = (lines ?? []).filter(l => l.qty > 0);
+  const vatRate = sale.vat_rate || 0;
+  const subtotal = active.reduce((s, l) => s + l.qty * l.unit_price, 0);
+  const vatAmt = Math.round(subtotal * vatRate) / 100;
+  const total = subtotal + vatAmt;
+  const remainder = Math.max(0, total - sale.balance);
+  const canSubmit = active.length > 0 && (method !== 'cash' || remainder <= 0 || !!payType);
+
+  const setLine = (idx: number, patch: Partial<ReturnLine>) =>
+    setLines(ls => ls ? ls.map((l, i) => i === idx ? { ...l, ...patch } : l) : ls);
+
+  const submit = async () => {
+    if (!canSubmit) { toast.error(remainder > 0 ? 'Choose a payment method for the refund.' : 'Set a quantity to return.'); return; }
+    const returnId = await createMut.mutate({
+      saleId: sale.id,
+      items: active.map(l => ({ saleItemId: l.sale_item_id, qty: l.qty, condition: l.condition })),
+      reason: reason.trim() || null,
+      remainderMethod: method,
+      paymentTypeId: method === 'cash' ? (payType || null) : null,
+    });
+    if (!returnId) { toast.error(createMut.error ?? 'Could not record the return.'); return; }
+    toast.success('Return recorded — stock and balance updated.');
+    try {
+      const ret = await returnsApi.sales.get(returnId);
+      await generateCreditNotePdf({
+        companyName, creditNoteNo: ret.doc_no ?? returnId.slice(0, 8).toUpperCase(), invoiceNo, date: ret.return_date,
+        customerName: customerName(sale.customer_id), reason: reason.trim() || undefined,
+        items: active.map(l => ({ name: l.label, qty: l.qty, unitPrice: l.unit_price, amount: l.qty * l.unit_price, condition: l.condition })),
+        subtotal, vatAmount: vatAmt, vatRate, total,
+        appliedToBalance: Math.min(total, sale.balance), refunded: method === 'cash' ? remainder : 0, toStoreCredit: method === 'store_credit' ? remainder : 0,
+      });
+    } catch { /* the return is already recorded; a missed PDF isn't worth blocking on */ }
+    onDone();
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={560}>
+      <div className="modal-header">
+        <h2>Return items — {invoiceNo}</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <div className="modal-body">
+        {loading && <Loading />}
+        {error && <ErrorState message={error} />}
+        {createMut.error && <ErrorState message={createMut.error} />}
+        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Every item on this sale has already been returned.</p>}
+        {lines && lines.length > 0 && (
+          <>
+            {lines.map((l, idx) => (
+              <div key={l.sale_item_id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.4fr', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.6rem' }}>
+                <div className="form-group">
+                  <label>{l.label}</label>
+                  <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{l.max.toLocaleString()} returnable at {fmt(l.unit_price)}</small>
+                </div>
+                <div className="form-group">
+                  <label>Qty</label>
+                  <NumberInput value={l.qty} onChange={v => setLine(idx, { qty: Math.max(0, Math.min(v, l.max)) })} />
+                </div>
+                <div className="form-group">
+                  <label>Condition</label>
+                  <select value={l.condition} disabled={l.qty === 0} onChange={e => setLine(idx, { condition: e.target.value as ReturnCondition })}>
+                    {CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            ))}
+
+            <div className="form-group">
+              <label>Reason</label>
+              <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. wrong size, arrived damaged" />
+            </div>
+
+            {active.length > 0 && (
+              <>
+                <div className="total-row" style={{ marginBottom: '0.75rem' }}>
+                  {vatAmt > 0 && (
+                    <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: 4 }}>
+                      Subtotal: {fmt(subtotal)} &nbsp;·&nbsp; VAT: {fmt(vatAmt)}
+                    </div>
+                  )}
+                  <strong>Credit total: {fmt(total)}</strong>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 4 }}>
+                    {Math.min(total, sale.balance) > 0 && <>Reduces balance owed by {fmt(Math.min(total, sale.balance))}. </>}
+                    {remainder > 0 && <>{fmt(remainder)} left over to {method === 'cash' ? 'refund' : 'credit'}.</>}
+                  </div>
+                </div>
+
+                {remainder > 0 && (
+                  <div className="form-group">
+                    <label>What happens to the {fmt(remainder)} left over?</label>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: method === 'cash' ? '0.5rem' : 0 }}>
+                      <button type="button" className={method === 'cash' ? 'btn-primary' : 'btn-secondary'} onClick={() => setMethod('cash')}>Refund in cash</button>
+                      <button type="button" className={method === 'store_credit' ? 'btn-primary' : 'btn-secondary'} disabled={!hasCustomer}
+                              title={hasCustomer ? undefined : 'This sale has no named customer'} onClick={() => setMethod('store_credit')}>
+                        Store credit
+                      </button>
+                    </div>
+                    {method === 'cash' && (
+                      <select value={payType} onChange={e => setPayType(e.target.value)}>
+                        <option value="">— payment method —</option>
+                        {payTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={createMut.pending || !canSubmit} onClick={submit}>
+          {createMut.pending ? 'Saving…' : 'Record Return'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -407,6 +605,30 @@ function SaleDetail({ id, onClose, customerName, productName }: {
   productName: (id: string) => string;
 }) {
   const { data, loading, error } = useQuery<any>(() => salesApi.detail(id), [id]);
+  const { data: creditNotes } = useQuery(() => returnsApi.sales.forSale(id), [id]);
+  const { tenant } = useAuth();
+  const toast = useToast();
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const downloadCreditNote = async (ret: { id: string; doc_no: string | null; return_date: string; reason: string | null;
+    subtotal: number; vat_amount: number; total: number; applied_to_balance: number; refunded: number; to_store_credit: number }) => {
+    setDownloading(ret.id);
+    try {
+      const items = await returnsApi.sales.items(ret.id);
+      await generateCreditNotePdf({
+        companyName: tenant?.name ?? 'My Business', creditNoteNo: ret.doc_no ?? ret.id.slice(0, 8).toUpperCase(),
+        invoiceNo: data?.doc_no ?? id.slice(0, 8).toUpperCase(), date: ret.return_date,
+        customerName: customerName(data?.customer_id), reason: ret.reason,
+        items: items.map(i => ({ name: productName(i.finished_good_id), qty: i.qty, unitPrice: i.unit_price, amount: i.amount, condition: i.condition })),
+        subtotal: ret.subtotal, vatAmount: ret.vat_amount, vatRate: data?.vat_rate ?? 0, total: ret.total,
+        appliedToBalance: ret.applied_to_balance, refunded: ret.refunded, toStoreCredit: ret.to_store_credit,
+      });
+    } catch (e: any) {
+      toast.error(e.message ?? 'Could not build the credit note.');
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   return (
     <Modal onClose={onClose}>
@@ -440,9 +662,33 @@ function SaleDetail({ id, onClose, customerName, productName }: {
               </table>
               <div className="view-summary">
                 <div><span>Total</span><strong>{fmt(data.total_amount)}</strong></div>
+                {data.returned_total > 0 && <div><span>Returned</span><strong style={{ color: '#dc2626' }}>−{fmt(data.returned_total)}</strong></div>}
                 <div><span>Paid</span><strong>{fmt(data.amount_paid)}</strong></div>
                 <div className={data.balance > 0 ? 'text-danger' : ''}><span>Balance</span><strong>{fmt(data.balance)}</strong></div>
               </div>
+              {creditNotes && creditNotes.length > 0 && (
+                <>
+                  <h3 className="section-title">Credit Notes</h3>
+                  <table className="view-table">
+                    <thead><tr><th>Date</th><th>Credit Note</th><th>Reason</th><th>Total</th><th /></tr></thead>
+                    <tbody>
+                      {creditNotes.map(r => (
+                        <tr key={r.id}>
+                          <td>{r.return_date}</td>
+                          <td>{r.doc_no}</td>
+                          <td>{r.reason || '—'}</td>
+                          <td>{fmt(r.total)}</td>
+                          <td>
+                            <button className="btn-ghost btn-sm" disabled={downloading === r.id} onClick={() => downloadCreditNote(r)}>
+                              <FileText size={13} /> {downloading === r.id ? 'Preparing…' : 'PDF'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
               {data.sale_payments?.length > 0 && (
                 <>
                   <h3 className="section-title">Payments</h3>

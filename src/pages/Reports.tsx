@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
-         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, lookups, stock } from '../lib/api';
+         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, lookups, stock } from '../lib/api';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
 import { useQuery } from '../lib/hooks';
@@ -15,7 +15,7 @@ import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products';
+type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
   { id: 'sales', label: 'Sales' },
@@ -24,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'debtors', label: 'Debtors' },
   { id: 'creditors', label: 'Creditors' },
   { id: 'products', label: 'Product Profit' },
+  { id: 'returns', label: 'Returns' },
 ];
 
 export default function Reports() {
@@ -44,6 +45,9 @@ export default function Reports() {
   const suppQ = useQuery(() => suppliersApi.list(), []);
   // Aggregated server-side, so it re-runs when the date range changes.
   const prodProfitQ = useQuery(() => reportsApi.productProfitability(from, to, branch || null), [from, to, branch]);
+  // Netted by the return's OWN date (migration 0023), so this can differ
+  // from what the Sales tab shows for the same range.
+  const returnsQ = useQuery(() => returnsApi.byProduct(from, to, branch || null), [from, to, branch]);
   // Per-branch quantities for the Stock tab when a branch is chosen.
   const levelsQ = useQuery(() => stock.levels(null), []);
 
@@ -215,6 +219,18 @@ export default function Reports() {
       </span> },
   ];
 
+  const returnsData = returnsQ.data ?? [];
+  const returnedValue = returnsData.reduce((s, r) => s + Number(r.value_returned || 0), 0);
+  const returnedLoss = returnsData.reduce((s, r) => s + Number(r.loss_value || 0), 0);
+  const returnCols: Column<any>[] = [
+    { key: 'product_name', header: 'Product', value: r => r.product_name, render: r => <strong>{r.product_name}</strong> },
+    { key: 'qty_returned', header: 'Qty Returned', align: 'right', value: r => Number(r.qty_returned), render: r => Number(r.qty_returned).toLocaleString() },
+    { key: 'value_returned', header: 'Value', align: 'right', value: r => Number(r.value_returned), render: r => fmt(Number(r.value_returned)) },
+    { key: 'resellable_qty', header: 'Resellable', align: 'right', value: r => Number(r.resellable_qty), render: r => Number(r.resellable_qty).toLocaleString() },
+    { key: 'loss_value', header: 'Written Off', align: 'right', value: r => Number(r.loss_value),
+      render: r => Number(r.loss_value) > 0 ? <span style={{ color: '#dc2626', fontWeight: 600 }}>{fmt(Number(r.loss_value))}</span> : '—' },
+  ];
+
   // ---- Exports per tab ----
   const doExport = async (kind: 'xlsx' | 'pdf') => {
     let cols: ExportColumn<any>[] = [];
@@ -278,7 +294,7 @@ export default function Reports() {
         { header: 'Owed', value: r => r.balance },
       ];
       rows = creditors; name = 'creditors-report'; title = 'Outstanding Creditors' + rangeLabel;
-    } else {
+    } else if (tab === 'products') {
       cols = [
         { header: 'Product', value: r => r.product_name },
         { header: 'Qty Sold', value: r => r.qty_sold },
@@ -288,6 +304,15 @@ export default function Reports() {
         { header: 'Margin %', value: r => r.margin_pct },
       ];
       rows = productProfit; name = 'product-profitability'; title = 'Product Profitability' + rangeLabel;
+    } else {
+      cols = [
+        { header: 'Product', value: r => r.product_name },
+        { header: 'Qty Returned', value: r => r.qty_returned },
+        { header: 'Value', value: r => r.value_returned },
+        { header: 'Resellable Qty', value: r => r.resellable_qty },
+        { header: 'Written Off', value: r => r.loss_value },
+      ];
+      rows = returnsData; name = 'returns-report'; title = 'Returns' + rangeLabel;
     }
 
     try {
@@ -518,6 +543,32 @@ export default function Reports() {
               <strong>{fmt(productRevenue)}</strong> revenue,{' '}
               <strong style={{ color: productProfitTotal >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(productProfitTotal)}</strong> gross profit
               {productRevenue > 0 && <> ({((productProfitTotal / productRevenue) * 100).toFixed(1)}% blended margin)</>}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === 'returns' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>Returns{rangeLabel}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Counted by the day the return happened, not the day of the original sale.
+          </p>
+          <DataTable
+            columns={returnCols}
+            rows={returnsData}
+            getRowKey={r => r.fg_id}
+            loading={returnsQ.loading}
+            error={returnsQ.error}
+            onRetry={returnsQ.refetch}
+            searchKeys={[r => r.product_name]}
+            searchPlaceholder="Search products…"
+            emptyMessage="No returns in this period."
+          />
+          {returnsData.length > 0 && (
+            <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
+              {fmt(returnedValue)} returned across {returnsData.length} product{returnsData.length !== 1 ? 's' : ''}
+              {returnedLoss > 0 && <>, of which <strong style={{ color: '#dc2626' }}>{fmt(returnedLoss)}</strong> was written off as damaged or expired</>}.
             </p>
           )}
         </div>

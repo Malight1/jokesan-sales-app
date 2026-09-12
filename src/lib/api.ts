@@ -12,6 +12,8 @@ export interface Customer {
   id: string; first_name: string | null; last_name: string | null;
   company_store: string | null; address: string | null; phone: string | null;
   email: string | null; customer_type_id: string | null; last_reminded_at: string | null;
+  // Earned from returns, spent on a later sale (migration 0023).
+  credit_balance?: number;
 }
 export interface Supplier {
   id: string; first_name: string | null; last_name: string | null;
@@ -43,12 +45,18 @@ export interface SalesOrder {
   notes: string | null; created_at: string; voided: boolean;
   subtotal: number; vat_amount: number; vat_rate: number;
   branch_id: string | null;
+  // Cumulative return adjustment (0023). total_amount/gross_profit stay as
+  // invoiced; these two track what's been given back since.
+  returned_total?: number; returned_profit?: number;
 }
 export interface PurchaseOrder {
   id: string; purchase_date: string; supplier_id: string | null;
   total_amount: number; total_paid: number; balance: number;
   payment_status: string; processed: boolean; voided: boolean;
   branch_id: string | null;
+  // Balance can go negative once returned_total exceeds it: the supplier
+  // owes YOU (migration 0023).
+  returned_total?: number;
 }
 export interface ProductionRun {
   id: string; production_date: string; finished_good_id: string;
@@ -259,6 +267,92 @@ export const purchases = {
       p_reference: reference ?? null, p_notes: notes ?? null,
     }),
   void: (purchaseId: string) => rpcVoid('void_purchase', { p_purchase: purchaseId }),
+};
+
+// ============================================================
+// RETURNS & CREDIT NOTES (migration 0023)
+//
+// A sale with a return is never voided or edited — total_amount and
+// gross_profit stay exactly as invoiced. Money goes: first it pays down
+// whatever the customer still owes, then whatever's left is refunded in
+// cash/transfer or turned into store credit for a named customer.
+// ============================================================
+export type ReturnCondition = 'resellable' | 'damaged' | 'expired';
+export interface SaleReturn {
+  id: string; sales_order_id: string; branch_id: string | null;
+  doc_no: string | null; return_date: string; reason: string | null;
+  subtotal: number; vat_amount: number; total: number; cogs_reversed: number;
+  applied_to_balance: number; refunded: number; to_store_credit: number;
+  refund_payment_type_id: string | null; created_at: string;
+}
+export interface SaleReturnItem {
+  id: string; sale_return_id: string; sale_item_id: string; finished_good_id: string;
+  qty: number; unit_price: number; amount: number; condition: ReturnCondition;
+}
+export interface PurchaseReturn {
+  id: string; purchase_order_id: string; branch_id: string | null;
+  doc_no: string | null; return_date: string; reason: string | null;
+  total: number; created_at: string;
+}
+export interface PurchaseReturnItem {
+  id: string; purchase_return_id: string; purchase_item_id: string; material_id: string;
+  qty: number; cost_price: number; amount: number;
+}
+export interface ReturnsByProduct {
+  fg_id: string; product_name: string; qty_returned: number; value_returned: number;
+  resellable_qty: number; loss_value: number;
+}
+
+export const returns = {
+  sales: {
+    list: () => runAll<SaleReturn>((f, t) => supabase.from('sale_returns').select('*').order('return_date', { ascending: false }).range(f, t)),
+    get: (id: string) => run<SaleReturn>(supabase.from('sale_returns').select('*').eq('id', id).single()),
+    forSale: (saleId: string) => run<SaleReturn[]>(supabase.from('sale_returns').select('*').eq('sales_order_id', saleId).order('created_at')),
+    items: (returnId: string) => run<SaleReturnItem[]>(supabase.from('sale_return_items').select('*').eq('sale_return_id', returnId)),
+    create: (params: {
+      saleId: string;
+      items: { saleItemId: string; qty: number; condition?: ReturnCondition }[];
+      reason?: string | null;
+      remainderMethod?: 'cash' | 'store_credit';
+      paymentTypeId?: string | null;
+      date?: string;
+    }) =>
+      rpc<string>('create_sale_return', {
+        p_sale: params.saleId,
+        p_items: params.items.map(i => ({ sale_item_id: i.saleItemId, qty: i.qty, condition: i.condition ?? 'resellable' })),
+        p_reason: params.reason ?? null,
+        p_remainder_method: params.remainderMethod ?? 'cash',
+        p_payment_type: params.paymentTypeId ?? null,
+        ...(params.date ? { p_date: params.date } : {}),
+      }),
+  },
+  purchases: {
+    list: () => runAll<PurchaseReturn>((f, t) => supabase.from('purchase_returns').select('*').order('return_date', { ascending: false }).range(f, t)),
+    forPurchase: (purchaseId: string) => run<PurchaseReturn[]>(supabase.from('purchase_returns').select('*').eq('purchase_order_id', purchaseId).order('created_at')),
+    items: (returnId: string) => run<PurchaseReturnItem[]>(supabase.from('purchase_return_items').select('*').eq('purchase_return_id', returnId)),
+    create: (params: {
+      purchaseId: string;
+      items: { purchaseItemId: string; qty: number }[];
+      reason?: string | null;
+    }) =>
+      rpc<string>('create_purchase_return', {
+        p_purchase: params.purchaseId,
+        p_items: params.items.map(i => ({ purchase_item_id: i.purchaseItemId, qty: i.qty })),
+        p_reason: params.reason ?? null,
+      }),
+  },
+  // Finance-only, mirrors report_product_profitability's role check.
+  byProduct: (from?: string, to?: string, branchId?: string | null) =>
+    rpc<ReturnsByProduct[]>('report_returns', {
+      p_from: from || null, p_to: to || null,
+      ...(branchId ? { p_branch: branchId } : {}),
+    }),
+};
+
+// A named customer's earned-but-unspent refund. Spending it works like a
+// second payment on a later sale — record_sale_payment is untouched.
+export const storeCredit = {
+  spend: (saleId: string, amount: number) => rpcVoid('spend_store_credit', { p_sale: saleId, p_amount: amount }),
 };
 
 // ============================================================

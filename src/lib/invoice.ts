@@ -127,3 +127,134 @@ export async function generateInvoicePdf(d: InvoiceData) {
 
   doc.save(`${d.invoiceNo}.pdf`);
 }
+
+// ============================================================
+// CREDIT NOTE — a partial or full return against an existing invoice
+// (migration 0023). Deliberately its own small document rather than a
+// reprint of the invoice: the invoice never changes after it's issued.
+// ============================================================
+export interface CreditNoteData {
+  companyName: string;
+  creditNoteNo: string;
+  invoiceNo: string;
+  date: string;
+  customerName: string;
+  customerPhone?: string | null;
+  reason?: string | null;
+  items: { name: string; qty: number; unitPrice: number; amount: number; condition: string }[];
+  subtotal: number;
+  vatAmount: number;
+  vatRate: number;
+  total: number;
+  appliedToBalance: number;
+  refunded: number;
+  toStoreCredit: number;
+  tin?: string | null;
+  logoDataUrl?: string | null;
+}
+
+const CONDITION_LABEL: Record<string, string> = { resellable: 'Resellable', damaged: 'Damaged', expired: 'Expired' };
+
+export async function generateCreditNotePdf(d: CreditNoteData) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  void autoTable;
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  if (d.logoDataUrl) {
+    try {
+      const fmtType = d.logoDataUrl.includes('png') ? 'PNG' : 'JPEG';
+      doc.addImage(d.logoDataUrl, fmtType, 14, 12, 22, 22);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(d.companyName, 40, 22);
+      if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 40, 28); }
+    } catch { /* ignore bad image */ }
+  } else {
+    doc.setFontSize(19);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(d.companyName, 14, 20);
+    if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 14, 26); }
+  }
+
+  doc.setFontSize(20);
+  doc.setTextColor(220, 38, 38);
+  doc.text('CREDIT NOTE', pageW - 14, 20, { align: 'right' });
+
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(14, 31, pageW - 14, 31);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Credit Note No: ${d.creditNoteNo}`, pageW - 14, 38, { align: 'right' });
+  doc.text(`Against Invoice: ${d.invoiceNo}`, pageW - 14, 44, { align: 'right' });
+  doc.text(`Date: ${d.date}`, pageW - 14, 50, { align: 'right' });
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(148, 163, 184);
+  doc.text('RETURNED BY', 14, 40);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(d.customerName, 14, 46);
+  let y = 51;
+  if (d.customerPhone) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(d.customerPhone, 14, y);
+    y += 5;
+  }
+  if (d.reason) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Reason: ${d.reason}`, 14, y);
+    y += 5;
+  }
+
+  autoTable(doc, {
+    startY: Math.max(y + 6, 56),
+    head: [['Item', 'Qty', 'Unit Price', 'Amount', 'Condition']],
+    body: d.items.map(i => [i.name, i.qty.toLocaleString(), money(i.unitPrice), money(i.amount), CONDITION_LABEL[i.condition] ?? i.condition]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [220, 38, 38] },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+  });
+
+  const afterTable = (doc as any).lastAutoTable.finalY + 8;
+  const rows: [string, string, boolean][] = [];
+  if (d.vatAmount > 0) {
+    rows.push(['Subtotal', money(d.subtotal), false]);
+    rows.push([`VAT (${d.vatRate}%)`, money(d.vatAmount), false]);
+  }
+  rows.push(['Credit Total', money(d.total), true]);
+  if (d.appliedToBalance > 0) rows.push(['Applied to balance owed', money(d.appliedToBalance), false]);
+  if (d.refunded > 0) rows.push(['Refunded', money(d.refunded), false]);
+  if (d.toStoreCredit > 0) rows.push(['Added to store credit', money(d.toStoreCredit), false]);
+  let ty = afterTable;
+  rows.forEach(([label, value, strong]) => {
+    doc.setFontSize(strong ? 12 : 10);
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setTextColor(strong ? 220 : 30, strong ? 38 : 41, strong ? 38 : 59);
+    doc.text(label, pageW - 80, ty);
+    doc.text(value, pageW - 14, ty, { align: 'right' });
+    ty += strong ? 8 : 6;
+  });
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+  doc.save(`${d.creditNoteNo}.pdf`);
+}

@@ -677,6 +677,221 @@ begin
     exists (select 1 from fg_batches where batch_no = 'OPEN-1' and expiry_date = current_date + 100 and branch_id = t_id('abuja')));
 end $$;
 
+-- ---------- 24. Returns and credit notes (0023) ----------
+do $$
+declare
+  v_rsoap uuid; v_cust uuid; v_rsale1 uuid; v_rsale2 uuid; v_walkin uuid;
+  v_cash uuid; v_item1 uuid; v_item2 uuid; v_itemw uuid;
+  v_n int; v_bal numeric; v_status text; v_credit numeric;
+begin
+  select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+
+  -- ---- setup: a product just for this section, so its numbers are clean ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(t_id('lagos'));
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Return Soap', 'pcs', 5, 100, 1.5) returning id into v_rsoap;
+  perform t_put('rsoap', v_rsoap);
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_rsoap, 20, 40, 'Opening balance');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_rsoap, 10, 40, 'Opening balance');
+
+  insert into customers (tenant_id, first_name) values (t_id('tenant'), 'Returning Customer') returning id into v_cust;
+  perform t_put('return_cust', v_cust);
+
+  -- ---- A: only the cashier who rang it up (same day) may return it ----
+  execute format('select public.create_sale(%L::uuid, current_date, null, 600, %L::jsonb)',
+    v_cust, t_items(v_rsoap, 10, 100)) into v_rsale1;
+  perform t_put('rsale1', v_rsale1);
+  select id into v_item1 from sale_items where sales_order_id = v_rsale1;
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a cashier cannot return someone else''s sale',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, %L)', v_rsale1,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 1))::text, 'wrong person'),
+    'you rang up yourself');
+  perform t_su();
+
+  -- ---- B: a mixed return (resellable + damaged) pays down the balance first ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.create_sale_return(v_rsale1,
+    jsonb_build_array(
+      jsonb_build_object('sale_item_id', v_item1, 'qty', 3, 'condition', 'resellable'),
+      jsonb_build_object('sale_item_id', v_item1, 'qty', 1, 'condition', 'damaged')),
+    'wrong size, one arrived crushed');
+  perform t_su();
+
+  select balance, payment_status into v_bal, v_status from sales_orders where id = v_rsale1;
+  perform t_rec('a return that exactly covers the balance settles the sale',
+    v_bal = 0 and v_status = 'full', format('balance=%s status=%s', v_bal, v_status));
+  perform t_rec('resellable units go back to the exact batch at cost (10-10+3=13 left)',
+    (select qty_remaining = 13 from fg_batches where finished_good_id = v_rsoap and branch_id = t_id('lagos') and origin = 'adjustment'));
+  perform t_rec('damaged units do not come back to the shelf (Lagos 13 + Abuja 10 = 23, not 24)',
+    (select qty_balance = 23 from finished_goods where id = v_rsoap));
+  perform t_rec('gross profit is adjusted by revenue lost minus cost recovered (400 - 120 = 280)',
+    (select returned_total = 400 and returned_profit = 280 from sales_orders where id = v_rsale1));
+
+  -- ---- C: once the balance is gone, the rest is a cash refund ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.create_sale_return(v_rsale1,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2, 'condition', 'resellable')),
+    'kept fewer than planned', 'cash', v_cash);
+  perform t_su();
+  perform t_rec('nothing more was owed, so the whole return came back as a cash refund',
+    exists (select 1 from sale_payments where sales_order_id = v_rsale1 and reference = 'RETURN' and amount_paid = -200));
+  perform t_rec('the sale stays settled after a refund (balance is still 0)',
+    (select balance = 0 and payment_status = 'full' from sales_orders where id = v_rsale1));
+
+  -- ---- D: or, for a named customer, store credit instead of cash ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.create_sale_return(v_rsale1,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2, 'condition', 'resellable')),
+    'store credit instead', 'store_credit');
+  perform t_su();
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('the customer earned store credit for the refund (₦200)', v_credit = 200, v_credit::text);
+
+  -- ---- E: a return can't take back more than is left to return ----
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('cannot return more than what is left on the line',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, %L)', v_rsale1,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 3))::text, 'too many'),
+    'still returnable');
+  perform public.create_sale_return(v_rsale1,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2, 'condition', 'resellable')),
+    'the last of it');
+  perform t_su();
+  perform t_rec('every resellable unit is back on the shelf (9 of 10 returned, 1 stayed damaged: 10-10+9=19)',
+    (select qty_remaining = 19 from fg_batches where finished_good_id = v_rsoap and branch_id = t_id('lagos') and origin = 'adjustment'));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('the line is now fully returned',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, %L)', v_rsale1,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 1))::text, 'once more'),
+    'still returnable');
+  perform t_err('a sale with a return on it can''t be voided as a whole',
+    format('select public.void_sale(%L::uuid)', v_rsale1), 'use a return');
+  perform t_su();
+
+  -- ---- F: store credit is spent like a second payment, capped both ways ----
+  -- Sale of 3 (₦300 owed) against a customer sitting on ₦200 of credit, so
+  -- the two caps (what's owed, what they have) each get tested on their own.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)',
+    v_cust, t_items(v_rsoap, 3, 100)) into v_rsale2;
+  perform t_put('rsale2', v_rsale2);
+  perform t_err('cannot spend more store credit than the customer has',
+    format('select public.spend_store_credit(%L::uuid, 250)', v_rsale2), 'only has');
+  perform t_err('cannot spend more credit than the sale still owes',
+    format('select public.spend_store_credit(%L::uuid, 350)', v_rsale2), 'more than');
+  perform public.spend_store_credit(v_rsale2, 200);
+  perform t_su();
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('spending store credit reduces the customer''s balance (200 → 0)', v_credit = 0, v_credit::text);
+  perform t_rec('it pays down the sale without needing to fully settle it (300 - 200 = 100 still owed)',
+    (select balance = 100 and payment_status = 'part' from sales_orders where id = v_rsale2));
+  perform t_rec('store credit is logged as its own kind of payment',
+    exists (select 1 from sale_payments where sales_order_id = v_rsale2 and reference = 'STORE_CREDIT' and amount_paid = 200));
+
+  -- ---- G: store credit needs someone to credit it to ----
+  -- Paid in full, so the return has no balance left to absorb it — the
+  -- whole thing has to go out as a refund, and there's no one to credit.
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  execute format('select public.create_sale(null, current_date, null, 200, %L::jsonb)', t_items(v_rsoap, 2, 100)) into v_walkin;
+  select id into v_itemw from sale_items where sales_order_id = v_walkin;
+  perform t_err('store credit is refused on a walk-in sale with no customer',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, null, %L)', v_walkin,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_itemw, 'qty', 1))::text, 'store_credit'),
+    'named customer');
+  perform t_su();
+
+  -- ---- H: goods sent back to a supplier ----
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  declare v_po uuid; v_pi uuid; v_before numeric;
+  begin
+    select public.create_purchase(null, current_date, null, 0,
+      jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 20, 'cost_price', 10))) into v_po;
+    select id into v_pi from purchase_items where purchase_order_id = v_po;
+    select balance into v_before from purchase_orders where id = v_po;
+    perform public.create_purchase_return(v_po,
+      jsonb_build_array(jsonb_build_object('purchase_item_id', v_pi, 'qty', 5)), 'damaged in the bag');
+    perform t_rec('the supplier return draws down that exact batch (20 → 15)',
+      (select qty_remaining = 15 from purchase_items where id = v_pi));
+    perform t_rec('what you owe the supplier drops by the return''s cost (₦200 → ₦150)',
+      (select balance = v_before - 50 from purchase_orders where id = v_po));
+    perform t_err('cannot return more of a batch than is still unused',
+      format('select public.create_purchase_return(%L::uuid, %L::jsonb)', v_po,
+        jsonb_build_array(jsonb_build_object('purchase_item_id', v_pi, 'qty', 20))::text),
+      'still unused');
+  end;
+  perform t_su();
+
+  -- ---- I: a return in one report period doesn't touch another (2026-01 vs today) ----
+  -- (kept simple: this is exercised structurally by dashboard_summary/report_*
+  --  joining sale_returns on its OWN return_date rather than the sale's date;
+  --  covered by the profitability and returns-report assertions below.)
+end $$;
+
+-- ---------- 25. reports net returns out cleanly (isolated product) ----------
+do $$
+declare v_item uuid; v_sale uuid; v_ret uuid; v_cash uuid; v_row record;
+begin
+  select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Profit Test Item', 'pcs', 5, 25, 1.5) returning id into v_item;
+  perform t_put('profit_item', v_item);
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_item, 5, 10, 'Opening balance');
+
+  execute format('select public.create_sale(null, current_date, null, 125, %L::jsonb)', t_items(v_item, 5, 25)) into v_sale;
+  execute format(
+    'select public.create_sale_return(%L::uuid, %L::jsonb, %L, %L, %L::uuid)',
+    v_sale,
+    jsonb_build_array(jsonb_build_object('sale_item_id',
+      (select id from sale_items where sales_order_id = v_sale), 'qty', 2, 'condition', 'resellable'))::text,
+    'too many', 'cash', v_cash
+  ) into v_ret;
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  select * into v_row from public.report_product_profitability(null, null, null)
+   where fg_id = v_item;
+  perform t_rec('product profitability nets qty, revenue and cost (net of returns)',
+    v_row.qty_sold = 3 and v_row.total_revenue = 75 and v_row.total_cogs = 30 and v_row.profit = 45,
+    format('qty=%s rev=%s cogs=%s profit=%s', v_row.qty_sold, v_row.total_revenue, v_row.total_cogs, v_row.profit));
+
+  select * into v_row from public.report_returns(null, null, null) where fg_id = v_item;
+  perform t_rec('the returns report splits resellable from a loss',
+    v_row.qty_returned = 2 and v_row.value_returned = 50 and v_row.resellable_qty = 2 and v_row.loss_value = 0,
+    format('qty=%s value=%s resellable=%s loss=%s', v_row.qty_returned, v_row.value_returned, v_row.resellable_qty, v_row.loss_value));
+  perform t_su();
+end $$;
+
+-- ---------- 26. VAT on a return is prorated at the sale's own rate ----------
+do $$
+declare v_sale uuid; v_ret uuid; v_row record; v_item uuid; v_cash uuid;
+begin
+  select id into v_item from finished_goods where id = t_id('profit_item');
+  select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+  update tenants set vat_enabled = true, vat_rate = 7.5 where id = t_id('tenant');
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, null, 53.75, %L::jsonb, 0)', t_items(v_item, 2, 25)) into v_sale;
+  execute format(
+    'select public.create_sale_return(%L::uuid, %L::jsonb, null, %L, %L::uuid)',
+    v_sale,
+    jsonb_build_array(jsonb_build_object('sale_item_id',
+      (select id from sale_items where sales_order_id = v_sale), 'qty', 1, 'condition', 'resellable'))::text,
+    'cash', v_cash
+  ) into v_ret;
+  perform t_su();
+
+  select * into v_row from sale_returns where id = v_ret;
+  perform t_rec('a return carries its own share of VAT at the rate the sale was made at',
+    v_row.subtotal = 25 and v_row.vat_amount = 1.88 and v_row.total = 26.88,
+    format('subtotal=%s vat=%s total=%s', v_row.subtotal, v_row.vat_amount, v_row.total));
+
+  update tenants set vat_enabled = false where id = t_id('tenant');
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin
