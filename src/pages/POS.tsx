@@ -1,12 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete, Undo2 } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete, Undo2, Tag } from 'lucide-react';
 import {
-  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock,
-  FinishedGood, Customer, Lookup, StockLevel, SalesOrder,
+  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing,
+  FinishedGood, Customer, Lookup, StockLevel, SalesOrder, PriceList, PriceListItem, CustomerType,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
+import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
@@ -18,12 +20,18 @@ import OfflineBanner from '../components/OfflineBanner';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import Modal from '../components/Modal';
+import ApprovalModal from '../components/ApprovalModal';
+import LinePriceModal from '../components/LinePriceModal';
 import { ReturnModal } from './Sales';
 import './POS.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const NEEDS_APPROVAL = /manager'?s? pin/i;
 
-interface CartLine { good: FinishedGood; qty: number; }
+// unitPrice defaults to the resolved list price; `manual` marks a line the
+// cashier has hand-priced, so switching the customer later re-prices
+// everything EXCEPT what was deliberately discounted.
+interface CartLine { good: FinishedGood; qty: number; unitPrice: number; manual?: boolean; discountReason?: string; }
 
 // Round-number cash amounts a cashier would actually hand over (matches
 // real naira notes), so "Cash given" is usually a tap instead of typing.
@@ -88,6 +96,10 @@ export default function POS() {
     { cacheKey: `pos-levels-${myBranchId ?? 'default'}` });
   const custQ = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'pos-customers' });
   const payQ = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
+  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const listsQ = useQuery<PriceList[]>(() => tiersEnabled ? pricing.lists() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-price-lists' });
+  const priceItemsQ = useQuery<PriceListItem[]>(() => tiersEnabled ? pricing.allItems() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-price-items' });
+  const custTypesQ = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-cust-types' });
   const [checkingOut, setCheckingOut] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -98,10 +110,31 @@ export default function POS() {
   const [tendered, setTendered] = useState(0);
   const [payMode, setPayMode] = useState<'full' | 'part' | 'credit'>('full');
   const [showKeypad, setShowKeypad] = useState(false);
+  const [discountLine, setDiscountLine] = useState<CartLine | null>(null);
+  const [orderDiscount, setOrderDiscount] = useState(0);
+  const [showOrderDiscount, setShowOrderDiscount] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [needsApproval, setNeedsApproval] = useState(false);
   const [done, setDone] = useState<{
     total: number; paid: number; subtotal: number; vat: number; vatRate: number;
     offline?: boolean; docNo?: string | null;
   } | null>(null);
+
+  const priceCtx: PriceContext = useMemo(() => ({
+    priceListItems: priceItemsQ.data ?? [],
+    defaultListId: listsQ.data?.find(l => l.is_default && l.is_active)?.id ?? null,
+    customers: custQ.data ?? [],
+    customerTypes: custTypesQ.data ?? [],
+  }), [priceItemsQ.data, listsQ.data, custQ.data, custTypesQ.data]);
+  const resolvedPrice = (g: FinishedGood, qty: number) => resolvePriceLocal(g.id, qty, customerId || null, priceCtx, g.selling_price);
+
+  // Picking a customer reprices every line to their tier — except one the
+  // cashier has already hand-discounted, which stays exactly as set.
+  useEffect(() => {
+    setCart(c => c.map(l => l.manual ? l : { ...l, unitPrice: resolvedPrice(l.good, l.qty) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, priceItemsQ.data, listsQ.data]);
 
   // Returns, found by invoice number rather than a full sales list — POS
   // never loads one. Needs a connection: unlike a sale, a return checks
@@ -128,12 +161,14 @@ export default function POS() {
     [goods, search]
   );
 
-  const subtotal = cart.reduce((s, l) => s + l.qty * l.good.selling_price, 0);
+  const cartSubtotal = cart.reduce((s, l) => s + l.qty * l.unitPrice, 0);
+  const subtotal = Math.max(cartSubtotal - orderDiscount, 0);
   const vatRate = tenant?.vat_enabled ? tenant.vat_rate : 0;
   const vatAmt = subtotal * vatRate / 100;
   const total = subtotal + vatAmt;
   const paid = payMode === 'full' ? total : payMode === 'credit' ? 0 : Math.min(tendered, total);
   const change = payMode === 'full' && tendered > total ? tendered - total : 0;
+  const totalDiscount = cart.reduce((s, l) => s + Math.max((resolvedPrice(l.good, l.qty) - l.unitPrice) * l.qty, 0), 0) + orderDiscount;
 
   const addToCart = (g: FinishedGood) => {
     if (avail(g) <= 0) { toast.error(`${g.name} is out of stock${multi ? ` at ${myBranchName}` : ''}.`); return; }
@@ -141,9 +176,10 @@ export default function POS() {
       const ex = c.find(l => l.good.id === g.id);
       if (ex) {
         if (ex.qty >= avail(g)) { toast.error(`Only ${avail(g)} of ${g.name} ${where}.`); return c; }
-        return c.map(l => l.good.id === g.id ? { ...l, qty: l.qty + 1 } : l);
+        const nextQty = ex.qty + 1;
+        return c.map(l => l.good.id === g.id ? { ...l, qty: nextQty, unitPrice: l.manual ? l.unitPrice : resolvedPrice(g, nextQty) } : l);
       }
-      return [...c, { good: g, qty: 1 }];
+      return [...c, { good: g, qty: 1, unitPrice: resolvedPrice(g, 1) }];
     });
   };
 
@@ -159,39 +195,66 @@ export default function POS() {
       if (l.good.id !== id) return [l];
       if (qty <= 0) return [];
       const capped = Math.min(qty, avail(l.good));
-      return [{ ...l, qty: capped }];
+      // A quantity break can change the resolved price — unless this line
+      // was hand-priced, in which case the cashier's own number sticks.
+      return [{ ...l, qty: capped, unitPrice: l.manual ? l.unitPrice : resolvedPrice(l.good, capped) }];
     }));
   };
 
   const clearSale = () => {
     setCart([]); setCustomerId(''); setTendered(0); setPayMode('full'); setShowKeypad(false);
+    setOrderDiscount(0); setShowOrderDiscount(false);
   };
 
-  const checkout = async () => {
+  const applyLinePrice = (fgId: string, unitPrice: number, reason: string) => {
+    setCart(c => c.map(l => l.good.id === fgId
+      ? { ...l, unitPrice, manual: unitPrice !== resolvedPrice(l.good, l.qty), discountReason: reason || undefined }
+      : l));
+    setDiscountLine(null);
+  };
+
+  const buildPayload = (approval?: { userId: string; pin: string }) => ({
+    customerId: customerId || null,
+    date: new Date().toISOString().split('T')[0],
+    paymentTypeId: payTypeId || null,
+    amountPaid: paid,
+    items: cart.map(l => ({
+      finished_good_id: l.good.id, quantity: l.qty, unit_price: l.unitPrice,
+      ...(l.manual && l.discountReason ? { discount_reason: l.discountReason } : {}),
+    })),
+    vatRate,
+    // Pinned so a sale queued offline replays at the branch it was rung up
+    // at, even if this device later signs in somewhere else.
+    branchId: myBranchId,
+    ...(orderDiscount > 0 ? { orderDiscount } : {}),
+    ...(approval ? { approval } : {}),
+  });
+
+  const checkout = async (approval?: { userId: string; pin: string }) => {
     if (cart.length === 0) { toast.error('Cart is empty.'); return; }
     if (payMode !== 'credit' && !payTypeId) { toast.error('Select a payment method.'); return; }
     if (payMode === 'full' && tendered < total) { toast.error('Cash given is less than the total.'); return; }
-    const payload = {
-      customerId: customerId || null,
-      date: new Date().toISOString().split('T')[0],
-      paymentTypeId: payTypeId || null,
-      amountPaid: paid,
-      items: cart.map(l => ({ finished_good_id: l.good.id, quantity: l.qty, unit_price: l.good.selling_price })),
-      vatRate,
-      // Pinned so a sale queued offline replays at the branch it was rung up
-      // at, even if this device later signs in somewhere else.
-      branchId: myBranchId,
-    };
+    const payload = buildPayload(approval);
     setCheckingOut(true);
+    if (approval) { setApproving(true); setApprovalError(null); }
     try {
       const saleId = await salesApi.create(payload);
       // The server issues the invoice number (0021); the receipt must carry
       // the same one the Sales page and the tax records show.
       const docNo = await salesApi.docNo(saleId).catch(() => null);
+      setNeedsApproval(false);
       setDone({ total, paid, subtotal, vat: vatAmt, vatRate, docNo });
       goodsQ.refetch();
       levelsQ.refetch();
     } catch (e: any) {
+      if (!approval && NEEDS_APPROVAL.test(e.message ?? '')) {
+        setNeedsApproval(true);
+        return;
+      }
+      if (approval) {
+        setApprovalError(e.message ?? 'Could not approve that discount.');
+        return;
+      }
       if (looksOffline(e)) {
         // Keep selling — the sale is queued locally and replayed through the
         // real FIFO engine the moment connectivity returns (useOnlineSync).
@@ -211,6 +274,7 @@ export default function POS() {
       }
     } finally {
       setCheckingOut(false);
+      if (approval) setApproving(false);
     }
   };
 
@@ -243,7 +307,7 @@ export default function POS() {
   // ---- success screen ----
   if (done) {
     const cust = custQ.data?.find(c => c.id === customerId);
-    const receiptItems = cart.map(l => ({ name: l.good.name, qty: l.qty, unitPrice: l.good.selling_price, amount: l.qty * l.good.selling_price }));
+    const receiptItems = cart.map(l => ({ name: l.good.name, qty: l.qty, unitPrice: l.unitPrice, amount: l.qty * l.unitPrice }));
     // Offline, the number is issued when the sale syncs.
     const invNo = done.docNo ?? (done.offline ? 'Pending sync' : 'Receipt');
     const sendWa = () => {
@@ -333,25 +397,52 @@ export default function POS() {
         <div className="cart-lines">
           {cart.length === 0 ? (
             <div className="cart-empty"><ShoppingCart size={28} /><p>Tap a product to start</p></div>
-          ) : cart.map(l => (
-            <div key={l.good.id} className="cart-line">
-              <div className="cl-info">
-                <div className="cl-name">{l.good.name}</div>
-                <div className="cl-price">{fmt(l.good.selling_price)} each</div>
+          ) : cart.map(l => {
+            const list = resolvedPrice(l.good, l.qty);
+            const discounted = l.unitPrice < list;
+            return (
+              <div key={l.good.id} className="cart-line">
+                <div className="cl-info">
+                  <div className="cl-name">{l.good.name}</div>
+                  <div className="cl-price">
+                    {fmt(l.unitPrice)} each
+                    {discounted && <span style={{ color: '#94a3b8', textDecoration: 'line-through', marginLeft: 5 }}>{fmt(list)}</span>}
+                  </div>
+                </div>
+                <div className="cl-qty">
+                  <button onClick={() => setQty(l.good.id, l.qty - 1)}><Minus size={13} /></button>
+                  <span>{l.qty}</span>
+                  <button onClick={() => setQty(l.good.id, l.qty + 1)}><Plus size={13} /></button>
+                </div>
+                <div className="cl-amount">{fmt(l.qty * l.unitPrice)}</div>
+                {tiersEnabled && (
+                  <button className="cl-remove" title="Change price" aria-label={`Change price for ${l.good.name}`}
+                          onClick={() => setDiscountLine(l)}>
+                    <Tag size={13} />
+                  </button>
+                )}
+                <button className="cl-remove" onClick={() => setQty(l.good.id, 0)}><X size={13} /></button>
               </div>
-              <div className="cl-qty">
-                <button onClick={() => setQty(l.good.id, l.qty - 1)}><Minus size={13} /></button>
-                <span>{l.qty}</span>
-                <button onClick={() => setQty(l.good.id, l.qty + 1)}><Plus size={13} /></button>
-              </div>
-              <div className="cl-amount">{fmt(l.qty * l.good.selling_price)}</div>
-              <button className="cl-remove" onClick={() => setQty(l.good.id, 0)}><X size={13} /></button>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {cart.length > 0 && (
           <div className="cart-checkout">
+            {tiersEnabled && (showOrderDiscount || orderDiscount > 0) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: '0.8rem', color: '#64748b', flexShrink: 0 }}>Order discount ₦</span>
+                <NumberInput value={orderDiscount} onChange={v => setOrderDiscount(Math.max(0, Math.min(v, cartSubtotal)))} style={{ flex: 1 }} />
+              </div>
+            )}
+            {tiersEnabled && !showOrderDiscount && orderDiscount === 0 && (
+              <button type="button" className="btn-ghost btn-sm" style={{ marginBottom: 6 }} onClick={() => setShowOrderDiscount(true)}>
+                <Tag size={13} /> Add order discount
+              </button>
+            )}
+            {totalDiscount > 0 && (
+              <div style={{ fontSize: '0.8rem', color: '#16a34a', marginBottom: 4 }}>You're giving {fmt(totalDiscount)} off</div>
+            )}
             {vatRate > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#64748b' }}>
                 <span>Subtotal · VAT {vatRate}%</span><span>{fmt(subtotal)} · {fmt(vatAmt)}</span>
@@ -457,7 +548,7 @@ export default function POS() {
 
             <button
               className="btn-primary checkout-btn"
-              onClick={checkout}
+              onClick={() => checkout()}
               disabled={
                 checkingOut ||
                 (payMode !== 'credit' && !payTypeId) ||
@@ -514,6 +605,28 @@ export default function POS() {
           hasCustomer={!!returnSale.customer_id}
           onClose={() => setReturnSale(null)}
           onDone={() => { setReturnSale(null); goodsQ.refetch(); levelsQ.refetch(); }}
+        />
+      )}
+
+      {discountLine && (
+        <LinePriceModal
+          productName={discountLine.good.name}
+          qty={discountLine.qty}
+          unit={discountLine.good.unit ?? undefined}
+          currentPrice={discountLine.unitPrice}
+          listPrice={resolvedPrice(discountLine.good, discountLine.qty)}
+          reason={discountLine.discountReason}
+          onSave={(price, reason) => applyLinePrice(discountLine.good.id, price, reason)}
+          onClose={() => setDiscountLine(null)}
+        />
+      )}
+
+      {needsApproval && (
+        <ApprovalModal
+          pending={approving}
+          error={approvalError}
+          onCancel={() => { setNeedsApproval(false); setApprovalError(null); }}
+          onApprove={(managerId, pin) => checkout({ userId: managerId, pin })}
         />
       )}
     </div>

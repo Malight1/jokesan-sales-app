@@ -14,6 +14,14 @@ export interface Customer {
   email: string | null; customer_type_id: string | null; last_reminded_at: string | null;
   // Earned from returns, spent on a later sale (migration 0023).
   credit_balance?: number;
+  // Overrides their customer type's price list (migration 0025).
+  price_list_id?: string | null;
+}
+// customer_types with its price list, for resolving a sale's price
+// (migration 0025) — lookups.customerTypes() stays the plain id/name form
+// the rest of the app already uses.
+export interface CustomerType extends Lookup {
+  price_list_id?: string | null;
 }
 export interface Supplier {
   id: string; first_name: string | null; last_name: string | null;
@@ -133,6 +141,55 @@ export const lookups = {
 };
 
 // ============================================================
+// PRICE LISTS, QUANTITY BREAKS & DISCOUNT LIMITS (migration 0025)
+//
+// A price is resolved in this order: the customer's own list, then their
+// customer type's list, then the company's default list, then the
+// product's plain selling price. create_sale (server) is the only place
+// this is actually enforced; the frontend just previews it from the same
+// tables so POS/Sales can show a live price as a cart is built.
+// ============================================================
+export interface PriceList { id: string; name: string; is_default: boolean; is_active: boolean; }
+export interface PriceListItem { id: string; price_list_id: string; finished_good_id: string; min_qty: number; price: number; }
+export interface DiscountLine { reason: string; line_count: number; qty: number; discount_value: number; }
+
+export const pricing = {
+  lists: () => run<PriceList[]>(supabase.from('price_lists').select('*').order('name')),
+  createList: (name: string) => run<PriceList>(supabase.from('price_lists').insert({ name: name.trim() }).select().single()),
+  renameList: (id: string, name: string) => del(supabase.from('price_lists').update({ name: name.trim() }).eq('id', id)),
+  // Only one list may be the default; clear the old one first.
+  setDefault: async (id: string) => {
+    await del(supabase.from('price_lists').update({ is_default: false }).eq('is_default', true));
+    await del(supabase.from('price_lists').update({ is_default: true }).eq('id', id));
+  },
+  setActive: (id: string, is_active: boolean) => del(supabase.from('price_lists').update({ is_active }).eq('id', id)),
+  removeList: (id: string) => del(supabase.from('price_lists').delete().eq('id', id)),
+  // Every price for every list — small enough per tenant to load in one
+  // go, and POS/Sales need instant, no-round-trip repricing as a cart
+  // is built.
+  allItems: () => run<PriceListItem[]>(supabase.from('price_list_items').select('*')),
+  // A flat price per product for one list (min_qty 1). Quantity breaks
+  // beyond that live in the database (0025) but aren't editable here yet.
+  setPrice: (priceListId: string, finishedGoodId: string, price: number) =>
+    del(supabase.from('price_list_items').upsert(
+      { price_list_id: priceListId, finished_good_id: finishedGoodId, min_qty: 1, price },
+      { onConflict: 'price_list_id,finished_good_id,min_qty' },
+    )),
+  clearPrice: (priceListId: string, finishedGoodId: string) =>
+    del(supabase.from('price_list_items').delete().eq('price_list_id', priceListId).eq('finished_good_id', finishedGoodId).eq('min_qty', 1)),
+
+  customerTypes: () => run<CustomerType[]>(supabase.from('customer_types').select('id, name, price_list_id').order('name')),
+  setCustomerTypeList: (id: string, priceListId: string | null) =>
+    del(supabase.from('customer_types').update({ price_list_id: priceListId }).eq('id', id)),
+
+  discountReport: (from?: string, to?: string, branchId?: string | null) =>
+    rpc<DiscountLine[]>('report_discounts', { p_from: from || null, p_to: to || null, ...(branchId ? { p_branch: branchId } : {}) }),
+
+  hasApprovalPin: () => rpc<boolean>('has_approval_pin'),
+  setApprovalPin: (pin: string) => rpcVoid('set_approval_pin', { p_pin: pin }),
+};
+
+// ============================================================
 // CUSTOMERS
 // ============================================================
 export const customers = {
@@ -235,17 +292,26 @@ export const sales = {
     customerId: string | null; date: string; paymentTypeId: string | null;
     amountPaid: number;
     // fg_batch_id sells from one exact batch (a scanned batch label).
-    items: { finished_good_id: string; quantity: number; unit_price: number; fg_batch_id?: string }[];
+    // discount_reason is only meaningful when unit_price is below what
+    // resolve_price() would charge — the server works the discount amount
+    // out for itself, it isn't sent here.
+    items: { finished_good_id: string; quantity: number; unit_price: number; fg_batch_id?: string; discount_reason?: string | null }[];
     vatRate?: number;
     // Pinned by the offline queue so a sale replays at the branch it was
     // rung up at. Omitted otherwise: the server uses the caller's branch.
     branchId?: string | null;
+    // A flat ₦ amount off the whole sale (migration 0025).
+    orderDiscount?: number;
+    // Needed only when the combined discount is over the cashier's limit.
+    approval?: { userId: string; pin: string } | null;
   }) =>
     rpc<string>('create_sale', {
       p_customer: params.customerId, p_date: params.date,
       p_payment_type: params.paymentTypeId, p_amount_paid: params.amountPaid, p_items: params.items,
       p_vat_rate: params.vatRate ?? 0,
       ...(params.branchId ? { p_branch: params.branchId } : {}),
+      ...(params.orderDiscount ? { p_order_discount: params.orderDiscount } : {}),
+      ...(params.approval ? { p_approval: { user_id: params.approval.userId, pin: params.approval.pin } } : {}),
     }),
   addPayment: (saleId: string, amount: number, paymentTypeId: string | null, reference?: string, notes?: string) =>
     rpcVoid('record_sale_payment', {

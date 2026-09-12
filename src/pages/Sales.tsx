@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag } from 'lucide-react';
 import {
-  sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding,
+  sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
   returns as returnsApi, storeCredit,
-  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition,
+  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
+import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf, generateCreditNotePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
 import { enqueuePayment } from '../lib/offlineQueue';
@@ -16,10 +18,12 @@ import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
 import NumberInput from '../components/NumberInput';
+import ApprovalModal from '../components/ApprovalModal';
 import './Sales.scss';
 import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const NEEDS_APPROVAL = /manager'?s? pin/i;
 const CONDITIONS: { id: ReturnCondition; label: string; hint: string }[] = [
   { id: 'resellable', label: 'Resellable', hint: 'Goes back on the shelf' },
   { id: 'damaged', label: 'Damaged', hint: 'Written off — cost stays a loss' },
@@ -32,7 +36,7 @@ const statusMap: Record<string, { label: string; cls: string }> = {
   unpaid: { label: 'Unpaid', cls: 'badge-danger' },
 };
 
-interface LineItem { finished_good_id: string; quantity: number; unit_price: number; }
+interface LineItem { finished_good_id: string; quantity: number; unit_price: number; discount_reason: string; }
 
 export default function Sales() {
   const toast = useToast();
@@ -41,10 +45,14 @@ export default function Sales() {
   // rather than letting staff click into a permission error.
   const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
   const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
   const { data: goods, refetch: refetchGoods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
+  const { data: priceLists } = useQuery<PriceList[]>(() => tiersEnabled ? pricing.lists() : Promise.resolve([]), [tiersEnabled]);
+  const { data: priceItems } = useQuery<PriceListItem[]>(() => tiersEnabled ? pricing.allItems() : Promise.resolve([]), [tiersEnabled]);
+  const { data: custTypes } = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled]);
 
   const createMut = useMutation(salesApi.create);
   const payMut = useMutation(salesApi.addPayment);
@@ -58,8 +66,12 @@ export default function Sales() {
   const [payType, setPayType] = useState('');
   const [returnFor, setReturnFor] = useState<SalesOrder | null>(null);
   const spendCreditMut = useMutation(storeCredit.spend);
+  const [orderDiscount, setOrderDiscount] = useState(0);
+  const [needsApproval, setNeedsApproval] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
-  const blankItem = (): LineItem => ({ finished_good_id: '', quantity: 1, unit_price: 0 });
+  const blankItem = (): LineItem => ({ finished_good_id: '', quantity: 1, unit_price: 0, discount_reason: '' });
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0], customerId: '', paymentTypeId: '', amountPaid: 0,
     items: [blankItem()],
@@ -71,9 +83,18 @@ export default function Sales() {
   };
   const productName = (id: string) => goods?.find(g => g.id === id)?.name ?? '—';
   const productStock = (id: string) => goods?.find(g => g.id === id)?.qty_balance ?? 0;
-  const productPrice = (id: string) => goods?.find(g => g.id === id)?.selling_price ?? 0;
 
-  const total = form.items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+  const priceCtx: PriceContext = useMemo(() => ({
+    priceListItems: priceItems ?? [],
+    defaultListId: priceLists?.find(l => l.is_default && l.is_active)?.id ?? null,
+    customers: customers ?? [],
+    customerTypes: custTypes ?? [],
+  }), [priceItems, priceLists, customers, custTypes]);
+  const listPriceFor = (fgId: string, qty: number, customerId: string) =>
+    resolvePriceLocal(fgId, qty, customerId || null, priceCtx, goods?.find(g => g.id === fgId)?.selling_price ?? 0);
+
+  const cartSubtotal = form.items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+  const total = Math.max(cartSubtotal - orderDiscount, 0);
 
   const addItem = () => setForm(f => ({ ...f, items: [...f.items, blankItem()] }));
   const removeItem = (idx: number) => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
@@ -81,11 +102,29 @@ export default function Sales() {
     setForm(f => {
       const items = [...f.items];
       (items[idx] as any)[field] = value;
-      if (field === 'finished_good_id') items[idx].unit_price = productPrice(String(value));
+      if (field === 'finished_good_id') {
+        items[idx].unit_price = listPriceFor(String(value), items[idx].quantity || 1, f.customerId);
+        items[idx].discount_reason = '';
+      }
       return { ...f, items };
     });
+  // Picking a customer reprices every line to their tier. On a form this
+  // small, the natural order is "pick who it's for, then add items" — a
+  // price hand-typed before that gets overwritten, same trade-off POS
+  // avoids by tracking per-line overrides, which isn't worth the extra
+  // state here.
+  const setCustomer = (customerId: string) =>
+    setForm(f => ({
+      ...f, customerId,
+      items: f.items.map(i => i.finished_good_id
+        ? { ...i, unit_price: listPriceFor(i.finished_good_id, i.quantity || 1, customerId), discount_reason: '' }
+        : i),
+    }));
 
-  const resetForm = () => setForm({ date: new Date().toISOString().split('T')[0], customerId: '', paymentTypeId: '', amountPaid: 0, items: [blankItem()] });
+  const resetForm = () => {
+    setForm({ date: new Date().toISOString().split('T')[0], customerId: '', paymentTypeId: '', amountPaid: 0, items: [blankItem()] });
+    setOrderDiscount(0); setNeedsApproval(false); setApprovalError(null);
+  };
 
   const stockError = form.items.some(i => {
     if (!i.finished_good_id) return false;
@@ -95,25 +134,36 @@ export default function Sales() {
   const vatRate = tenant?.vat_enabled ? tenant.vat_rate : 0;
   const vatAmt = total * vatRate / 100;
   const grandTotal = total + vatAmt;
+  const totalDiscount = validItems.reduce((s, i) => s + Math.max((listPriceFor(i.finished_good_id, i.quantity, form.customerId) - i.unit_price) * i.quantity, 0), 0) + orderDiscount;
   const canSubmit = validItems.length > 0 && total > 0 && !stockError;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitSale = async (approval?: { userId: string; pin: string }) => {
     if (!canSubmit) { toast.error('Check items — product, quantity, and available stock.'); return; }
+    if (approval) { setApproving(true); setApprovalError(null); }
     const res = await createMut.mutate({
       customerId: form.customerId || null,
       date: form.date,
       paymentTypeId: form.paymentTypeId || null,
       amountPaid: Number(form.amountPaid) || 0,
-      items: validItems.map(i => ({ finished_good_id: i.finished_good_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
+      items: validItems.map(i => ({
+        finished_good_id: i.finished_good_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price),
+        ...(i.discount_reason.trim() ? { discount_reason: i.discount_reason.trim() } : {}),
+      })),
       vatRate,
+      ...(orderDiscount > 0 ? { orderDiscount } : {}),
+      ...(approval ? { approval } : {}),
     });
+    if (approval) setApproving(false);
     if (res) {
       toast.success('Sale recorded — stock deducted, COGS calculated.');
       setShowModal(false);
       resetForm();
       refetch();
       refetchGoods();
+    } else if (!approval && createMut.error && NEEDS_APPROVAL.test(createMut.error)) {
+      setNeedsApproval(true);
+    } else if (approval) {
+      setApprovalError(createMut.error ?? 'Could not approve that discount.');
     } else if (createMut.error) {
       toast.error(createMut.error);
     }
@@ -268,9 +318,9 @@ export default function Sales() {
               <h2>New Sale</h2>
               <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
             </div>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={e => { e.preventDefault(); submitSale(); }}>
               <div className="modal-body">
-                {createMut.error && <ErrorState message={createMut.error} />}
+                {createMut.error && !needsApproval && <ErrorState message={createMut.error} />}
                 <div className="grid-2">
                   <div className="form-group">
                     <label>Date</label>
@@ -278,7 +328,7 @@ export default function Sales() {
                   </div>
                   <div className="form-group">
                     <label>Customer</label>
-                    <select value={form.customerId} onChange={e => setForm(f => ({ ...f, customerId: e.target.value }))}>
+                    <select value={form.customerId} onChange={e => setCustomer(e.target.value)}>
                       <option value="">Walk-in / none</option>
                       {customers?.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name} — {c.company_store}</option>)}
                     </select>
@@ -290,44 +340,64 @@ export default function Sales() {
                   const stock = item.finished_good_id ? productStock(item.finished_good_id) : null;
                   const isOut = stock === 0;
                   const isOver = stock !== null && item.quantity > stock;
+                  const list = item.finished_good_id ? listPriceFor(item.finished_good_id, item.quantity || 1, form.customerId) : 0;
+                  const discounted = tiersEnabled && item.finished_good_id && item.unit_price < list;
                   return (
-                    <div className="item-row" key={idx}>
-                      <div className="form-group">
-                        <label>Product</label>
-                        <select value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
-                          <option value="">— select —</option>
-                          {goods?.map(g => (
-                            <option key={g.id} value={g.id} disabled={g.qty_balance === 0}>
-                              {g.name}{g.qty_balance === 0 ? ' — OUT OF STOCK' : ` (${g.qty_balance} in stock)`}
-                            </option>
-                          ))}
-                        </select>
-                        {isOut && <small className="stock-error">Out of stock</small>}
+                    <div key={idx}>
+                      <div className="item-row">
+                        <div className="form-group">
+                          <label>Product</label>
+                          <select value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
+                            <option value="">— select —</option>
+                            {goods?.map(g => (
+                              <option key={g.id} value={g.id} disabled={g.qty_balance === 0}>
+                                {g.name}{g.qty_balance === 0 ? ' — OUT OF STOCK' : ` (${g.qty_balance} in stock)`}
+                              </option>
+                            ))}
+                          </select>
+                          {isOut && <small className="stock-error">Out of stock</small>}
+                        </div>
+                        <div className="form-group">
+                          <label>Qty {stock !== null && <span className="stock-hint">({stock} avail)</span>}</label>
+                          <NumberInput value={item.quantity}
+                            onChange={v => updateItem(idx, 'quantity', v)}
+                            style={{ borderColor: isOver ? '#dc2626' : undefined }} />
+                          {isOver && <small className="stock-error">Exceeds stock ({stock})</small>}
+                        </div>
+                        <div className="form-group">
+                          <label>Unit Price (₦){discounted && <span className="stock-hint"> (list {fmt(list)})</span>}</label>
+                          <NumberInput value={item.unit_price} onChange={v => updateItem(idx, 'unit_price', v)} />
+                        </div>
+                        <div className="form-group amount-col">
+                          <label>Amount</label>
+                          <div className="amount-display">{fmt(item.quantity * item.unit_price)}</div>
+                        </div>
+                        {form.items.length > 1 && (
+                          <button type="button" className="remove-item" onClick={() => removeItem(idx)}><X size={14} /></button>
+                        )}
                       </div>
-                      <div className="form-group">
-                        <label>Qty {stock !== null && <span className="stock-hint">({stock} avail)</span>}</label>
-                        <NumberInput value={item.quantity}
-                          onChange={v => updateItem(idx, 'quantity', v)}
-                          style={{ borderColor: isOver ? '#dc2626' : undefined }} />
-                        {isOver && <small className="stock-error">Exceeds stock ({stock})</small>}
-                      </div>
-                      <div className="form-group">
-                        <label>Unit Price (₦)</label>
-                        <NumberInput value={item.unit_price} onChange={v => updateItem(idx, 'unit_price', v)} />
-                      </div>
-                      <div className="form-group amount-col">
-                        <label>Amount</label>
-                        <div className="amount-display">{fmt(item.quantity * item.unit_price)}</div>
-                      </div>
-                      {form.items.length > 1 && (
-                        <button type="button" className="remove-item" onClick={() => removeItem(idx)}><X size={14} /></button>
+                      {discounted && (
+                        <div className="form-group" style={{ marginTop: '-0.5rem', marginBottom: '0.75rem' }}>
+                          <input value={item.discount_reason} placeholder="Reason for the discount (e.g. regular customer)"
+                                 onChange={e => updateItem(idx, 'discount_reason', e.target.value)} />
+                        </div>
                       )}
                     </div>
                   );
                 })}
                 <button type="button" className="btn-ghost btn-sm add-item-btn" onClick={addItem}><Plus size={14} /> Add item</button>
 
+                {tiersEnabled && (
+                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: '0.75rem' }}>
+                    <label style={{ margin: 0, whiteSpace: 'nowrap' }}><Tag size={13} style={{ verticalAlign: -2 }} /> Order discount (₦)</label>
+                    <NumberInput value={orderDiscount} onChange={v => setOrderDiscount(Math.max(0, Math.min(v, cartSubtotal)))} style={{ maxWidth: 140 }} />
+                  </div>
+                )}
+
                 <div className="total-row">
+                  {totalDiscount > 0 && (
+                    <div style={{ fontSize: '0.85rem', color: '#16a34a', marginBottom: 4 }}>You're giving {fmt(totalDiscount)} off</div>
+                  )}
                   {vatRate > 0 && (
                     <div style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 400, marginBottom: 4 }}>
                       Subtotal: {fmt(total)} &nbsp;·&nbsp; VAT ({vatRate}%): {fmt(vatAmt)}
@@ -358,6 +428,15 @@ export default function Sales() {
               </div>
             </form>
         </Modal>
+      )}
+
+      {needsApproval && (
+        <ApprovalModal
+          pending={approving}
+          error={approvalError}
+          onCancel={() => { setNeedsApproval(false); setApprovalError(null); }}
+          onApprove={(managerId, pin) => submitSale({ userId: managerId, pin })}
+        />
       )}
 
       {viewId && (

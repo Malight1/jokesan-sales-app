@@ -1052,6 +1052,165 @@ begin
   update tenants set cashier_returns = 'same_day_own' where id = t_id('tenant');
 end $$;
 
+-- ---------- 29. price lists, discount limits, and below-cost (0025) ----------
+do $$
+declare
+  v_admin uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_books uuid := '00000000-0000-0000-0000-000000000004';
+  v_pitem uuid; v_wtype uuid; v_wbuyer uuid; v_wlist uuid; v_rlist uuid;
+  v_sale uuid; v_row record; v_n numeric;
+begin
+  perform t_as(v_admin);
+  perform public.set_my_branch(t_id('lagos'));
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Priced Item', 'pcs', 5, 100, 1.5) returning id into v_pitem;
+  perform t_put('priced_item', v_pitem);
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_pitem, 50, 20, 'Opening balance');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_pitem, 20, 20, 'Opening balance');
+  perform t_su();
+
+  -- ---- A: price lists are a Growth-plan feature ----
+  update tenants set plan = 'starter' where id = t_id('tenant');
+  perform t_as(v_admin);
+  perform t_err('price lists need at least the Growth plan',
+    format('insert into price_lists (tenant_id, name) values (%L::uuid, %L)', t_id('tenant'), 'Test List'),
+    'Growth plan');
+  perform t_su();
+  update tenants set plan = 'growth' where id = t_id('tenant');
+
+  -- ---- setup: a wholesale customer with their own price list, quantity break included ----
+  perform t_as(v_admin);
+  insert into customer_types (tenant_id, name) values (t_id('tenant'), 'Wholesale') returning id into v_wtype;
+  insert into customers (tenant_id, first_name, customer_type_id) values (t_id('tenant'), 'Wholesale Buyer', v_wtype) returning id into v_wbuyer;
+  insert into price_lists (tenant_id, name, is_default) values (t_id('tenant'), 'Wholesale List', false) returning id into v_wlist;
+  insert into price_lists (tenant_id, name, is_default) values (t_id('tenant'), 'Retail List', true) returning id into v_rlist;
+  update customer_types set price_list_id = v_wlist where id = v_wtype;
+  insert into price_list_items (tenant_id, price_list_id, finished_good_id, min_qty, price) values
+    (t_id('tenant'), v_wlist, v_pitem, 1, 80),
+    (t_id('tenant'), v_wlist, v_pitem, 10, 70),
+    (t_id('tenant'), v_rlist, v_pitem, 1, 95);
+  perform t_su();
+  perform t_put('wholesale_buyer', v_wbuyer);
+
+  -- ---- B: an inventory-role storekeeper cannot set up a price list ----
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('only an admin sets up price lists',
+    format('insert into price_lists (tenant_id, name) values (%L::uuid, %L)', t_id('tenant'), 'Sneaky List'),
+    'row-level security');
+  perform t_su();
+
+  -- ---- C: which price a sale actually resolves to ----
+  perform t_as(v_admin);
+  execute format('select public.create_sale(%L::uuid, current_date, null, 80, %L::jsonb)', v_wbuyer, t_items(v_pitem, 1, 80)) into v_sale;
+  perform t_su();
+  perform t_rec('a wholesale customer''s own list price is picked up (₦80, no discount)',
+    (select list_price = 80 and discount_amount = 0 from sale_items where sales_order_id = v_sale));
+
+  perform t_as(v_admin);
+  execute format('select public.create_sale(%L::uuid, current_date, null, 700, %L::jsonb)', v_wbuyer, t_items(v_pitem, 10, 70)) into v_sale;
+  perform t_su();
+  perform t_rec('a quantity break picks the price for that quantity (10+ at ₦70)',
+    (select list_price = 70 and discount_amount = 0 from sale_items where sales_order_id = v_sale));
+
+  perform t_as(v_admin);
+  execute format('select public.create_sale(null, current_date, null, 95, %L::jsonb)', t_items(v_pitem, 1, 95)) into v_sale;
+  perform t_su();
+  perform t_rec('a walk-in gets the company''s default list (₦95), not the plain selling price',
+    (select list_price = 95 and discount_amount = 0 from sale_items where sales_order_id = v_sale));
+
+  update price_lists set is_active = false where id = v_rlist;
+  perform t_as(v_admin);
+  execute format('select public.create_sale(null, current_date, null, 100, %L::jsonb)', t_items(v_pitem, 1, 100)) into v_sale;
+  perform t_su();
+  perform t_rec('with no active default list, it falls back to the plain selling price (₦100)',
+    (select list_price = 100 and discount_amount = 0 from sale_items where sales_order_id = v_sale));
+  update price_lists set is_active = true where id = v_rlist;
+
+  -- ---- D: a discount past a role's limit needs a manager's PIN ----
+  perform t_as(v_cashier);
+  perform t_err('a steep discount is refused without a manager''s PIN',
+    format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_wbuyer, t_items(v_pitem, 1, 50)),
+    'manager''s PIN');
+  perform t_su();
+
+  perform t_as(v_admin);
+  perform public.set_approval_pin('1234');
+  perform t_su();
+
+  -- These three carry their own discount_reason so section G can find
+  -- exactly them, rather than trusting every discount in the whole test
+  -- run to have gone through this section.
+  perform t_as(v_cashier);
+  perform t_err('the wrong PIN is refused the same way',
+    format('select public.create_sale(p_customer := %L::uuid, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_approval := %L::jsonb)',
+      v_wbuyer, jsonb_build_array(jsonb_build_object('finished_good_id', v_pitem, 'quantity', 1, 'unit_price', 50, 'discount_reason', 'phase3-test'))::text,
+      jsonb_build_object('user_id', v_admin, 'pin', '0000')::text),
+    'manager''s PIN');
+  execute format('select public.create_sale(p_customer := %L::uuid, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_approval := %L::jsonb)',
+    v_wbuyer, jsonb_build_array(jsonb_build_object('finished_good_id', v_pitem, 'quantity', 1, 'unit_price', 50, 'discount_reason', 'phase3-test'))::text,
+    jsonb_build_object('user_id', v_admin, 'pin', '1234')::text) into v_sale;
+  perform t_su();
+  perform t_rec('the right PIN lets the discount through, and records who approved it',
+    (select approved_by = v_admin and discount_total = 30 from sales_orders where id = v_sale));
+
+  -- accounts can't ring up a sale at all (guard_money_write, 0017) — its
+  -- own max_discount_pct entry exists for if that ever changes, not
+  -- reachable today, so it isn't exercised here.
+  perform t_as(v_admin);
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_wbuyer,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_pitem, 'quantity', 1, 'unit_price', 40, 'discount_reason', 'phase3-test'))::text)
+    into v_sale;
+  perform t_su();
+  perform t_rec('an admin can give any discount without a PIN', v_sale is not null);
+
+  -- ---- E: a flat order-level discount ----
+  perform t_as(v_admin);
+  execute format('select public.create_sale(p_customer := null, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_order_discount := 20)',
+    t_items(v_pitem, 2, 95)) into v_sale;
+  perform t_su();
+  perform t_rec('an order discount reduces the subtotal and is tracked on the sale',
+    (select subtotal = 170 and discount_total = 20 from sales_orders where id = v_sale));
+  perform t_as(v_admin);
+  perform t_err('the order discount can''t be negative',
+    format('select public.create_sale(p_customer := null, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_order_discount := -5)', t_items(v_pitem, 1, 95)),
+    'negative');
+  perform t_err('the order discount can''t be more than the sale total',
+    format('select public.create_sale(p_customer := null, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_order_discount := 1000)', t_items(v_pitem, 1, 95)),
+    'more than the sale total');
+  perform t_su();
+
+  -- ---- F: selling below cost is warned about, or blocked outright ----
+  perform t_as(v_admin);
+  execute format('select public.create_sale(null, current_date, null, 0, %L::jsonb)', t_items(v_pitem, 1, 15)) into v_sale;
+  perform t_su();
+  perform t_rec('below-cost still goes through when the business only wants a warning',
+    (select total_amount = 15 from sales_orders where id = v_sale));
+  perform t_rec('but it leaves a trace for the owner',
+    exists (select 1 from audit_logs where action = 'below_cost_sale' and entity_id = v_pitem::text));
+
+  update tenants set pricing_rules = jsonb_set(pricing_rules, '{below_cost}', '"block"') where id = t_id('tenant');
+  perform t_as(v_admin);
+  perform t_err('a business can block selling below cost outright',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb)', t_items(v_pitem, 1, 15)),
+    'below its cost');
+  perform t_su();
+  update tenants set pricing_rules = jsonb_set(pricing_rules, '{below_cost}', '"warn"') where id = t_id('tenant');
+
+  -- ---- G: the discounts report ----
+  perform t_as(v_cashier);
+  perform t_err('a cashier cannot see the discounts report',
+    'select * from public.report_discounts()', 'Only admin and accounts');
+  perform t_su();
+
+  perform t_as(v_books);
+  select * into v_row from public.report_discounts(null, null, null) where reason = 'phase3-test';
+  perform t_su();
+  perform t_rec('the discounts report groups by reason (2 lines, ₦30+₦40 = ₦70)',
+    v_row.line_count = 2 and v_row.qty = 2 and v_row.discount_value = 70,
+    format('line_count=%s qty=%s discount_value=%s', v_row.line_count, v_row.qty, v_row.discount_value));
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

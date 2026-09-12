@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
-  materials as materialsApi, finishedGoods as goodsApi,
-  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch,
+  materials as materialsApi, finishedGoods as goodsApi, pricing,
+  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { hasFeature, planFor } from '../lib/features';
 import { Loading, ErrorState, Empty } from '../components/DataStates';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
@@ -15,7 +16,7 @@ import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
 
-type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'recipes';
+type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'pricing' | 'recipes';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'business', label: 'Business & Profile', icon: <Building2 size={15} /> },
@@ -23,6 +24,7 @@ const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'branches', label: 'Branches', icon: <MapPin size={15} /> },
   { id: 'billing', label: 'Billing', icon: <CreditCard size={15} /> },
   { id: 'types', label: 'Types', icon: <Tags size={15} /> },
+  { id: 'pricing', label: 'Pricing', icon: <Tag size={15} /> },
   { id: 'recipes', label: 'Recipes (BOM)', icon: <FlaskConical size={15} /> },
 ];
 
@@ -62,6 +64,7 @@ export default function Settings() {
       {tab === 'branches' && isMultiBranch && <BranchesTab />}
       {tab === 'billing' && <BillingTab />}
       {tab === 'types' && <TypesTab />}
+      {tab === 'pricing' && <PricingTab />}
       {tab === 'recipes' && <RecipesTab />}
     </div>
   );
@@ -1021,6 +1024,268 @@ function RecipesTab() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// Pricing — price lists, quantity breaks, customer-type assignment,
+// and an admin's own manager-approval PIN (migration 0025)
+// ============================================================
+function PricingTab() {
+  const toast = useToast();
+  const { tenant } = useAuth();
+  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+
+  const listsQ = useQuery<PriceList[]>(() => pricing.lists(), []);
+  const itemsQ = useQuery<PriceListItem[]>(() => pricing.allItems(), []);
+  const goodsQ = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
+  const typesQ = useQuery<CustomerType[]>(() => pricing.customerTypes(), []);
+
+  const [selectedList, setSelectedList] = useState('');
+  const [newListName, setNewListName] = useState('');
+  const [deleteList, setDeleteListState] = useState<PriceList | null>(null);
+  const createMut = useMutation(pricing.createList);
+  const removeMut = useMutation(pricing.removeList);
+
+  const lists = listsQ.data ?? [];
+  useEffect(() => {
+    if (!selectedList && listsQ.data && listsQ.data.length > 0) setSelectedList(listsQ.data[0].id);
+  }, [listsQ.data, selectedList]);
+
+  const reload = () => { listsQ.refetch(); itemsQ.refetch(); };
+
+  const addList = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newListName.trim()) return;
+    const res = await createMut.mutate(newListName.trim());
+    if (res) { toast.success(`${res.name} added.`); setNewListName(''); setSelectedList(res.id); reload(); }
+    else toast.error(createMut.error ?? 'Could not add that list — is this business on the Growth plan or above?');
+  };
+
+  const makeDefault = async (l: PriceList) => {
+    await pricing.setDefault(l.id);
+    toast.success(`${l.name} is now the default price list.`);
+    reload();
+  };
+  const toggleActive = async (l: PriceList) => {
+    await pricing.setActive(l.id, !l.is_active);
+    reload();
+  };
+  const confirmDeleteList = async () => {
+    if (!deleteList) return;
+    const res = await removeMut.mutate(deleteList.id);
+    if (res !== null) {
+      toast.success(`${deleteList.name} removed.`);
+      if (selectedList === deleteList.id) setSelectedList('');
+      reload();
+    } else {
+      const msg = removeMut.error ?? '';
+      toast.error(msg.includes('violates') || msg.includes('foreign key')
+        ? `Cannot remove — ${deleteList.name} is assigned to a customer or customer type.` : msg || 'Remove failed.');
+    }
+    setDeleteListState(null);
+  };
+
+  const setTypeList = async (typeId: string, priceListId: string) => {
+    await pricing.setCustomerTypeList(typeId, priceListId || null);
+    toast.success('Updated.');
+    typesQ.refetch();
+  };
+
+  if (!tiersEnabled) {
+    return (
+      <div className="card" style={{ maxWidth: 520, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+        <Tag size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
+        <h3 style={{ marginBottom: '0.35rem' }}>Price lists and quantity breaks</h3>
+        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+          Set up retail, wholesale and distributor pricing — with breaks like "12+ at ₦2,400" — on
+          the {planFor('price_tiers')} plan and above.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <h3 style={{ marginBottom: '0.25rem' }}>Price Lists</h3>
+        <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
+          A customer with no list of their own uses the default. Quantity breaks (e.g. 12+ at a lower
+          price) can be set per product in the database already — this screen sets one flat price per list for now.
+        </p>
+        {listsQ.loading ? <Loading /> : lists.length === 0 ? (
+          <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem' }}>No price lists yet — add your first below.</p>
+        ) : (
+          <div className="lookup-list" style={{ marginBottom: '1rem' }}>
+            {lists.map(l => (
+              <div key={l.id} className="lookup-row" style={{ opacity: l.is_active ? 1 : 0.55 }}>
+                <button type="button" onClick={() => setSelectedList(l.id)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', flex: 1, padding: 0,
+                                 fontWeight: selectedList === l.id ? 700 : 400, color: selectedList === l.id ? '#2563eb' : 'inherit' }}>
+                  {l.name}{!l.is_active && ' (inactive)'}
+                </button>
+                {l.is_default && <span className="badge-primary" style={{ marginRight: 8 }}>Default</span>}
+                <div className="lookup-row-actions">
+                  {!l.is_default && (
+                    <button className="lookup-action" onClick={() => makeDefault(l)} title="Make default" aria-label={`Make ${l.name} the default`}>
+                      <Star size={13} />
+                    </button>
+                  )}
+                  <button className="lookup-action" onClick={() => toggleActive(l)} title={l.is_active ? 'Deactivate' : 'Activate'}>
+                    {l.is_active ? <X size={13} /> : <Check size={13} />}
+                  </button>
+                  <button className="lookup-action danger" onClick={() => setDeleteListState(l)} title="Remove" aria-label={`Remove ${l.name}`}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <form onSubmit={addList} className="lookup-add">
+          <input value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="e.g. Wholesale, Distributor…" />
+          <button className="btn-primary" type="submit" disabled={createMut.pending || !newListName.trim()} aria-label="Add price list">
+            <Plus size={15} />
+          </button>
+        </form>
+      </div>
+
+      {selectedList && (
+        <div className="card" style={{ marginBottom: '1.25rem' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Prices — {lists.find(l => l.id === selectedList)?.name}</h3>
+          {goodsQ.loading ? <Loading /> : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                    <th style={{ padding: '0.4rem 0' }}>Product</th><th>Selling Price</th><th>Price on this list</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(goodsQ.data ?? []).map(g => (
+                    <PriceRow key={g.id} good={g} priceListId={selectedList}
+                              current={itemsQ.data?.find(i => i.price_list_id === selectedList && i.finished_good_id === g.id && i.min_qty === 1)?.price ?? null}
+                              onSaved={() => itemsQ.refetch()} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <h3 style={{ marginBottom: '0.25rem' }}>Customer Types</h3>
+        <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
+          Everyone in a customer type gets that list's prices, unless the customer has their own list set on their own record.
+        </p>
+        {(typesQ.data ?? []).length === 0 ? (
+          <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No customer types yet — add some under Settings → Types.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.6rem' }}>
+            {(typesQ.data ?? []).map(t => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                <span style={{ fontSize: '0.88rem' }}>{t.name}</span>
+                <select value={t.price_list_id ?? ''} onChange={e => setTypeList(t.id, e.target.value)} style={{ maxWidth: 220 }}>
+                  <option value="">Default list</option>
+                  {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <ApprovalPinCard />
+
+      {deleteList && (
+        <ConfirmDialog
+          title="Remove Price List"
+          message={<>Remove <strong>{deleteList.name}</strong>? Customers or customer types using it will fall back to the default list.</>}
+          confirmLabel="Remove"
+          pending={removeMut.pending}
+          onConfirm={confirmDeleteList}
+          onCancel={() => setDeleteListState(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PriceRow({ good, priceListId, current, onSaved }: {
+  good: FinishedGood; priceListId: string; current: number | null; onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [value, setValue] = useState(current ?? 0);
+  const [dirty, setDirty] = useState(false);
+  const saveMut = useMutation(pricing.setPrice);
+  const clearMut = useMutation(pricing.clearPrice);
+
+  useEffect(() => { if (!dirty) setValue(current ?? 0); }, [current, dirty]);
+
+  const commit = async () => {
+    if (!dirty) return;
+    setDirty(false);
+    if (value <= 0) {
+      if (current === null) return;
+      const res = await clearMut.mutate(priceListId, good.id);
+      if (res !== null) onSaved(); else toast.error(clearMut.error ?? 'Could not clear that price.');
+      return;
+    }
+    if (value === current) return;
+    const res = await saveMut.mutate(priceListId, good.id, value);
+    if (res !== null) onSaved(); else toast.error(saveMut.error ?? 'Could not save that price.');
+  };
+
+  return (
+    <tr style={{ borderTop: '1px solid #f1f5f9' }}>
+      <td style={{ padding: '0.4rem 0' }}>{good.name}</td>
+      <td style={{ color: '#94a3b8' }}>₦{good.selling_price.toLocaleString()}</td>
+      <td style={{ maxWidth: 140 }}>
+        <NumberInput value={value} onChange={v => { setValue(v); setDirty(true); }}
+                     onBlur={commit} placeholder="Same as selling price" />
+      </td>
+    </tr>
+  );
+}
+
+function ApprovalPinCard() {
+  const toast = useToast();
+  const hasPinQ = useQuery<boolean>(() => pricing.hasApprovalPin(), []);
+  const [pin, setPin] = useState('');
+  const [pin2, setPin2] = useState('');
+  const saveMut = useMutation(pricing.setApprovalPin);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^[0-9]{4,6}$/.test(pin)) { toast.error('Use a 4 to 6 digit PIN.'); return; }
+    if (pin !== pin2) { toast.error("The two PINs don't match."); return; }
+    const res = await saveMut.mutate(pin);
+    if (res !== null) { toast.success('Your approval PIN is set.'); setPin(''); setPin2(''); hasPinQ.refetch(); }
+    else toast.error(saveMut.error ?? 'Could not set the PIN.');
+  };
+
+  return (
+    <div className="card">
+      <h3 style={{ marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: 8 }}><Lock size={16} /> Your Approval PIN</h3>
+      <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
+        When a cashier tries to give a discount above their limit, they'll ask you for this PIN.
+        {hasPinQ.data && ' A PIN is already set — saving a new one replaces it.'}
+      </p>
+      <form onSubmit={submit} className="grid-2" style={{ maxWidth: 400 }}>
+        <div className="form-group">
+          <label>New PIN (4–6 digits)</label>
+          <input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} />
+        </div>
+        <div className="form-group">
+          <label>Confirm PIN</label>
+          <input type="password" inputMode="numeric" maxLength={6} value={pin2} onChange={e => setPin2(e.target.value.replace(/\D/g, ''))} />
+        </div>
+        <button className="btn-primary" type="submit" disabled={saveMut.pending} style={{ gridColumn: '1 / -1', justifySelf: 'start' }}>
+          {saveMut.pending ? 'Saving…' : 'Set PIN'}
+        </button>
+      </form>
     </div>
   );
 }

@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
 import { Plus, X, Pencil, Trash2 } from 'lucide-react';
-import { customers as customersApi, lookups, Customer } from '../lib/api';
+import { customers as customersApi, lookups, pricing, Customer, PriceList } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
 import Modal from '../components/Modal';
 
-const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '' };
+const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '', price_list_id: '' };
 
 export default function Customers() {
   const toast = useToast();
+  const { tenant } = useAuth();
+  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'customers-list' });
   const { data: types } = useQuery(() => lookups.customerTypes(), []);
+  const { data: priceLists } = useQuery<PriceList[]>(() => pricing.lists().catch(() => []), []);
   const createMut = useMutation(customersApi.create);
   const updateMut = useMutation((id: string, c: Partial<Customer>) => customersApi.update(id, c));
   const removeMut = useMutation(customersApi.remove);
@@ -33,13 +38,18 @@ export default function Customers() {
     setForm({
       first_name: c.first_name ?? '', last_name: c.last_name ?? '', company_store: c.company_store ?? '',
       address: c.address ?? '', phone: c.phone ?? '', customer_type_id: c.customer_type_id ?? '',
+      price_list_id: c.price_list_id ?? '',
     });
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = { ...form, customer_type_id: form.customer_type_id || null };
+    const { price_list_id, ...rest } = form;
+    const payload = {
+      ...rest, customer_type_id: form.customer_type_id || null,
+      ...(tiersEnabled ? { price_list_id: price_list_id || null } : {}),
+    };
     const res = editRow
       ? await updateMut.mutate(editRow.id, payload)
       : await createMut.mutate(payload);
@@ -139,6 +149,16 @@ export default function Customers() {
                   </div>
                 </div>
                 <div className="form-group"><label>Address</label><input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+                {tiersEnabled && (
+                  <div className="form-group">
+                    <label>Price List</label>
+                    <select value={form.price_list_id} onChange={e => setForm(f => ({ ...f, price_list_id: e.target.value }))}>
+                      <option value="">Use their customer type's list</option>
+                      {priceLists?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                    <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Overrides the customer type below for this one customer.</small>
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

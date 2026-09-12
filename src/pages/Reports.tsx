@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
-         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, lookups, stock } from '../lib/api';
+         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock } from '../lib/api';
+import { hasFeature } from '../lib/features';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
 import { useQuery } from '../lib/hooks';
@@ -15,8 +16,8 @@ import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns';
-const TABS: { id: Tab; label: string }[] = [
+type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts';
+const ALL_TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
   { id: 'sales', label: 'Sales' },
   { id: 'expenses', label: 'Expenses' },
@@ -25,10 +26,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'creditors', label: 'Creditors' },
   { id: 'products', label: 'Product Profit' },
   { id: 'returns', label: 'Returns' },
+  { id: 'discounts', label: 'Discounts' },
 ];
 
 export default function Reports() {
   const { tenant } = useAuth();
+  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const TABS = ALL_TABS.filter(t => t.id !== 'discounts' || tiersEnabled);
   const [tab, setTab] = useState<Tab>('pnl');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -48,6 +52,7 @@ export default function Reports() {
   // Netted by the return's OWN date (migration 0023), so this can differ
   // from what the Sales tab shows for the same range.
   const returnsQ = useQuery(() => returnsApi.byProduct(from, to, branch || null), [from, to, branch]);
+  const discountsQ = useQuery(() => tiersEnabled ? pricing.discountReport(from, to, branch || null) : Promise.resolve([]), [from, to, branch, tiersEnabled]);
   // Per-branch quantities for the Stock tab when a branch is chosen.
   const levelsQ = useQuery(() => stock.levels(null), []);
 
@@ -231,6 +236,16 @@ export default function Reports() {
       render: r => Number(r.loss_value) > 0 ? <span style={{ color: '#dc2626', fontWeight: 600 }}>{fmt(Number(r.loss_value))}</span> : '—' },
   ];
 
+  const discountsData = discountsQ.data ?? [];
+  const discountedValue = discountsData.reduce((s, r) => s + Number(r.discount_value || 0), 0);
+  const discountCols: Column<any>[] = [
+    { key: 'reason', header: 'Reason', value: r => r.reason, render: r => <strong>{r.reason}</strong> },
+    { key: 'line_count', header: 'Lines', align: 'right', value: r => Number(r.line_count), render: r => Number(r.line_count).toLocaleString() },
+    { key: 'qty', header: 'Qty', align: 'right', value: r => Number(r.qty), render: r => Number(r.qty).toLocaleString() },
+    { key: 'discount_value', header: 'Discount Given', align: 'right', value: r => Number(r.discount_value),
+      render: r => <span style={{ color: '#dc2626', fontWeight: 600 }}>{fmt(Number(r.discount_value))}</span> },
+  ];
+
   // ---- Exports per tab ----
   const doExport = async (kind: 'xlsx' | 'pdf') => {
     let cols: ExportColumn<any>[] = [];
@@ -304,7 +319,7 @@ export default function Reports() {
         { header: 'Margin %', value: r => r.margin_pct },
       ];
       rows = productProfit; name = 'product-profitability'; title = 'Product Profitability' + rangeLabel;
-    } else {
+    } else if (tab === 'returns') {
       cols = [
         { header: 'Product', value: r => r.product_name },
         { header: 'Qty Returned', value: r => r.qty_returned },
@@ -313,6 +328,14 @@ export default function Reports() {
         { header: 'Written Off', value: r => r.loss_value },
       ];
       rows = returnsData; name = 'returns-report'; title = 'Returns' + rangeLabel;
+    } else {
+      cols = [
+        { header: 'Reason', value: r => r.reason },
+        { header: 'Lines', value: r => r.line_count },
+        { header: 'Qty', value: r => r.qty },
+        { header: 'Discount Given', value: r => r.discount_value },
+      ];
+      rows = discountsData; name = 'discounts-report'; title = 'Discounts' + rangeLabel;
     }
 
     try {
@@ -569,6 +592,31 @@ export default function Reports() {
             <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
               {fmt(returnedValue)} returned across {returnsData.length} product{returnsData.length !== 1 ? 's' : ''}
               {returnedLoss > 0 && <>, of which <strong style={{ color: '#dc2626' }}>{fmt(returnedLoss)}</strong> was written off as damaged or expired</>}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === 'discounts' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>Discounts{rangeLabel}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Grouped by the reason given at the till or on the sale — order-level discounts aren't broken out here yet.
+          </p>
+          <DataTable
+            columns={discountCols}
+            rows={discountsData}
+            getRowKey={r => r.reason}
+            loading={discountsQ.loading}
+            error={discountsQ.error}
+            onRetry={discountsQ.refetch}
+            searchKeys={[r => r.reason]}
+            searchPlaceholder="Search reasons…"
+            emptyMessage="No discounts given in this period."
+          />
+          {discountsData.length > 0 && (
+            <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
+              <strong style={{ color: '#dc2626' }}>{fmt(discountedValue)}</strong> given away across {discountsData.length} reason{discountsData.length !== 1 ? 's' : ''}.
             </p>
           )}
         </div>
