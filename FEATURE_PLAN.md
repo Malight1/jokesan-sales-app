@@ -1,22 +1,23 @@
 # StockFlow Feature Plan: closing the competitor gaps
 
-**Date:** 12 September 2026
+**Date:** 12 September 2026. **Status updated:** 13 September 2026 — see `HANDOVER.md` for the fuller picture (what's actually live vs. what's only on a branch).
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0020. **0017, 0018 and 0020 must be live in production before any of this starts.**
-New migrations begin at `0021`.
+**Starts from:** migrations 0001–0020. **0017, 0018 and 0020 must be live in production before any of this starts — they are not live yet.**
 
-| Phase | Feature | Migration(s) | Estimate* |
-|---|---|---|---|
-| 0 | Foundations: document numbers, audit helper, plan gating | 0021 | 2–3 days |
-| 1 | Batch numbers, manufacture and expiry dates (NAFDAC) | 0022 | 7–9 days |
-| 2 | Returns and credit notes (customer and supplier) | 0023 | 6–8 days |
-| 3 | Discounts and price tiers | 0024 | 5–7 days |
-| 4 | Shifts and cash-up (X/Z reports) | 0025 | 5–6 days |
-| 5 | Automatic payment confirmation | 0026 + Edge Functions | 8–12 days, plus provider approval |
-| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | 14–18 days |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 10–14 days |
+| Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
+|---|---|---|---|---|
+| 0 | Foundations: document numbers, audit helper, plan gating | 0021 | 0021 | ✅ done |
+| 1 | Batch numbers, manufacture and expiry dates (NAFDAC) | 0022 | 0022 | ✅ done |
+| 2 | Returns and credit notes (customer and supplier) | 0023 | 0023, **0024** (void a return + configurable cashier policy, added after review) | ✅ done |
+| 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
+| 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** (next) | not started |
+| 5 | Automatic payment confirmation | 0026 + Edge Functions | 0027+ | not started, plus provider approval needed |
+| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | 0028+ | not started |
+| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0029+ | not started |
 
-\*These are working days for one developer, and they include tests. Taken in order, the whole plan is about 12–15 weeks. Phases 1–4 (about 5–6 weeks) are the ones that make the product sellable to manufacturers and shops.
+**Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
+
+Phases 0–3 are done, tested (DB harness, tsc, jest, production build all verified — see `HANDOVER.md`), and committed to `feature/batch-expiry-foundations` — **not yet pushed, merged, or deployed.** The rest of this document is the original plan for Phases 4–7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 ---
 
