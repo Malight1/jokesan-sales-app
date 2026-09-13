@@ -36,6 +36,13 @@ export interface Tenant {
   allow_expired_sale?: boolean;
   // How far a cashier may go with a return (migration 0024).
   cashier_returns?: 'none' | 'same_day_own' | 'any';
+  // Shifts and cash-up (migration 0026). Optional until it has run.
+  shift_rules?: {
+    required_for: string[];   // e.g. ["sales"] once an admin turns it on
+    blind_count: boolean;
+    variance_alert: number;
+    pay_out_limit: number;
+  };
 }
 
 interface AuthState {

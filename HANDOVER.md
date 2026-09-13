@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 13 September 2026.
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 13 September 2026 (Phase 4 added).
 
 ## What this is
 
@@ -24,15 +24,16 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (13 September 2026)
 
-Nothing described below the multi-branch stock migration has reached production yet. Everything is built, tested, and committed to a branch — **not pushed, not merged, not deployed.**
+Nothing described below the multi-branch stock migration has reached production yet. Everything is built, tested, and committed to a branch — pushed to GitHub, but **not merged, not deployed.**
 
-- **Git:** branch `feature/batch-expiry-foundations`, 6 commits ahead of `main` (not pushed to GitHub yet). `main` itself is only current up to the multi-branch stock work.
-- **Database:** the *live* Supabase project has **not** run migrations `0017` onward. Everything from `0017_role_enforcement.sql` through `0025_pricing.sql` exists only as files in this branch, verified against a local PGlite (Postgres-in-WASM) test harness — never against the real project.
-- **Before ANY of this goes live**, in order: run `0017` → `0018` → `0019` → `0020` → `0021` → `0022` → `0023` → `0024` → `0025` in the Supabase SQL editor (each file's header comment states which migrations it must run after — double-check as you go, a couple were written and verified before later ones existed). Then deploy the frontend.
+- **Git:** branch `feature/batch-expiry-foundations`, pushed to `origin`. `main` itself is only current up to the multi-branch stock work — do not merge until the migrations below have run live, since the frontend on this branch already calls RPCs/columns that only exist from `0017` onward.
+- **Database:** the *live* Supabase project has **not** run migrations `0017` onward. Everything from `0017_role_enforcement.sql` through `0026_shifts.sql` exists only as files in this branch, verified against a local PGlite (Postgres-in-WASM) test harness — never against the real project.
+- **Before ANY of this goes live**, in order: run `0017` → `0018` → `0019` → `0020` → `0021` → `0022` → `0023` → `0024` → `0025` → `0026` in the Supabase SQL editor, one file at a time so a failure is easy to isolate (each file's header comment states which migrations it must run after — double-check as you go, a couple were written and verified before later ones existed). Then merge to `main` — Vercel auto-deploys the frontend from there.
 - Also still pending from before this work started: move the Supabase project to a paid plan, and make one real Paystack Business-plan test payment end-to-end.
-- After `0025` runs, at least one admin should set an approval PIN under **Settings → Pricing** — without one, no cashier discount over their limit can ever be approved (the "manager PIN" dialog will show "no admin has set up an approval PIN yet").
+- After `0025` runs, at least one admin should set an approval PIN under **Settings → Pricing** — without one, no cashier discount over their limit can ever be approved (the "manager PIN" dialog will show "no admin has set up an approval PIN yet"). The same PIN also gates an over-limit pay-out once Phase 4's till requirement is turned on.
+- `0026` ships with shifts **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it, not automatic on deploy.
 
-**What to do with a fresh session:** read this file, then run `git log --oneline main..feature/batch-expiry-foundations` to see the 6 commits, then decide whether to keep building on this branch (Phase 4 onward, see below) or stop and get the user to push/deploy what's here first. Don't assume either — ask if genuinely unclear, but if the user says "proceed" or "continue," the default is to keep building forward on the same branch.
+**What to do with a fresh session:** read this file, then run `git log --oneline main..feature/batch-expiry-foundations` to see the commits, then decide whether to keep building on this branch (Phase 5 onward, see below) or stop and get the user to merge/deploy what's here first. Don't assume either — ask if genuinely unclear, but if the user says "proceed" or "continue," the default is to keep building forward on the same branch.
 
 ## Architecture
 
@@ -79,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state on this branch: DB harness 186/186, tsc clean, jest 103/103, build succeeds at ~152 kB gzip (main bundle).
+Current state on this branch: DB harness 206/206, tsc clean, jest 103/103, build succeeds at ~152 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -95,8 +96,9 @@ Current state on this branch: DB harness 186/186, tsc clean, jest 103/103, build
 | 0023_returns.sql | Partial customer/supplier returns, store credit, `create_sale_return`/`create_purchase_return` | ❌ pending |
 | 0024_return_voids_and_policy.sql | `void_sale_return`/`void_purchase_return`, configurable `tenants.cashier_returns` policy | ❌ pending |
 | 0025_pricing.sql | Price lists, quantity breaks, per-role discount limits with manager-PIN approval, below-cost warning | ❌ pending |
+| 0026_shifts.sql | Registers, shifts, cash-up (`open_shift`/`close_shift`/`add_cash_movement`/`x_report`/`z_report`), `payment_types.method_group` | ❌ pending |
 
-**0017 → 0025 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree.
+**0017 → 0026 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree.
 
 ## Key files
 
@@ -109,6 +111,7 @@ Current state on this branch: DB harness 186/186, tsc clean, jest 103/103, build
 - `src/lib/features.ts` — mirrors the server's `plan_level()`/`feature_level()` mapping, for "upgrade to X plan" UI messaging only.
 - `src/lib/invoice.ts` — invoice **and credit note** PDF generation.
 - `src/lib/offlineQueue.ts` — the offline write queue (`QueuedOp` union: `sale` | `sale_payment`, easy to extend).
+- `src/lib/useTillGate.ts` — whether this tenant requires an open till for selling and whether the signed-in person has one; POS reads this to decide what to render. `src/components/OpenTillScreen.tsx`, `TillHeader.tsx`, `CashMovementModal.tsx`, `CloseTillModal.tsx` are the till UI it drives (migration 0026).
 - `src/components/Modal.tsx` (+ `useModalA11y` hook) — the shared modal shell; every dialog in the app should use this, not a bespoke overlay.
 - `src/components/ApprovalModal.tsx`, `src/components/LinePriceModal.tsx` — manager-PIN approval and per-line price/discount editing, shared between POS and Sales.
 - `src/pages/Sales.tsx` — exports `ReturnModal`, reused by `POS.tsx` for the "Returns" counter flow. If you need the return UI somewhere else, import it from here rather than duplicating it.
@@ -130,16 +133,21 @@ Current state on this branch: DB harness 186/186, tsc clean, jest 103/103, build
 | 1 | Batch numbers, manufacture/expiry dates, NAFDAC labels, recall trace | ✅ done (0022) |
 | 2 | Partial returns, credit notes, store credit, supplier returns, **void a return**, POS-integrated returns, configurable cashier-return policy | ✅ done (0023, 0024) |
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
-| 4 | Shifts and cash-up (X/Z reports) | **not started — next up** |
-| 5 | Automatic payment confirmation (Paystack dedicated accounts / pay links) | not started |
+| 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
+| 5 | Automatic payment confirmation (Paystack dedicated accounts / pay links) | **not started — next up** |
 | 6 | Quotes, real purchase orders (ordered before received), units of measure, delivery notes, custom fields, audit-log viewer | not started |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0026`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 4 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0027`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
-### Phase 4 in brief (start here)
+### Phase 4, as shipped (0026)
 
-Registers/tills, per-branch: open with a float, ring sales against the open shift, close with a blind cash count, X report (read-only any time) and Z report (final, numbered like every other document via `next_doc_no`). Ties into the existing `payment_types.method_group` split (cash vs. transfer vs. card) so "expected cash" is computable. See `FEATURE_PLAN.md`'s Phase 4 section for the full schema sketch (`registers`, `shifts`, `cash_movements` tables) — it was written before Phases 1–3 existed, so cross-check column names against what actually shipped (e.g. it assumes `doc_sequences`/`next_doc_no` already exist, which is now true).
+Registers/tills, per-branch: open with a float, ring sales against the open shift, close with a blind cash count, X report (read-only any time) and Z report (final, numbered like every other document via `next_doc_no`). Ties into `payment_types.method_group` (cash vs. transfer vs. card vs. store_credit vs. other) so "expected cash" is computable — `handle_new_user` seeds new tenants' Cash/Bank Transfer types with the right group directly, since the migration-time backfill only reaches rows that already existed.
+
+- **Engine:** `open_shift`, `add_cash_movement` (pay-in/pay-out/drop, a pay-out over `shift_rules.pay_out_limit` needs the same manager-PIN mechanism as Phase 3's discounts), `close_shift` (returns the Z report), `x_report`/`z_report`, plus `current_open_shift()`/`shift_required()` helpers. `create_sale`, `record_sale_payment`, `create_sale_return`'s cash refund, and `spend_store_credit` all tag the caller's open shift **on their own** — no client-side plumbing needed to link a sale to a till.
+- **Opt-in by design:** `shift_rules.required_for` defaults to `[]`, not `["sales"]` — the alternative would lock every existing tenant out of selling the instant `0026` runs, before any till exists. An admin turns it on under **Settings → Business** once registers are set up under **Settings → Branches**.
+- **Frontend:** `src/lib/useTillGate.ts` decides whether POS should show `OpenTillScreen` (till required, none open) or `TillHeader` (a till chip with Pay in/out, X report, Close till) above the normal POS layout — see `src/pages/POS.tsx`. A network failure while checking fails **open** (lets the cashier keep selling), matching the offline-first philosophy elsewhere in the app.
+- See `FEATURE_PLAN.md`'s Phase 4 section for the original schema sketch — it was written before Phases 1–3 existed, so a few specifics there don't match what shipped (see `FEATURE_PLAN.md`'s own note on this).
 
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
@@ -148,6 +156,9 @@ Registers/tills, per-branch: open with a float, ring sales against the open shif
 - An over-the-limit discount attempted while offline fails when the queued sale syncs, rather than prompting for a PIN at that point — the cashier needs to redo it from the Sales page once back online.
 - Returns aren't queueable offline at all (by design — a return checks live FIFO batches and balances, same reasoning as why stock-receiving isn't offline-capable either).
 - POS's "Returns" counter finds a sale by typed invoice number only, no barcode/receipt scan yet.
+- Phase 4 shipped engine-complete but UI-partial: no owner-dashboard "shift short" attention card, no Reports → Shifts tab (Z report history, variance per cashier over time), no denomination-breakdown counting UI (Close Till just takes one total), and no printable/thermal Z report layout. `x_report()`/`z_report()` already return every figure those screens would need — it's pure frontend work whenever it's prioritized.
+- An offline-queued sale made while a till was required but not open (or was open and then closed before sync) fails when it reaches the server — same pattern as an over-the-limit offline discount, surfaced in the Pending Sync panel for the cashier to redo online.
+- Registers can only be added at a branch that already has one (multi-branch tenants, via Settings → Branches); a single-branch tenant that wants a second physical till has to be given one directly in the database for now.
 
 ## How the user works
 

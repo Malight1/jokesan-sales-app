@@ -1211,6 +1211,157 @@ begin
     format('line_count=%s qty=%s discount_value=%s', v_row.line_count, v_row.qty, v_row.discount_value));
 end $$;
 
+-- ---------- 30. shifts and cash-up (0026) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_books   uuid := '00000000-0000-0000-0000-000000000004';
+  v_ssoap   uuid;
+  v_cash    uuid;
+  v_abuja_reg  uuid;
+  v_lagos_reg  uuid;
+  v_second_reg uuid;
+  v_shift1  uuid;
+  v_shift2  uuid;
+  v_sale    uuid;
+  v_xr      jsonb;
+  v_zr      jsonb;
+begin
+  select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+  select id into v_abuja_reg from registers where branch_id = t_id('abuja') limit 1;
+  select id into v_lagos_reg from registers where branch_id = t_id('lagos') limit 1;
+
+  -- ---- setup: a product just for this section, stocked at Abuja ----
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Shift Soap', 'pcs', 5, 100, 1.5) returning id into v_ssoap;
+  perform t_put('ssoap', v_ssoap);
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_ssoap, 50, 40, 'Opening balance');
+  perform t_su();
+
+  perform t_rec('every branch got a Main till register automatically',
+    v_abuja_reg is not null and v_lagos_reg is not null
+    and (select name from registers where id = v_abuja_reg) = 'Main till');
+
+  -- ---- A: shifts aren't required until an admin turns it on ----
+  perform t_as(v_cashier);
+  execute format('select public.create_sale(null, current_date, null, 100, %L::jsonb)', t_items(v_ssoap, 1, 100)) into v_sale;
+  perform t_su();
+  perform t_rec('a sale needs no open till until an admin requires one',
+    (select shift_id is null from sales_orders where id = v_sale));
+
+  perform t_as(v_admin);
+  update tenants set shift_rules = jsonb_set(shift_rules, '{required_for}', '["sales"]') where id = t_id('tenant');
+  perform t_su();
+
+  perform t_as(v_cashier);
+  perform t_err('selling is blocked with no open till once the tenant requires one',
+    format('select public.create_sale(null, current_date, null, 100, %L::jsonb)', t_items(v_ssoap, 1, 100)),
+    'Open your till');
+  perform t_su();
+
+  -- ---- B: only admin/sales may open a till (storekeeper's home branch is Lagos) ----
+  perform t_as(v_store);
+  perform t_err('inventory cannot open a till',
+    format('select public.open_shift(%L::uuid, 5000)', v_lagos_reg), 'not allowed');
+  perform t_su();
+
+  -- ---- C: opening a till ----
+  perform t_as(v_cashier);
+  select public.open_shift(v_abuja_reg, 5000) into v_shift1;
+  perform t_put('shift1', v_shift1);
+  perform t_rec('opening a till stamps the register, branch and float',
+    (select register_id = v_abuja_reg and branch_id = t_id('abuja') and opening_float = 5000 and status = 'open'
+       from shifts where id = v_shift1));
+
+  perform t_err('the same register cannot be opened twice',
+    format('select public.open_shift(%L::uuid, 1000)', v_abuja_reg), 'already has an open till');
+  perform t_su();
+
+  -- a second register at Abuja, so "one shift per user" is tested
+  -- independently of "one shift per register"
+  perform t_as(v_admin);
+  insert into registers (tenant_id, branch_id, name) values (t_id('tenant'), t_id('abuja'), 'Second till')
+  returning id into v_second_reg;
+  perform t_su();
+
+  perform t_as(v_cashier);
+  perform t_err('one cashier cannot have two tills open at once',
+    format('select public.open_shift(%L::uuid, 1000)', v_second_reg), 'already have an open till');
+
+  -- ---- D: a sale made with an open till is tagged with it ----
+  execute format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_cash, t_items(v_ssoap, 1, 100)) into v_sale;
+  perform t_rec('a sale made with an open till is tagged with it',
+    (select shift_id = v_shift1 from sales_orders where id = v_sale));
+  perform t_rec('and so is the payment recorded with it',
+    (select shift_id = v_shift1 from sale_payments where sales_order_id = v_sale));
+
+  -- part-paid, then the rest collected later in the same shift
+  execute format('select public.create_sale(null, current_date, %L::uuid, 40, %L::jsonb)', v_cash, t_items(v_ssoap, 1, 100)) into v_sale;
+  perform public.record_sale_payment(v_sale, 60, v_cash);
+  perform t_rec('a later payment on the same sale is tagged with the open till too',
+    (select shift_id = v_shift1 from sale_payments where sales_order_id = v_sale and amount_paid = 60));
+
+  -- ---- E: pay-ins and pay-outs ----
+  perform t_err('a cash movement needs a reason',
+    format('select public.add_cash_movement(%L, 500, %L)', 'pay_in', ''), 'reason is required');
+  perform public.add_cash_movement('pay_in', 2000, 'change top-up');
+
+  -- a pay-out over the tenant's ₦5,000 default limit needs a manager PIN
+  -- (the admin's PIN, '1234', was already set up in the pricing section)
+  perform t_err('a pay-out over the limit needs a manager''s PIN',
+    format('select public.add_cash_movement(%L, 6000, %L)', 'pay_out', 'rent top-up'), 'manager''s PIN');
+  perform public.add_cash_movement('pay_out', 500, 'fuel for delivery bike');
+  perform public.add_cash_movement('pay_out', 6000, 'rent top-up', jsonb_build_object('user_id', v_admin, 'pin', '1234'));
+
+  -- ---- F: the X report reconciles what should be in the drawer ----
+  -- float 5000 + cash sales (100+40+60=200) + pay_in 2000 - pay_out (500+6000) = 700
+  select public.x_report(v_shift1) into v_xr;
+  perform t_rec('the X report''s expected cash reconciles float, sales, pay-ins and pay-outs',
+    (v_xr->'expected'->>'cash')::numeric = 700, v_xr->'expected'->>'cash');
+  perform t_su();
+
+  perform t_as(v_store);
+  perform t_err('inventory cannot see till reports',
+    format('select public.x_report(%L::uuid)', v_shift1), 'not allowed');
+  perform t_su();
+
+  -- ---- G: closing the till ----
+  perform t_as(v_cashier);
+  perform t_err('the counted cash can''t be negative',
+    'select public.close_shift(-1)', 'negative');
+  select public.close_shift(700, null, 'counted twice, matches') into v_zr;
+  perform t_rec('closing the till issues a real Z number and zero variance',
+    (v_zr->>'doc_no') like 'Z-%' and (v_zr->>'variance')::numeric = 0, v_zr::text);
+
+  perform t_err('closing again with no open till is refused', 'select public.close_shift(0)', 'no open till');
+
+  -- ---- H: a variance is recorded and logged ----
+  perform t_as(v_admin);
+  update tenants set shift_rules = jsonb_set(shift_rules, '{variance_alert}', '100') where id = t_id('tenant');
+  perform t_su();
+  perform t_as(v_cashier);
+  select public.open_shift(v_abuja_reg, 1000) into v_shift2;
+  execute format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_cash, t_items(v_ssoap, 1, 100)) into v_sale;
+  select public.close_shift(950, null, 'short — recount tomorrow') into v_zr;
+  perform t_rec('a shortfall is recorded as a negative variance (expected 1100, counted 950 = -150)',
+    (v_zr->>'variance')::numeric = -150, v_zr::text);
+  perform t_su();
+  perform t_rec('a variance past the alert threshold is logged for the owner',
+    exists (select 1 from audit_logs where action = 'shift_variance' and entity_id = (v_zr->>'shift_id')));
+
+  -- ---- I: the Z report survives after close, for reprinting ----
+  perform t_as(v_books);
+  select public.z_report(v_shift1) into v_zr;
+  perform t_su();
+  perform t_rec('accounts can reprint an old Z report by id',
+    (v_zr->>'shift_id') = v_shift1::text and (v_zr->>'sales_count')::int = 2, v_zr::text);
+
+  update tenants set shift_rules = jsonb_set(shift_rules, '{required_for}', '[]') where id = t_id('tenant');
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

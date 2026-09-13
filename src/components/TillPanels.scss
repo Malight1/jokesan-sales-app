@@ -1,0 +1,105 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+// ---- the "open till" gate (replaces the POS product grid) ----
+.till-gate {
+  @include flex(center, center, 0.6rem);
+  flex-direction: column;
+  min-height: calc(100vh - #{$header-height} - 4rem);
+  text-align: center;
+  padding: 1rem;
+
+  h1 { font-size: $font-size-2xl; color: $gray-900; margin: 0; }
+  > p { color: $gray-500; max-width: 380px; margin: 0; }
+
+  .till-gate-empty { color: $danger; max-width: 340px; }
+
+  .till-gate-form {
+    width: 100%;
+    max-width: 320px;
+    margin-top: 1rem;
+    text-align: left;
+
+    .btn-primary.big { width: 100%; margin-top: 0.5rem; padding: 0.85rem; font-size: $font-size-base; }
+  }
+}
+
+// ---- the "till open" chip + dropdown, shown above POS ----
+.till-header {
+  position: relative;
+  margin-bottom: 0.75rem;
+
+  .till-chip {
+    @include flex(center, center, 0.4rem);
+    background: $success-light;
+    color: $success;
+    border: 1px solid rgba($success, 0.25);
+    border-radius: $radius-full;
+    padding: 0.4rem 0.9rem;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .till-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    background: $white;
+    border: 1px solid $gray-200;
+    border-radius: $radius-lg;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    padding: 0.35rem;
+    min-width: 180px;
+
+    button {
+      @include flex(center, flex-start, 0.5rem);
+      width: 100%;
+      background: none;
+      border: none;
+      text-align: left;
+      padding: 0.5rem 0.6rem;
+      border-radius: $radius-sm;
+      font-size: $font-size-sm;
+      color: $gray-700;
+      cursor: pointer;
+      &:hover { background: $gray-100; }
+    }
+  }
+}
+
+// ---- shared bits between the X and Z report modals ----
+.till-close-hint { color: $gray-500; font-size: $font-size-sm; margin: 0 0 0.75rem; }
+
+.till-close-figures {
+  @include flex(center, space-between, 0.5rem);
+  margin-bottom: 0.75rem;
+
+  div { text-align: center; flex: 1;
+    span { display: block; font-size: $font-size-xs; color: $gray-500; text-transform: uppercase; letter-spacing: 0.05em; }
+    strong { font-size: $font-size-lg; color: $gray-900; }
+  }
+  .ok strong { color: $success; }
+  .over strong { color: $primary; }
+  .short strong { color: $danger; }
+}
+
+.till-close-summary { color: $gray-500; font-size: $font-size-sm; text-align: center; margin: 0; }
+
+.till-kind-toggle {
+  @include flex(center, flex-start, 0.5rem);
+
+  button {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-600;
+    cursor: pointer;
+    font-size: $font-size-sm;
+
+    &.active { border-color: $primary; color: $primary; background: $primary-light; font-weight: 600; }
+  }
+}

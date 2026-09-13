@@ -698,6 +698,7 @@ export const tenantApi = {
     name?: string; currency?: string; vat_enabled?: boolean; vat_rate?: number; tin?: string | null; logo_url?: string | null;
     expiry_warning_days?: number; allow_expired_sale?: boolean;
     cashier_returns?: 'none' | 'same_day_own' | 'any';
+    shift_rules?: Partial<ShiftRules>;
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };
@@ -736,6 +737,59 @@ export const transfers = {
       p_product: p.productId, p_qty: p.qty, p_note: p.note ?? null,
       ...(p.batchId ? { p_batch: p.batchId } : {}),
     }),
+};
+
+// ============================================================
+// SHIFTS AND CASH-UP (migration 0026)
+//
+// create_sale/record_sale_payment/create_sale_return/spend_store_credit
+// all tag the caller's open shift server-side on their own — nothing here
+// needs to pass a shift id into a sale. This module only covers opening
+// and closing a till, pay-ins/pay-outs, and the two reports.
+// ============================================================
+export interface Register { id: string; branch_id: string; name: string; is_active: boolean; }
+export interface ShiftRules {
+  required_for: string[];   // e.g. ["sales"] once an admin turns it on
+  blind_count: boolean;
+  variance_alert: number;
+  pay_out_limit: number;
+}
+export interface ShiftExpected {
+  cash: number; opening_float: number; cash_sales?: number;
+  pay_in: number; pay_out: number; drop: number;
+  transfer?: number; card?: number; store_credit?: number;
+}
+export interface ShiftReport {
+  shift_id: string; register_id: string; branch_id: string;
+  opened_by: string; opened_at: string; opening_float: number;
+  status?: 'open' | 'closed';
+  doc_no?: string | null; closed_by?: string | null; closed_at?: string | null;
+  sales_count: number; sales_total: number; discount_total: number; refunds_total: number;
+  expected: ShiftExpected;
+  counted_cash?: number | null; counted_breakdown?: Record<string, number> | null;
+  variance?: number | null; notes?: string | null;
+}
+
+export const registers = {
+  list: () => run<Register[]>(supabase.from('registers').select('*').order('name')),
+  create: (name: string, branchId: string) =>
+    run<Register>(supabase.from('registers').insert({ name: name.trim(), branch_id: branchId }).select().single()),
+  setActive: (id: string, is_active: boolean) => del(supabase.from('registers').update({ is_active }).eq('id', id)),
+};
+
+export const shifts = {
+  // null if the caller has no open till right now.
+  myOpenShiftId: () => rpc<string | null>('current_open_shift'),
+  open: (registerId: string, float: number) => rpc<string>('open_shift', { p_register: registerId, p_float: float }),
+  addCashMovement: (kind: 'pay_in' | 'pay_out' | 'drop', amount: number, reason: string, approval?: { userId: string; pin: string } | null) =>
+    rpc<string>('add_cash_movement', {
+      p_kind: kind, p_amount: amount, p_reason: reason,
+      ...(approval ? { p_approval: { user_id: approval.userId, pin: approval.pin } } : {}),
+    }),
+  xReport: (shiftId?: string) => rpc<ShiftReport>('x_report', shiftId ? { p_shift: shiftId } : undefined),
+  zReport: (shiftId: string) => rpc<ShiftReport>('z_report', { p_shift: shiftId }),
+  close: (countedCash: number, breakdown?: Record<string, number> | null, notes?: string | null) =>
+    rpc<ShiftReport>('close_shift', { p_counted_cash: countedCash, p_breakdown: breakdown ?? null, p_notes: notes ?? null }),
 };
 
 // Generic CRUD over the three lookup tables (payment/expense/customer types)

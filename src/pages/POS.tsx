@@ -22,6 +22,9 @@ import NumberInput from '../components/NumberInput';
 import Modal from '../components/Modal';
 import ApprovalModal from '../components/ApprovalModal';
 import LinePriceModal from '../components/LinePriceModal';
+import TillHeader from '../components/TillHeader';
+import OpenTillScreen from '../components/OpenTillScreen';
+import { useTillGate } from '../lib/useTillGate';
 import { ReturnModal } from './Sales';
 import './POS.scss';
 
@@ -91,6 +94,7 @@ export default function POS() {
   const toast = useToast();
   const { tenant } = useAuth();
   const { multi, myBranchId, myBranchName } = useBranches();
+  const till = useTillGate();
   const goodsQ = useQuery<FinishedGood[]>(() => goodsApi.list(), [], { cacheKey: 'pos-goods' });
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(myBranchId), [myBranchId],
     { cacheKey: `pos-levels-${myBranchId ?? 'default'}` });
@@ -357,8 +361,11 @@ export default function POS() {
 
   if (goodsQ.loading) return <Loading label="Loading products…" />;
   if (goodsQ.error) return <ErrorState message={goodsQ.error} onRetry={goodsQ.refetch} />;
+  if (till.blocked) return <OpenTillScreen onOpened={till.refetch} />;
 
   return (
+    <div className="pos-page">
+    {till.shift && <TillHeader shift={till.shift} onChanged={till.refetch} />}
     <div className="pos">
       {/* Product grid */}
       <div className="pos-products">
@@ -629,6 +636,7 @@ export default function POS() {
           onApprove={(managerId, pin) => checkout({ userId: managerId, pin })}
         />
       )}
+    </div>
     </div>
   );
 }

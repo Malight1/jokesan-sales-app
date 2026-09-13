@@ -10,14 +10,18 @@
 | 1 | Batch numbers, manufacture and expiry dates (NAFDAC) | 0022 | 0022 | ✅ done |
 | 2 | Returns and credit notes (customer and supplier) | 0023 | 0023, **0024** (void a return + configurable cashier policy, added after review) | ✅ done |
 | 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
-| 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** (next) | not started |
+| 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | 0027+ | not started, plus provider approval needed |
 | 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | 0028+ | not started |
 | 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0029+ | not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–3 are done, tested (DB harness, tsc, jest, production build all verified — see `HANDOVER.md`), and committed to `feature/batch-expiry-foundations` — **not yet pushed, merged, or deployed.** The rest of this document is the original plan for Phases 4–7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–4 are done, tested (DB harness, tsc, jest, production build all verified — see `HANDOVER.md`), and committed to `feature/batch-expiry-foundations` — **not yet pushed, merged, or deployed.** The rest of this document is the original plan for Phases 5–7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+
+**Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
+- `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
+- The owner dashboard's "shift short" attention card, a Reports → Shifts tab, a denomination-breakdown counting UI, and a printable Z report layout were **not built** — `x_report()`/`z_report()` already return everything those screens would need, so it's UI-only work whenever it's prioritized.
 
 ---
 

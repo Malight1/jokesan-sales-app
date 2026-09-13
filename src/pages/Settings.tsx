@@ -3,8 +3,8 @@ import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
-  materials as materialsApi, finishedGoods as goodsApi, pricing,
-  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType,
+  materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi,
+  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -80,6 +80,31 @@ function BranchesTab() {
   const updateMut = useMutation((id: string, b: Partial<Branch>) => branchesApi.update(id, b));
   const activeMut = useMutation((id: string, on: boolean) => branchesApi.setActive(id, on));
 
+  // Registers/tills (migration 0026) — "Main till" is created automatically
+  // for every branch; this is only for a branch that runs more than one.
+  const registersQ = useQuery<Register[]>(() => registersApi.list(), []);
+  const createRegMut = useMutation((name: string, branchId: string) => registersApi.create(name, branchId));
+  const regActiveMut = useMutation((id: string, on: boolean) => registersApi.setActive(id, on));
+  const [showRegModal, setShowRegModal] = useState(false);
+  const [regName, setRegName] = useState('');
+  const [regBranch, setRegBranch] = useState('');
+
+  const branchName = (id: string) => branchesQ.data?.find(b => b.id === id)?.name ?? '—';
+
+  const openAddRegister = () => { setRegName(''); setRegBranch(branchesQ.data?.[0]?.id ?? ''); setShowRegModal(true); };
+  const submitRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regBranch) { toast.error('Pick a branch.'); return; }
+    const res = await createRegMut.mutate(regName.trim(), regBranch);
+    if (res) { toast.success('Register added.'); setShowRegModal(false); registersQ.refetch(); }
+    else toast.error(createRegMut.error ?? 'Failed.');
+  };
+  const toggleRegister = async (r: Register) => {
+    const res = await regActiveMut.mutate(r.id, !r.is_active);
+    if (res !== null) { toast.success(`${r.name} ${r.is_active ? 'deactivated' : 'reactivated'}.`); registersQ.refetch(); }
+    else toast.error(regActiveMut.error ?? 'Failed.');
+  };
+
   const [showModal, setShowModal] = useState(false);
   const [editRow, setEditRow] = useState<Branch | null>(null);
   const [name, setName] = useState('');
@@ -146,6 +171,61 @@ function BranchesTab() {
         searchPlaceholder="Search branches…"
         emptyMessage="No branches yet."
       />
+
+      <div className="section-toolbar" style={{ marginTop: '1.5rem' }}>
+        <p className="section-toolbar-count">Registers — every branch already has a "Main till"; add another only if a branch runs more than one</p>
+        <button className="btn-secondary" onClick={openAddRegister}><Plus size={16} /> Add Register</button>
+      </div>
+      {!registersQ.loading && (
+        <DataTable
+          columns={[
+            { key: 'name', header: 'Name', value: r => r.name, render: r => <strong>{r.name}</strong> },
+            { key: 'branch', header: 'Branch', value: r => branchName(r.branch_id) },
+            { key: 'is_active', header: 'Status', value: r => (r.is_active ? 'Active' : 'Inactive'),
+              render: r => r.is_active ? <span className="badge-success">Active</span> : <span className="badge-danger">Inactive</span> },
+            { key: 'actions', header: 'Actions', sortable: false, align: 'right', value: () => '',
+              render: r => (
+                <button className="btn-ghost btn-sm" style={{ color: r.is_active ? '#dc2626' : '#16a34a' }} onClick={() => toggleRegister(r)}>
+                  {r.is_active ? 'Deactivate' : 'Reactivate'}
+                </button>
+              ) },
+          ] as Column<Register>[]}
+          rows={registersQ.data ?? []}
+          getRowKey={r => r.id}
+          searchKeys={[r => r.name]}
+          searchPlaceholder="Search registers…"
+          emptyMessage="No registers yet."
+        />
+      )}
+
+      {showRegModal && (
+        <Modal onClose={() => setShowRegModal(false)} maxWidth={380}>
+          <div className="modal-header">
+            <h2>Add Register</h2>
+            <button className="close-btn" onClick={() => setShowRegModal(false)}><X size={18} /></button>
+          </div>
+          <form onSubmit={submitRegister}>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Branch</label>
+                <select value={regBranch} onChange={e => setRegBranch(e.target.value)}>
+                  {(branchesQ.data ?? []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Register Name</label>
+                <input value={regName} onChange={e => setRegName(e.target.value)} required placeholder="e.g. Counter 2" />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn-secondary" onClick={() => setShowRegModal(false)}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={createRegMut.pending}>
+                {createRegMut.pending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {showModal && (
         <Modal onClose={() => setShowModal(false)} maxWidth={400}>
@@ -280,6 +360,11 @@ function BusinessTab() {
   // How far a cashier may go with a return (migration 0024).
   const hasReturnPolicy = tenant?.cashier_returns !== undefined;
   const [cashierReturns, setCashierReturns] = useState<'none' | 'same_day_own' | 'any'>(tenant?.cashier_returns ?? 'same_day_own');
+  // Shifts and cash-up (migration 0026).
+  const hasShiftRules = tenant?.shift_rules !== undefined;
+  const [tillRequired, setTillRequired] = useState(!!tenant?.shift_rules?.required_for?.includes('sales'));
+  const [varianceAlert, setVarianceAlert] = useState(tenant?.shift_rules?.variance_alert ?? 1000);
+  const [payOutLimit, setPayOutLimit] = useState(tenant?.shift_rules?.pay_out_limit ?? 5000);
   const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
   const [invPrefix, setInvPrefix] = useState<string | null>(null);
   const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
@@ -316,6 +401,14 @@ function BusinessTab() {
       name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null,
       ...(hasExpirySettings ? { expiry_warning_days: days, allow_expired_sale: allowExpired } : {}),
       ...(hasReturnPolicy ? { cashier_returns: cashierReturns } : {}),
+      ...(hasShiftRules ? {
+        shift_rules: {
+          required_for: tillRequired ? ['sales'] : [],
+          blind_count: tenant?.shift_rules?.blind_count ?? true,
+          variance_alert: Number(varianceAlert) || 0,
+          pay_out_limit: Number(payOutLimit) || 0,
+        },
+      } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
     if (invPrefix !== null && invPrefix.trim() !== (prefixQ.data ?? 'INV-')) {
@@ -447,6 +540,33 @@ function BusinessTab() {
                 </select>
                 <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>An admin or accounts can always process a return, whatever this is set to.</small>
               </div>
+            </>
+          )}
+
+          {hasShiftRules && (
+            <>
+              <hr className="divider" />
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginBottom: '0.75rem' }}>
+                <input type="checkbox" checked={tillRequired} onChange={e => setTillRequired(e.target.checked)} style={{ width: 'auto', marginTop: 3 }} />
+                <span>
+                  Require an open till before selling
+                  <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>
+                    Turn this on once registers are set up under Branches — everyone, including admins, will need to open a till before ringing up a sale.
+                  </small>
+                </span>
+              </label>
+              {tillRequired && (
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label htmlFor="variance-alert">Flag a cash-up short/over past</label>
+                    <NumberInput id="variance-alert" value={varianceAlert} onChange={setVarianceAlert} />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="payout-limit">Pay-out needs a manager PIN past</label>
+                    <NumberInput id="payout-limit" value={payOutLimit} onChange={setPayOutLimit} />
+                  </div>
+                </div>
+              )}
             </>
           )}
 
