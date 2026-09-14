@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
-  materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi,
-  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register,
+  materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
+  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -16,13 +16,14 @@ import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
 
-type Tab = 'business' | 'team' | 'branches' | 'billing' | 'types' | 'pricing' | 'recipes';
+type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'business', label: 'Business & Profile', icon: <Building2 size={15} /> },
   { id: 'team', label: 'Team', icon: <Users size={15} /> },
   { id: 'branches', label: 'Branches', icon: <MapPin size={15} /> },
   { id: 'billing', label: 'Billing', icon: <CreditCard size={15} /> },
+  { id: 'payments', label: 'Payments', icon: <Landmark size={15} /> },
   { id: 'types', label: 'Types', icon: <Tags size={15} /> },
   { id: 'pricing', label: 'Pricing', icon: <Tag size={15} /> },
   { id: 'recipes', label: 'Recipes (BOM)', icon: <FlaskConical size={15} /> },
@@ -63,6 +64,7 @@ export default function Settings() {
       {tab === 'team' && <TeamTab isMultiBranch={isMultiBranch} />}
       {tab === 'branches' && isMultiBranch && <BranchesTab />}
       {tab === 'billing' && <BillingTab />}
+      {tab === 'payments' && <PaymentsTab />}
       {tab === 'types' && <TypesTab />}
       {tab === 'pricing' && <PricingTab />}
       {tab === 'recipes' && <RecipesTab />}
@@ -337,6 +339,99 @@ function BillingTab() {
       <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '1rem', textAlign: 'center' }}>
         Secure payment by Paystack. You can cancel anytime. Test mode — use card 4084 0840 8408 4081, any future date, CVV 408.
       </p>
+    </div>
+  );
+}
+
+// ============================================================
+// Payments — connect the business's OWN Paystack account so a transfer
+// can confirm itself (migration 0027, Phase 5a). Money never passes
+// through StockFlow; this only stores the key (in Supabase Vault, via the
+// payments-connect Edge Function) and lets Sales generate "Pay now" links.
+// ============================================================
+function PaymentsTab() {
+  const toast = useToast();
+  const statusQ = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus(), []);
+  const [secretKey, setSecretKey] = useState('');
+  const [publicKey, setPublicKey] = useState('');
+  const [connecting, setConnecting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!secretKey.trim() || !publicKey.trim()) { toast.error('Both keys are needed.'); return; }
+    setConnecting(true);
+    try {
+      const res = await paymentsApi.connect(secretKey.trim(), publicKey.trim());
+      if (res.error) { toast.error(res.error); return; }
+      toast.success('Paystack connected — invoices can now get a "Pay now" link.');
+      setSecretKey(''); setPublicKey('');
+      statusQ.refetch();
+    } catch (e: any) {
+      toast.error(e.message ?? 'Could not connect.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  if (statusQ.loading) return <Loading label="Checking your payment connection…" />;
+  if (statusQ.error) return <ErrorState message={statusQ.error} onRetry={statusQ.refetch} />;
+
+  const connected = statusQ.data?.connected;
+
+  return (
+    <div className="grid-2" style={{ alignItems: 'start' }}>
+      <div className="card">
+        <h3 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Landmark size={18} color="#2563eb" /> Paystack
+        </h3>
+        <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
+          Connect your OWN Paystack account so a customer's transfer confirms itself — no bank alert to read. Money is collected directly into your account; StockFlow never holds it.
+        </p>
+
+        {connected ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.75rem 1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, marginBottom: '1rem' }}>
+            <ShieldCheck size={18} color="#16a34a" />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#16a34a' }}>Connected</div>
+              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Public key {statusQ.data?.public_key}</div>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <div className="form-group">
+              <label>Secret Key</label>
+              <input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder="sk_live_… or sk_test_…" autoComplete="off" />
+            </div>
+            <div className="form-group">
+              <label>Public Key</label>
+              <input value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk_live_… or pk_test_…" autoComplete="off" />
+            </div>
+            <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.75rem' }}>
+              Find these under your Paystack dashboard → Settings → API Keys & Webhooks. Your secret key is checked once here, then stored securely — nobody at StockFlow can read it back.
+            </small>
+            <button className="btn-primary" type="submit" disabled={connecting}>
+              {connecting ? 'Connecting…' : 'Connect Paystack'}
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Link2 size={18} color="#2563eb" /> How it works
+        </h3>
+        <ol style={{ paddingLeft: '1.1rem', fontSize: '0.85rem', color: '#475569', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <li>Connect your Paystack account above (one-time).</li>
+          <li>On an unpaid sale, tap "Pay now" to generate a payment link.</li>
+          <li>Share it with the customer — WhatsApp, SMS, however you like.</li>
+          <li>The moment they pay, the sale updates on its own — no bank alert to paste or match.</li>
+        </ol>
+        {connected && (
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.75rem' }}>
+            If Paystack support ever asks for a webhook URL for this account, it's the payments-webhook Edge Function's URL from your Supabase project.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -1362,6 +1362,146 @@ begin
   update tenants set shift_rules = jsonb_set(shift_rules, '{required_for}', '[]') where id = t_id('tenant');
 end $$;
 
+-- ---------- 31. automatic payment confirmation, pay links (0027) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_psoap   uuid;
+  v_transfer uuid;
+  v_cust    uuid;
+  v_sale1   uuid;
+  v_sale2   uuid;
+  v_sale3   uuid;
+  v_voided  uuid;
+  v_link    uuid;
+  v_inc1    uuid;
+  v_inc2    uuid;
+  v_inc3    uuid;
+  v_inc4    uuid;
+  v_status  jsonb;
+  v_credit  numeric;
+begin
+  select id into v_transfer from payment_types where tenant_id = t_id('tenant') and method_group = 'transfer';
+  insert into customers (tenant_id, first_name) values (t_id('tenant'), 'Pay Link Customer') returning id into v_cust;
+
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Paylink Soap', 'pcs', 5, 100, 1.5) returning id into v_psoap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_psoap, 20, 40, 'Opening balance');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_psoap, 20, 40, 'Opening balance');
+  perform t_su();
+
+  -- ---- A: not connected until an integration row exists ----
+  perform t_as(v_cashier);
+  select public.integration_status() into v_status;
+  perform t_su();
+  perform t_rec('a tenant with no integration reads as not connected',
+    (v_status->>'connected')::boolean = false and v_status->>'status' = 'not_connected');
+
+  -- payments-connect (the Edge Function) is what would insert this row for
+  -- real, using the service role after verifying the key with Paystack and
+  -- storing it in Vault — simulated here as the row it would leave behind.
+  insert into payment_integrations (tenant_id, status, public_key, secret_vault_id, last_verified_at)
+  values (t_id('tenant'), 'live', 'pk_test_abc123', gen_random_uuid(), now());
+
+  perform t_as(v_cashier);
+  select public.integration_status() into v_status;
+  perform t_su();
+  perform t_rec('once connected, status and the public key are visible — never the secret',
+    (v_status->>'connected')::boolean = true and v_status->>'status' = 'live'
+    and v_status->>'public_key' = 'pk_test_abc123' and not (v_status ? 'secret_vault_id'));
+
+  perform t_as(v_cashier);
+  perform t_rec('the app can never read payment_integrations directly, whatever the role',
+    (select count(*) from payment_integrations) = 0);
+  perform t_su();
+
+  -- ---- B: creating a pay link ----
+  -- Both sold at Abuja (the cashier's own branch below is what a payment
+  -- link's insert policy checks — same branch-visibility rule sale reads use).
+  perform t_as(v_admin);
+  execute format('select public.create_sale(p_customer := %L::uuid, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_branch := %L::uuid)',
+    v_cust, t_items(v_psoap, 1, 100), t_id('abuja')) into v_sale1;
+  execute format('select public.create_sale(p_customer := null, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_branch := %L::uuid)',
+    t_items(v_psoap, 1, 100), t_id('abuja')) into v_voided;
+  perform public.void_sale(v_voided);
+  perform t_su();
+
+  perform t_as(v_cashier);
+  insert into payment_links (tenant_id, sales_order_id, provider_ref, url, amount)
+  values (t_id('tenant'), v_sale1, 'PSK_ref_1', 'https://paystack.com/pay/abc', 100)
+  returning id into v_link;
+  perform t_rec('a cashier can record a pay link for a sale they can see', v_link is not null);
+
+  perform t_err('a pay link cannot be recorded against a voided sale',
+    format('insert into payment_links (tenant_id, sales_order_id, provider_ref, url, amount) values (%L, %L, %L, %L, 100)',
+      t_id('tenant'), v_voided, 'PSK_ref_bad', 'https://paystack.com/pay/bad'),
+    'row-level security');
+
+  perform t_err('a pay link''s provider reference must be unique',
+    format('insert into payment_links (tenant_id, sales_order_id, provider_ref, url, amount) values (%L, %L, %L, %L, 100)',
+      t_id('tenant'), v_sale1, 'PSK_ref_1', 'https://paystack.com/pay/dupe'),
+    'duplicate key');
+  perform t_su();
+
+  -- ---- C: the webhook applies a payment that exactly settles a sale ----
+  insert into incoming_payments (tenant_id, provider_ref, amount, payer_name, sales_order_id)
+  values (t_id('tenant'), 'PSK_ref_1', 100, 'Pay Link Customer', v_sale1)
+  returning id into v_inc1;
+  perform public.apply_incoming_payment(v_inc1);
+  perform t_rec('a matched payment settles the sale in full',
+    (select balance = 0 and payment_status = 'full' from sales_orders where id = v_sale1));
+  perform t_rec('the sale_payments row is tagged with the incoming payment and a transfer type',
+    (select payment_type_id = v_transfer and incoming_payment_id = v_inc1 from sale_payments where sales_order_id = v_sale1));
+  perform t_rec('the incoming payment is marked auto-matched, with the payment it created',
+    (select match_status = 'auto' and applied_payment_id is not null and customer_id = v_cust
+       from incoming_payments where id = v_inc1));
+
+  -- ---- D: a replayed webhook doesn't double-credit the sale ----
+  perform public.apply_incoming_payment(v_inc1);
+  perform t_rec('applying the same incoming payment twice changes nothing (still one payment row)',
+    (select count(*) from sale_payments where incoming_payment_id = v_inc1) = 1);
+
+  -- ---- E: no sale reference, or the sale no longer accepts payment ----
+  insert into incoming_payments (tenant_id, provider_ref, amount, payer_name)
+  values (t_id('tenant'), 'PSK_ref_2', 500, 'Nobody In Particular') returning id into v_inc2;
+  perform public.apply_incoming_payment(v_inc2);
+  perform t_rec('a payment with no sale reference is left for a human to match',
+    (select match_status = 'unmatched' from incoming_payments where id = v_inc2));
+
+  insert into incoming_payments (tenant_id, provider_ref, amount, sales_order_id)
+  values (t_id('tenant'), 'PSK_ref_3', 100, v_voided) returning id into v_inc3;
+  perform public.apply_incoming_payment(v_inc3);
+  perform t_rec('a payment referencing a voided sale is left unmatched, not force-applied',
+    (select match_status = 'unmatched' from incoming_payments where id = v_inc3));
+
+  -- ---- F: an overpayment becomes store credit for a named customer ----
+  perform t_as(v_admin);
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_cust, t_items(v_psoap, 1, 100)) into v_sale2;
+  perform t_su();
+  insert into incoming_payments (tenant_id, provider_ref, amount, sales_order_id)
+  values (t_id('tenant'), 'PSK_ref_4', 150, v_sale2) returning id into v_inc4;
+  perform public.apply_incoming_payment(v_inc4);
+  perform t_rec('the sale itself is only settled up to what it owed (₦100)',
+    (select balance = 0 and payment_status = 'full' from sales_orders where id = v_sale2));
+  select credit_balance into v_credit from customers where id = v_cust;
+  perform t_rec('the ₦50 overpaid becomes store credit for the customer', v_credit = 50, v_credit::text);
+  perform t_rec('the overpayment is on the customer credit ledger',
+    exists (select 1 from customer_credit_ledger where customer_id = v_cust and source_type = 'overpayment' and amount = 50));
+
+  -- ---- G: only the webhook (service role) may apply a payment ----
+  perform t_as(v_admin);
+  execute format('select public.create_sale(null, current_date, null, 0, %L::jsonb)', t_items(v_psoap, 1, 100)) into v_sale3;
+  perform t_su();
+  insert into incoming_payments (tenant_id, provider_ref, amount, sales_order_id)
+  values (t_id('tenant'), 'PSK_ref_5', 100, v_sale3) returning id into v_link;   -- reusing v_link as scratch
+  perform t_as(v_admin);
+  perform t_err('not even an admin can call apply_incoming_payment directly',
+    format('select public.apply_incoming_payment(%L::uuid)', v_link), 'permission denied');
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

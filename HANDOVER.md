@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 13 September 2026 (Phase 4 added).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 14 September 2026 (Phase 5a added).
 
 ## What this is
 
@@ -15,25 +15,24 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 1. **SCSS only, never Tailwind.** Design system lives in `src/styles/` (`_variables.scss`, `_mixins.scss`, `global.scss`, `layout.scss`).
 2. **No demo-data UI anywhere in the app.** Demo/seed data loads only via SQL run manually in the Supabase SQL editor, targeted only at `oguntunde123@gmail.com`. `seed_sample_data()`/`seed_demo_data_for()` are revoked from `authenticated`/`anon` (migration `0015_lock_sample_data.sql`) — there is deliberately no client wrapper for them in `src/lib/api.ts`.
-3. **The Paystack secret key never touches the frontend or repo.** Public key only in `.env` (`REACT_APP_PAYSTACK_PUBLIC_KEY`). Secret key lives solely as a Supabase Edge Function secret (`PAYSTACK_SECRET_KEY`), used by `supabase/functions/paystack-verify/index.ts`.
+3. **No Paystack secret key ever touches the frontend or repo.** Two separate cases: (a) StockFlow's own platform subscription billing — public key in `.env` (`REACT_APP_PAYSTACK_PUBLIC_KEY`), StockFlow's own secret key lives solely as a Supabase Edge Function secret (`PAYSTACK_SECRET_KEY`), used by `paystack-verify`. (b) each tenant's OWN Paystack account, connected under Settings → Payments (migration `0027`, Phase 5a) — that secret is checked once by `payments-connect` then stored only in Supabase Vault (`secret_vault_id`), never in a plain column; `payment_integrations` has zero RLS policies so the app can't read it back even as admin.
 4. **Stays on Create React App**, not Next.js. All server logic goes through Supabase Edge Functions or Postgres RPCs.
 5. **The blue accent `#2563eb` is locked.** Never change it without asking. Font is Plus Jakarta Sans.
 6. **Every change to stock or money goes through a `SECURITY DEFINER` RPC**, never a direct table write from the app. New money tables get a `guard_money_write` trigger and branch-scoped read policies (see "Engine conventions" below) — this is the single most important pattern to keep following.
 7. **The user prefers autonomous, uninterrupted building.** "Proceed" means keep shipping through a whole phase — verify with the test suite, not by asking. Pause only when genuinely blocked on a decision only the user can make.
 8. **Commit messages end with** `Co-Authored-By: Claude <model> <noreply@anthropic.com>` (model name matches whichever Claude model is doing the commit).
 
-## Where things actually stand (13 September 2026)
+## Where things actually stand (14 September 2026)
 
-Nothing described below the multi-branch stock migration has reached production yet. Everything is built, tested, and committed to a branch — pushed to GitHub, but **not merged, not deployed.**
+Migrations `0017`–`0026` are **live in production** and `main` is deployed on Vercel — the user ran them and confirmed the Paystack/paid-plan items from before this work are also done. Phase 5a (this session's work) is on a fresh branch, not yet merged.
 
-- **Git:** branch `feature/batch-expiry-foundations`, pushed to `origin`. `main` itself is only current up to the multi-branch stock work — do not merge until the migrations below have run live, since the frontend on this branch already calls RPCs/columns that only exist from `0017` onward.
-- **Database:** the *live* Supabase project has **not** run migrations `0017` onward. Everything from `0017_role_enforcement.sql` through `0026_shifts.sql` exists only as files in this branch, verified against a local PGlite (Postgres-in-WASM) test harness — never against the real project.
-- **Before ANY of this goes live**, in order: run `0017` → `0018` → `0019` → `0020` → `0021` → `0022` → `0023` → `0024` → `0025` → `0026` in the Supabase SQL editor, one file at a time so a failure is easy to isolate (each file's header comment states which migrations it must run after — double-check as you go, a couple were written and verified before later ones existed). Then merge to `main` — Vercel auto-deploys the frontend from there.
-- Also still pending from before this work started: move the Supabase project to a paid plan, and make one real Paystack Business-plan test payment end-to-end.
-- After `0025` runs, at least one admin should set an approval PIN under **Settings → Pricing** — without one, no cashier discount over their limit can ever be approved (the "manager PIN" dialog will show "no admin has set up an approval PIN yet"). The same PIN also gates an over-limit pay-out once Phase 4's till requirement is turned on.
-- `0026` ships with shifts **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it, not automatic on deploy.
+- **Git:** `main` has Phases 0–4 (`0017`–`0026`) merged and pushed — that's what's live. Phase 5a is on branch `feature/payment-confirmation`, built and tested but **not pushed, not merged, not deployed.**
+- **Database:** the live Supabase project has run `0017` through `0026`. `0027_payments.sql` (this session's work) exists only as a file on the feature branch, verified against the PGlite test harness — never against the real project, and it contains one thing the harness *can't* verify (see below).
+- **Before `0027` goes live:** run it in the Supabase SQL editor same as always, **then check that the `vault` extension is enabled** (Database → Extensions → `supabase_vault`) — if it isn't, the migration's Vault-wrapping functions (`store_tenant_paystack_secret`, `get_tenant_paystack_secret`) silently don't get created (the migration itself still succeeds; it just skips that one conditional block), and Settings → Payments will fail to connect until the extension is turned on and the migration is re-run.
+- **Three new Edge Functions to deploy manually** (Supabase dashboard → Edge Functions), same as `paystack-verify`/`invite-teammate` always have been: `payments-connect`, `payment-link-create`, and `payments-webhook` — the last one needs `--no-verify-jwt` if deployed via CLI, since Paystack can't send a Supabase auth token. After deploying, no per-tenant webhook registration step exists yet (deferred — see gaps below); for now, tell each connecting business to paste the `payments-webhook` function's URL into their own Paystack dashboard under Settings → API Keys & Webhooks.
+- `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 
-**What to do with a fresh session:** read this file, then run `git log --oneline main..feature/batch-expiry-foundations` to see the commits, then decide whether to keep building on this branch (Phase 5 onward, see below) or stop and get the user to merge/deploy what's here first. Don't assume either — ask if genuinely unclear, but if the user says "proceed" or "continue," the default is to keep building forward on the same branch.
+**What to do with a fresh session:** read this file, then run `git log --oneline main..feature/payment-confirmation` to see what's only on the branch, then decide whether to keep building (Phase 5b/5c or Phase 6, see below) or stop and get the user to run `0027`, enable Vault, deploy the three Edge Functions, and merge first. Don't assume either — ask if genuinely unclear, but if the user says "proceed" or "continue," the default is to keep building forward on the same branch.
 
 ## Architecture
 
@@ -80,25 +79,26 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state on this branch: DB harness 206/206, tsc clean, jest 103/103, build succeeds at ~152 kB gzip (main bundle).
+Current state on this branch: DB harness 222/222, tsc clean, jest 103/103, build succeeds at ~152 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
 | File | Purpose | Live in prod? |
 |---|---|---|
 | 0001–0016 | Core schema, FIFO engine, VAT, billing, barcodes, branches (early cut), product profitability | ✅ yes |
-| 0017_role_enforcement.sql | Per-table role-based RLS, `guard_money_write`/`guard_void` triggers, tenant suspension → read-only | ❌ **run this next** |
-| 0018_dashboard_summary.sql | Role-shaped `dashboard_summary()` jsonb RPC | ❌ pending |
-| 0019_billing_and_storage_fixes.sql | `plan_tier` gets `'business'`; logo upload confined to the caller's tenant folder | ✅ **already run** |
-| 0020_branch_stock.sql | The big one — real multi-branch stock, `stock_levels()`, `transfer_stock()`, `adjust_stock()`, engine rewritten branch-aware | ❌ pending |
-| 0021_foundations.sql | Sequential doc numbers (`next_doc_no`), `log_audit()`, plan-gating (`tenant_has_feature`) | ❌ pending |
-| 0022_batch_expiry.sql | Batch numbers, manufacture/expiry dates, FEFO picking, expired/recalled stock blocked from sale, `batch_trace()` | ❌ pending |
-| 0023_returns.sql | Partial customer/supplier returns, store credit, `create_sale_return`/`create_purchase_return` | ❌ pending |
-| 0024_return_voids_and_policy.sql | `void_sale_return`/`void_purchase_return`, configurable `tenants.cashier_returns` policy | ❌ pending |
-| 0025_pricing.sql | Price lists, quantity breaks, per-role discount limits with manager-PIN approval, below-cost warning | ❌ pending |
-| 0026_shifts.sql | Registers, shifts, cash-up (`open_shift`/`close_shift`/`add_cash_movement`/`x_report`/`z_report`), `payment_types.method_group` | ❌ pending |
+| 0017_role_enforcement.sql | Per-table role-based RLS, `guard_money_write`/`guard_void` triggers, tenant suspension → read-only | ✅ yes |
+| 0018_dashboard_summary.sql | Role-shaped `dashboard_summary()` jsonb RPC | ✅ yes |
+| 0019_billing_and_storage_fixes.sql | `plan_tier` gets `'business'`; logo upload confined to the caller's tenant folder | ✅ yes |
+| 0020_branch_stock.sql | The big one — real multi-branch stock, `stock_levels()`, `transfer_stock()`, `adjust_stock()`, engine rewritten branch-aware | ✅ yes |
+| 0021_foundations.sql | Sequential doc numbers (`next_doc_no`), `log_audit()`, plan-gating (`tenant_has_feature`) | ✅ yes |
+| 0022_batch_expiry.sql | Batch numbers, manufacture/expiry dates, FEFO picking, expired/recalled stock blocked from sale, `batch_trace()` | ✅ yes |
+| 0023_returns.sql | Partial customer/supplier returns, store credit, `create_sale_return`/`create_purchase_return` | ✅ yes |
+| 0024_return_voids_and_policy.sql | `void_sale_return`/`void_purchase_return`, configurable `tenants.cashier_returns` policy | ✅ yes |
+| 0025_pricing.sql | Price lists, quantity breaks, per-role discount limits with manager-PIN approval, below-cost warning | ✅ yes |
+| 0026_shifts.sql | Registers, shifts, cash-up (`open_shift`/`close_shift`/`add_cash_movement`/`x_report`/`z_report`), `payment_types.method_group` | ✅ yes |
+| 0027_payments.sql | Pay links + webhook confirmation (`payment_integrations`/`payment_links`/`incoming_payments`, `integration_status()`, `apply_incoming_payment()`), Vault-wrapping RPCs | ❌ **run this next** |
 
-**0017 → 0026 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree.
+**0017 → 0027 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needs the `vault` extension enabled (Database → Extensions → `supabase_vault`) for its Vault-wrapping functions to get created — see "Where things actually stand" above.
 
 ## Key files
 
@@ -117,8 +117,9 @@ Current state on this branch: DB harness 206/206, tsc clean, jest 103/103, build
 - `src/pages/Sales.tsx` — exports `ReturnModal`, reused by `POS.tsx` for the "Returns" counter flow. If you need the return UI somewhere else, import it from here rather than duplicating it.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
-- `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 190-ish assertions and counting), `README.md`.
-- `supabase/functions/paystack-verify/index.ts`, `supabase/functions/invite-teammate/index.ts` — Deno Edge Functions, deployed manually via the Supabase dashboard, not part of the frontend build.
+- `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
+- `supabase/functions/paystack-verify/index.ts`, `supabase/functions/invite-teammate/index.ts`, `supabase/functions/payments-connect/index.ts`, `supabase/functions/payment-link-create/index.ts`, `supabase/functions/payments-webhook/index.ts` — Deno Edge Functions, deployed manually via the Supabase dashboard, not part of the frontend build or the DB test suite (the last three are migration `0027`'s, Phase 5a).
+- `src/pages/Settings.tsx`'s Payments tab, `src/pages/Sales.tsx`'s "Get payment link" row action — the frontend half of Phase 5a. `payments` in `src/lib/api.ts` wraps `integration_status()` and the two Edge Functions a signed-in user calls (`payments-connect`, `payment-link-create`) — `payments-webhook` is never called by the app, only by Paystack.
 - `.claude/launch.json` — the `stockflow` dev-server config used by the Browser-pane preview tooling (`cd repo && BROWSER=none PORT=3000 npm start`).
 
 ## The competitor-gap plan (why all this exists)
@@ -134,11 +135,11 @@ Current state on this branch: DB harness 206/206, tsc clean, jest 103/103, build
 | 2 | Partial returns, credit notes, store credit, supplier returns, **void a return**, POS-integrated returns, configurable cashier-return policy | ✅ done (0023, 0024) |
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
-| 5 | Automatic payment confirmation (Paystack dedicated accounts / pay links) | **not started — next up** |
-| 6 | Quotes, real purchase orders (ordered before received), units of measure, delivery notes, custom fields, audit-log viewer | not started |
+| 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
+| 6 | Quotes, real purchase orders (ordered before received), units of measure, delivery notes, custom fields, audit-log viewer | **not started — next up** |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0027`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0028`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -148,6 +149,15 @@ Registers/tills, per-branch: open with a float, ring sales against the open shif
 - **Opt-in by design:** `shift_rules.required_for` defaults to `[]`, not `["sales"]` — the alternative would lock every existing tenant out of selling the instant `0026` runs, before any till exists. An admin turns it on under **Settings → Business** once registers are set up under **Settings → Branches**.
 - **Frontend:** `src/lib/useTillGate.ts` decides whether POS should show `OpenTillScreen` (till required, none open) or `TillHeader` (a till chip with Pay in/out, X report, Close till) above the normal POS layout — see `src/pages/POS.tsx`. A network failure while checking fails **open** (lets the cashier keep selling), matching the offline-first philosophy elsewhere in the app.
 - See `FEATURE_PLAN.md`'s Phase 4 section for the original schema sketch — it was written before Phases 1–3 existed, so a few specifics there don't match what shipped (see `FEATURE_PLAN.md`'s own note on this).
+
+### Phase 5a, as shipped (0027) — pay links only
+
+A customer's transfer confirms itself: an admin connects the business's OWN Paystack account once (Settings → Payments), Sales gets a "Get payment link" action on any unpaid invoice, and the moment the customer pays, `payments-webhook` records it — no bank alert to read or match. Money never passes through StockFlow; each business's own Paystack account collects it directly.
+
+- **Schema:** `payment_integrations` (one row per tenant, zero RLS policies — genuinely unreadable by the app, not even by that tenant's own admin), `payment_links`, `incoming_payments` (unique on `(provider, provider_ref)`, so a replayed webhook is a no-op), `sale_payments.incoming_payment_id`.
+- **The secret never sits in a plain column.** `payments-connect` checks the key against Paystack's API, then calls `store_tenant_paystack_secret()` (only created when the `vault` extension exists) to put it in Supabase Vault; `payment-link-create` calls `get_tenant_paystack_secret()` to get it back out when it needs to call Paystack on the tenant's behalf. Both are revoked from `authenticated`/`anon` — only the service-role Edge Functions can call them.
+- **`apply_incoming_payment()`** is the only thing that actually records money, and it's the first write in this app to reach a guarded table with no signed-in user at all (the webhook has no Supabase JWT, only Paystack's own HMAC signature). This exposed a real bug in `guard_money_write()` — it resolved tenant/role through `current_tenant_id()`/`current_role()`, both of which need `auth.uid()`, so a genuine service-role write would have been wrongly rejected as "tenant suspended." Fixed in `0027` by treating `current_role() is null` as a trusted system context — safe, because a real authenticated/anon request can never reach that state (its own RLS policy would already have blocked it via the same null `current_tenant_id()`). Worth knowing about before writing the next service-role-only write path.
+- **Deliberately not built** (see FEATURE_PLAN.md's own Phase 5 sub-phases): 5b (a dedicated virtual account per customer — needs Paystack's approval on the merchant's account first) and 5c (a bank-feed provider for businesses that won't use Paystack at all).
 
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
@@ -159,6 +169,9 @@ Registers/tills, per-branch: open with a float, ring sales against the open shif
 - Phase 4 shipped engine-complete but UI-partial: no owner-dashboard "shift short" attention card, no Reports → Shifts tab (Z report history, variance per cashier over time), no denomination-breakdown counting UI (Close Till just takes one total), and no printable/thermal Z report layout. `x_report()`/`z_report()` already return every figure those screens would need — it's pure frontend work whenever it's prioritized.
 - An offline-queued sale made while a till was required but not open (or was open and then closed before sync) fails when it reaches the server — same pattern as an over-the-limit offline discount, surfaced in the Pending Sync panel for the cashier to redo online.
 - Registers can only be added at a branch that already has one (multi-branch tenants, via Settings → Branches); a single-branch tenant that wants a second physical till has to be given one directly in the database for now.
+- No per-tenant webhook auto-registration — `payments-connect` doesn't yet call Paystack's API to set the webhook URL on the connecting business's account; they have to paste `payments-webhook`'s URL into their own Paystack dashboard by hand once (see "Where things actually stand").
+- No "Confirmed by Paystack" badge on the Sales list/detail yet, and no dedicated "Incoming Payments" view — `incoming_payments` rows (auto-matched, unmatched, or otherwise) aren't surfaced anywhere in the UI yet; `MatchPayment.tsx` (the bank-alert-paste flow) is untouched and still works exactly as before, side by side with pay links rather than unified into one page as FEATURE_PLAN.md's Phase 5 envisioned.
+- An overpaid pay link on a walk-in sale (no customer attached) has nowhere for the excess to go — it's simply not collectable, same as a cash overpay today; only a named customer gets it as store credit.
 
 ## How the user works
 

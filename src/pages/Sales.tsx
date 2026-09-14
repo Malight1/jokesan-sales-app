@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag } from 'lucide-react';
+import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, Link2 } from 'lucide-react';
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
-  returns as returnsApi, storeCredit,
+  returns as returnsApi, storeCredit, payments as paymentsApi, IntegrationStatus,
   SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -52,6 +52,10 @@ export default function Sales() {
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
   const { data: priceLists } = useQuery<PriceList[]>(() => tiersEnabled ? pricing.lists() : Promise.resolve([]), [tiersEnabled]);
   const { data: priceItems } = useQuery<PriceListItem[]>(() => tiersEnabled ? pricing.allItems() : Promise.resolve([]), [tiersEnabled]);
+  // Whether "Pay now" links are even available — no point showing the
+  // button (or failing every click) until Paystack is connected.
+  const { data: integration } = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus(), []);
+  const [creatingLinkFor, setCreatingLinkFor] = useState<string | null>(null);
   const { data: custTypes } = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled]);
 
   const createMut = useMutation(salesApi.create);
@@ -247,6 +251,29 @@ export default function Sales() {
     window.open(whatsappLink(cust?.phone, lines.join('\n')), '_blank');
   };
 
+  // Generates a Paystack pay link (payment-link-create) and hands it
+  // straight to WhatsApp — the sale updates on its own the moment the
+  // customer pays, via the payments-webhook Edge Function.
+  const getPayLink = async (s: SalesOrder) => {
+    setCreatingLinkFor(s.id);
+    try {
+      const res = await paymentsApi.createLink(s.id);
+      if (res.error || !res.url) { toast.error(res.error ?? 'Could not create a payment link.'); return; }
+      const cust = customers?.find(c => c.id === s.customer_id);
+      const lines = [
+        `Hello ${customerName(s.customer_id)}! To pay for ${invoiceNo(s)} (₦${s.balance.toLocaleString()}):`,
+        ``,
+        res.url,
+      ];
+      window.open(whatsappLink(cust?.phone, lines.join('\n')), '_blank');
+      toast.success('Payment link created — the sale updates automatically once it\'s paid.');
+    } catch (e: any) {
+      toast.error(e.message ?? 'Could not create a payment link.');
+    } finally {
+      setCreatingLinkFor(null);
+    }
+  };
+
   const handleVoid = async () => {
     if (!voidFor) return;
     const res = await voidMut.mutate(voidFor.id);
@@ -278,6 +305,8 @@ export default function Sales() {
 
   const rowActions: RowAction<SalesOrder>[] = [
     { icon: <Wallet size={15} />, label: 'Record payment', onClick: openPay, show: s => s.balance > 0 && !s.voided },
+    { icon: <Link2 size={15} />, label: creatingLinkFor ? 'Creating link…' : 'Get payment link', onClick: getPayLink,
+      show: s => s.balance > 0 && !s.voided && !!integration?.connected },
     { icon: <Undo2 size={15} />, label: 'Return items', onClick: setReturnFor, show: s => !s.voided },
     { icon: <Eye size={15} />, label: 'View', onClick: s => setViewId(s.id) },
     { icon: <FileText size={15} />, label: 'Download invoice (PDF)', onClick: downloadInvoice, show: s => !s.voided },

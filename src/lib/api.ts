@@ -862,6 +862,41 @@ export const billing = {
   },
 };
 
+// ============================================================
+// AUTOMATIC PAYMENT CONFIRMATION (migration 0027, Phase 5a)
+//
+// Each business connects its OWN Paystack account — money never passes
+// through StockFlow. Connecting and reading back the secret both happen
+// inside Edge Functions; the app only ever sees integration_status()'s
+// public-facing shape (status + public key, never the secret).
+// ============================================================
+export interface IntegrationStatus {
+  connected: boolean;
+  status: 'not_connected' | 'pending' | 'live' | 'error';
+  public_key: string | null;
+  last_verified_at: string | null;
+}
+export interface PaymentLink {
+  id: string; sales_order_id: string; provider_ref: string; url: string;
+  amount: number; status: 'pending' | 'paid' | 'expired' | 'cancelled'; created_at: string;
+}
+
+export const payments = {
+  integrationStatus: () => rpc<IntegrationStatus>('integration_status'),
+  connect: async (secretKey: string, publicKey: string): Promise<{ success?: boolean; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('payments-connect', { body: { secretKey, publicKey } });
+    if (error) return { error: error.message };
+    return data;
+  },
+  createLink: async (saleId: string): Promise<{ success?: boolean; url?: string; reference?: string; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('payment-link-create', { body: { saleId } });
+    if (error) return { error: error.message };
+    return data;
+  },
+  linksForSale: (saleId: string) =>
+    run<PaymentLink[]>(supabase.from('payment_links').select('*').eq('sales_order_id', saleId).order('created_at', { ascending: false })),
+};
+
 // NOTE: there is deliberately no client wrapper for seed_sample_data /
 // seed_demo_data_for. Demo data is seeded ONLY by running the SQL directly
 // in the Supabase editor, and only ever against the pitch account. Any UI
