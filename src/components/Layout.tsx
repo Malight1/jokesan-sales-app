@@ -71,6 +71,7 @@ const navItems = [
     section: 'Admin',
     items: [
       { to: '/import', label: 'Import Data', icon: Upload },
+      { to: '/audit', label: 'Audit Log', icon: ShieldCheck },
       { to: '/settings', label: 'Settings', icon: SettingsIcon },
     ],
   },
@@ -102,6 +103,7 @@ const pageTitles: Record<string, string> = {
   '/insights': 'Smart Insights',
   '/profile': 'My Profile',
   '/settings': 'Settings',
+  '/audit': 'Audit Log',
   '/platform': 'Platform Admin',
 };
 

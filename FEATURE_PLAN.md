@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0031, live in production. `0032` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0032, live in production. `0033` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -12,12 +12,12 @@
 | 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
-| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c), **0031** (6d), **0032** (6e) + more | 🟡 6a–6e done, 6f next |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0033+ | not started |
+| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c), **0031** (6d), **0032** (6e), **0033** (6f) | ✅ done |
+| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0034+ | not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–6d are live in production; Phase 6e's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6f onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–6e are live in production; Phase 6f's code is on `main` but its migration hasn't run yet — **this is the last sub-phase of Phase 6**, so once `0033` runs, all of Phase 6 is live and Phase 7 is next. The rest of this document is the original plan for Phase 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -50,6 +50,10 @@ Phases 0–6d are live in production; Phase 6e's code is on `main` but its migra
 - Built: `custom_field_defs` and a `custom_fields` jsonb column on customers, suppliers, finished goods, materials and sales orders, exactly as this plan's schema sketch describes. Fields render in the create/edit form for each of the four master-data entities, and in a "Custom fields" section on the Sale detail screen. A field flagged `show_on_invoice` prints on the invoice PDF.
 - A sale's fields are set only **after** the sale exists, via a dedicated `set_custom_fields` RPC, never at the point of sale — `create_sale` has no parameter for them. `required` is enforced for the four master-data entities but deliberately **not** for a sale, since there'd be no way to enforce it at creation time anyway.
 - Not built: DataTable optional columns for a custom field, and CSV/Excel export inclusion — both are generic table/export features the app doesn't have anywhere yet, not something specific to custom fields.
+
+**Phase 6f (audit log viewer), as actually shipped, closes out Phase 6** — built largely as the plan below describes, with one addition beyond it:
+- Built: a generic `audit_row_change()` trigger on the tables this plan names (roles, settings, branches, payment types) plus `expense_types`/`customer_types`/`price_lists`/`price_list_items` — the plan's "price changes" bullet, made concrete. Everything else sensitive (voids, returns, discount overrides, shift variance, batch write-offs/recalls) was already logging inline via `log_audit()` since Phase 0, so this phase's only new engine work was the tables with no RPC of their own to log from. A new `/audit` page (admin), with a before/after summary per row, a date-range filter, and "export per year" satisfied by picking a year and using the existing per-page Export button rather than a bespoke export path.
+- Not built: a dedicated diff-viewer modal (an inline one-line summary stands in for it) and distinct-value dropdown filters for action/entity (the search box covers the same ground).
 
 ---
 

@@ -2028,6 +2028,68 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 37. audit log triggers on sensitive config (0033) ----------
+do $$
+declare
+  v_admin  uuid := '00000000-0000-0000-0000-000000000001';
+  v_store  uuid := '00000000-0000-0000-0000-000000000003';
+  v_branch uuid;
+  v_ptype  uuid;
+  v_plist  uuid;
+  v_pitem  uuid;
+  v_before int;
+  v_after  int;
+begin
+  perform t_as(v_admin);
+
+  -- ---- A: a role change is logged with the old and new role ----
+  -- Ordered by id, not created_at: the whole test script is one
+  -- transaction, so now() is identical for every row it inserts.
+  update profiles set role = 'accounts' where id = v_store;
+  perform t_rec('a role change is logged with the old and new role',
+    (select (meta->'role'->>'from') = 'inventory' and (meta->'role'->>'to') = 'accounts'
+       from audit_logs where entity = 'profiles' and entity_id = v_store::text and action = 'update'
+       order by id desc limit 1));
+  update profiles set role = 'inventory' where id = v_store;
+
+  -- ---- B: an unrelated profile edit (not role/is_active/branch_id) logs nothing ----
+  select count(*) into v_before from audit_logs where entity = 'profiles' and entity_id = v_store::text;
+  update profiles set full_name = 'Storekeeper Renamed' where id = v_store;
+  select count(*) into v_after from audit_logs where entity = 'profiles' and entity_id = v_store::text;
+  perform t_rec('an unrelated profile edit is not logged', v_after = v_before);
+
+  -- ---- C: a tenant settings change is logged ----
+  update tenants set vat_rate = 5 where id = t_id('tenant');
+  perform t_rec('a tenant settings change is logged with the old and new value',
+    (select (meta->'vat_rate'->>'from') is not null and (meta->'vat_rate'->>'to')::numeric = 5
+       from audit_logs where entity = 'tenants' and entity_id = t_id('tenant')::text and action = 'update'
+       order by id desc limit 1));
+
+  -- ---- D: creating a branch is logged ----
+  insert into branches (tenant_id, name) values (t_id('tenant'), 'Audit Test Branch') returning id into v_branch;
+  perform t_rec('creating a branch is logged',
+    (select (meta->'name'->>'to') = 'Audit Test Branch'
+       from audit_logs where entity = 'branches' and entity_id = v_branch::text and action = 'create'));
+
+  -- ---- E: renaming a payment type is logged ----
+  insert into payment_types (tenant_id, name) values (t_id('tenant'), 'Audit Test Method') returning id into v_ptype;
+  update payment_types set name = 'Audit Test Method Renamed' where id = v_ptype;
+  perform t_rec('renaming a payment type is logged',
+    (select (meta->'name'->>'from') = 'Audit Test Method' and (meta->'name'->>'to') = 'Audit Test Method Renamed'
+       from audit_logs where entity = 'payment_types' and entity_id = v_ptype::text and action = 'update'));
+
+  -- ---- F: a price change is logged with the old and new price ----
+  insert into price_lists (tenant_id, name) values (t_id('tenant'), 'Audit Test List') returning id into v_plist;
+  insert into price_list_items (tenant_id, price_list_id, finished_good_id, min_qty, price)
+    values (t_id('tenant'), v_plist, t_id('soap'), 1, 55) returning id into v_pitem;
+  update price_list_items set price = 65 where id = v_pitem;
+  perform t_rec('a price change is logged with the old and new price',
+    (select (meta->'price'->>'from')::numeric = 55 and (meta->'price'->>'to')::numeric = 65
+       from audit_logs where entity = 'price_list_items' and entity_id = v_pitem::text and action = 'update'));
+
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

@@ -37,6 +37,7 @@ const MatchPayment = lazy(() => import('./pages/MatchPayment'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
 const Batches = lazy(() => import('./pages/Batches'));
+const Audit = lazy(() => import('./pages/Audit'));
 // Development-only design preview of the three role dashboards (sample
 // data, no sign-in). The constant condition is resolved at build time, so
 // the route and its chunk are dropped from production builds.
@@ -86,6 +87,7 @@ export default function App() {
                         <Route path="/batches" element={<Batches />} />
                         <Route path="/profile" element={<Profile />} />
                         <Route path="/settings" element={<Settings />} />
+                        <Route path="/audit" element={<Audit />} />
                       </Routes>
                     </Suspense>
                   </Layout>

@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6e — custom fields — added; not yet run live).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6f — audit log viewer — added; not yet run live. This closes out Phase 6 in full — Phase 7 is next).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6e as of 17 September 2026, but its migration (`0032`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6f as of 17 September 2026, but its migration (`0033`) hasn't been run live yet — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,15 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0031` are live (the user confirmed `0031` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6e (custom fields) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
+Migrations `0017`–`0032` are live (the user confirmed `0032` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6f (audit log viewer) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above). **This closes out Phase 6 entirely** — 6a through 6f are all shipped.
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0031`, confirmed by the user. **`0032_custom_fields.sql` has NOT been run yet.**
-- **This means the live app right now has a "Custom Fields" tab under Settings, and a custom-fields section on the Customers/Suppliers/Finished Goods/Materials forms and the Sale detail screen, that will fail** (the `custom_field_defs` table and `custom_fields` columns don't exist yet) until `0032` is run. Everything else is unaffected — every new query is wrapped in `.catch(() => [])`, so the forms themselves still work, they just won't show a custom-fields section. Run `0032` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
+- **Database:** the live Supabase project has run `0001` through `0032`, confirmed by the user. **`0033_audit_log.sql` has NOT been run yet.**
+- **This means the live app right now has an "Audit Log" nav link that will fail to load anything** (it queries `audit_logs`, which already exists from `0001` — so the page itself won't error, it'll just show zero events, since the new triggers that populate it for role/settings/branch/lookup/price changes don't exist yet) until `0033` is run. Every void/return/discount/shift/batch event logged since Phase 0 is already there and will show up fine. Run `0033` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0032` has actually been run live before assuming custom fields work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6f — audit log viewer — is next, or Phase 7 if reprioritized). Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0033` has actually been run live before assuming role/settings/branch/lookup/price changes are being logged for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below — **Phase 6 is done, so Phase 7 (smart reorder, an AI assistant, e-invoicing readiness) is next**, unless reprioritized. Verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 286/286, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
+Current state: DB harness 292/292, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -102,9 +102,10 @@ Current state: DB harness 286/286, tsc clean, jest 103/103, build succeeds at ~1
 | 0029_purchase_orders.sql | Order before receiving (`purchase_order_lines`, `goods_receipts`, `create_purchase_order()`, `receive_purchase_order()`, `cancel_purchase_order()`), advance payments, `suppliers.lead_time_days` | ✅ yes |
 | 0030_units_of_measure.sql | Units of measure (`product_units`, `resolve_uom_factor()`), `uom_id`/`uom_qty`/`uom_factor` on `sale_items`/`purchase_items` | ✅ yes |
 | 0031_deliveries.sql | Delivery notes and waybills (`deliveries`, `delivery_items`, `create_delivery_note()`/`dispatch_delivery()`/`mark_delivery_delivered()`/`mark_delivery_failed()`), private `delivery-proofs` Storage bucket | ✅ yes |
-| 0032_custom_fields.sql | Custom fields (`custom_field_defs`, `custom_fields` jsonb on customers/suppliers/finished_goods/materials/sales_orders, `validate_custom_fields()` trigger, `set_custom_fields()` RPC, `cleanup_deleted_custom_field()` trigger) | ❌ **run this next** |
+| 0032_custom_fields.sql | Custom fields (`custom_field_defs`, `custom_fields` jsonb on customers/suppliers/finished_goods/materials/sales_orders, `validate_custom_fields()` trigger, `set_custom_fields()` RPC, `cleanup_deleted_custom_field()` trigger) | ✅ yes |
+| 0033_audit_log.sql | Audit log viewer (`audit_row_change()` trigger, attached to `profiles`/`tenants`/`branches`/`payment_types`/`expense_types`/`customer_types`/`price_lists`/`price_list_items` — the sensitive config tables with no RPC of their own to log from) | ❌ **run this next** |
 
-**0017 → 0032 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0032` need nothing extra.
+**0017 → 0033 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0033` need nothing extra.
 
 ## Key files
 
@@ -126,6 +127,7 @@ Current state: DB harness 286/286, tsc clean, jest 103/103, build succeeds at ~1
 - `src/components/ProductUnitsSection.tsx` — units of measure management (migration 0030, Phase 6c), shared by the Finished Goods and Materials product-edit modals. Only rendered when editing an existing product (a unit needs a real `product_id`).
 - `src/pages/Deliveries.tsx` — delivery notes and waybills (migration 0031, Phase 6d). `Sales.tsx` also has a `CreateDeliveryModal` (unexported, unlike `ReturnModal`) behind its "Create delivery note" row action. `generateWaybillPdf` lives in `src/lib/invoice.ts`.
 - `src/components/CustomFieldsSection.tsx` — custom fields (migration 0032, Phase 6e), shared by the Customers/Suppliers/Finished Goods/Materials forms and the Sale detail screen. Definitions are managed under Settings → Custom Fields (`CustomFieldsTab` in `Settings.tsx`); `customFieldDefs`/`customFields` in `src/lib/api.ts` wrap `custom_field_defs` and the `set_custom_fields()` RPC — the latter is the only way to set a sale's fields, since `sales_orders` has no direct write policy.
+- `src/pages/Audit.tsx` — the audit log viewer (migration 0033, Phase 6f), admin-only. Read-only: `auditLog.list()` in `src/lib/api.ts` is the only wrapper, since nothing in the app ever writes `audit_logs` directly — `log_audit()` (called inline from inside sensitive RPCs since 0021) and `audit_row_change()` (a trigger on config tables that have no RPC of their own) are the only two writers.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
@@ -147,10 +149,10 @@ Current state: DB harness 286/286, tsc clean, jest 103/103, build succeeds at ~1
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
-| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields (**6e, 0032**), audit-log viewer | 🟡 partial — **6f next up** |
+| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields (**6e, 0032**), audit-log viewer (**6f, 0033**) | ✅ done |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0033`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0034`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -217,6 +219,16 @@ An admin defines a field once (Settings → Custom Fields — key, label, type, 
 - **Frontend:** a `CustomFieldsSection` component (shared by the Customers, Suppliers, Finished Goods and Materials forms, and the Sale detail screen) renders one input per definition; Settings → Custom Fields manages the definitions themselves. A sale field flagged `show_on_invoice` prints on the invoice PDF (`generateInvoicePdf`'s new `customFields` array in `src/lib/invoice.ts`).
 - **Deliberately not built** (see FEATURE_PLAN.md's own Phase 6e note): DataTable optional columns for a custom field, and including custom fields in the CSV/Excel exporters — both are generic features the app doesn't have anywhere yet (no table has configurable columns, and `exporters.ts` takes an explicit column list per call site), not something specific to this phase to bolt on affordably in one sitting.
 
+### Phase 6f, as shipped (0033) — audit log viewer
+
+**This closes out Phase 6 entirely.** Everything sensitive that already goes through an engine RPC (voids, returns, discounts, shift variance, batch write-offs and recalls) has called `log_audit()` inline since migration 0021 — nothing new was needed there. What was never logged is a change to config that has no RPC at all, because it's just a plain RLS-checked table write from the app: a staff member's role, a business setting, a branch, a payment/expense/customer type's name, a price. A trigger is the only place that can see both the before and the after on those.
+
+- **Engine:** one generic `audit_row_change()` trigger function, reused across eight tables (`profiles`, `tenants`, `branches`, `payment_types`, `expense_types`, `customer_types`, `price_lists`, `price_list_items`) via a `do $$ ... $$` loop, the same shape as 0017's role/RLS loop. Each table passes its own watched-column list as a trigger argument (e.g. `profiles` only watches `role,is_active,branch_id` — editing someone's `full_name` logs nothing), so the log stays signal, not noise; an `UPDATE` that touches none of the watched columns is silently skipped. `tenants` needed a second argument (`'id'` instead of the default `'tenant_id'`) since a tenant row's own id *is* its tenant id.
+- **The diff shape is uniform for every trigger-logged row:** `meta` is `{column: {from, to}}` for an update, `{column: {to}}` for a create, `{column: {from}}` for a delete — genuinely "before/after," unlike the older inline `log_audit()` calls, which each log whatever free-form object that action's own author decided (a `doc_no`, a `reason`, an `amount`). The `/audit` page's `formatMeta()` renders both shapes generically: an object with a `from`/`to` key prints as `"field: old → new"`, anything else prints as `"field: value"`.
+- **Not DB-plan-gated** — audit logging isn't a paid feature, it's a compliance backstop, so unlike custom fields this was never a candidate for `require_feature()` in the first place.
+- **Frontend:** a new `/audit` page (admin-only, nav item under Admin), read via `auditLog.list({from, to})` in `src/lib/api.ts` — genuinely read-only, there is no write function, since nothing in the app is meant to ever call `log_audit()` or write `audit_logs` directly except the engine itself. Loads the selected date range in full (matching every other list page's "load it all, let DataTable search/sort/paginate client-side" convention) with quick-pick buttons (last 30 days, this year, last year, all time) — picking a year and clicking DataTable's own built-in Export button is "export per year," so no separate export mechanism was built. User names come from `team.members()`, already loaded elsewhere in the app — no new query needed for that.
+- **Deliberately not built:** a dedicated diff-viewer modal (the `formatMeta()` inline summary was judged enough for a first cut — plan gave only "a before/after diff for edits," not a specific UI, so a compact one-line-per-event summary satisfies it far more cheaply than a modal per row) and a distinct-value dropdown filter for action/entity (the search box already reaches this: typing "role" or "tenants" filters to matching rows).
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).
@@ -239,6 +251,8 @@ An admin defines a field once (Settings → Custom Fields — key, label, type, 
 - No DataTable optional columns or CSV/Excel export inclusion for custom fields (Phase 6e) — see that section above.
 - A required custom field on a sale isn't enforced anywhere, by design (see Phase 6e above) — a cashier can leave it blank forever unless a report or reminder is built later to flag it.
 - `custom_field_defs.type` can be changed after values already exist under it without re-validating those existing rows — the next save of that row is what would first surface a now-mismatched value.
+- No dedicated diff-viewer modal on `/audit` (Phase 6f) — a compact inline summary line stands in for it. No distinct-value dropdown filters for action/entity either — the search box covers the same ground.
+- A `price_list_items` audit entry doesn't show which product or list it belongs to inline — only its own row id and the price that changed. Cross-referencing the id against `price_list_items` is the only way to know which product it was, if it's ever needed.
 
 ## How the user works
 

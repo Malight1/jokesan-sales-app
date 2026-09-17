@@ -1010,6 +1010,33 @@ export const lookupsAdmin = {
   remove: (table: LookupTable, id: string) => del(supabase.from(table).delete().eq('id', id)),
 };
 
+// ============================================================
+// AUDIT LOG (migration 0033, Phase 6f)
+//
+// audit_logs is append-only and read-only from the app — there's no
+// write function here at all. log_audit() (called from inside sensitive
+// engine RPCs since migration 0021 — voids, returns, discounts, shift
+// variance, batch write-offs/recalls) and audit_row_change() (a trigger
+// on config tables that have no RPC of their own: profiles, tenants,
+// branches, the lookup tables, price lists) are the only two writers.
+// ============================================================
+export interface AuditLogEntry {
+  id: number; tenant_id: string; user_id: string | null;
+  action: string; entity: string | null; entity_id: string | null;
+  meta: Record<string, any> | null; created_at: string;
+}
+
+export const auditLog = {
+  list: (opts: { from?: string; to?: string } = {}) =>
+    runAll<AuditLogEntry>((f, t) => {
+      let q = supabase.from('audit_logs').select('*')
+        .order('created_at', { ascending: false }).order('id', { ascending: false });
+      if (opts.from) q = q.gte('created_at', opts.from);
+      if (opts.to) q = q.lte('created_at', opts.to);
+      return q.range(f, t);
+    }),
+};
+
 export const profileApi = {
   updateName: (id: string, full_name: string) => del(supabase.from('profiles').update({ full_name }).eq('id', id)),
   changePassword: async (password: string) => {
