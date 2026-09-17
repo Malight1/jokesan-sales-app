@@ -1836,6 +1836,82 @@ begin
     and (select qty_remaining = 50 from purchase_items where po_line_id = v_line1));
 end $$;
 
+-- ---------- 35. delivery notes and waybills (0031) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_dsoap   uuid;
+  v_sale    uuid;
+  v_item1   uuid;
+  v_delivery uuid;
+  v_delivery2 uuid;
+begin
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Delivery Soap', 'pcs', 5, 100, 1.5) returning id into v_dsoap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_dsoap, 10, 40, 'Opening balance');
+  execute format('select public.create_sale(null, current_date, null, 1000, %L::jsonb)', t_items(v_dsoap, 10, 100)) into v_sale;
+  perform t_su();
+  select id into v_item1 from sale_items where sales_order_id = v_sale;
+
+  -- ---- A: only admin/sales may create a delivery note ----
+  perform t_as(v_store);
+  perform t_err('inventory cannot create a delivery note',
+    format('select public.create_delivery_note(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 6))::text),
+    'not allowed');
+  perform t_su();
+
+  -- ---- B: a partial delivery note gets a real DN- number ----
+  perform t_as(v_admin);
+  select public.create_delivery_note(v_sale,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 6)),
+    'Musa', 'ABC-123XY', 'Ikeja') into v_delivery;
+  perform t_rec('a delivery note gets a real DN- number and starts pending',
+    (select doc_no like 'DN-%' and status = 'pending' and driver_name = 'Musa' from deliveries where id = v_delivery));
+
+  -- ---- C: can't claim more than what's left of the sold line (10 sold, 6 claimed, 4 left) ----
+  perform t_err('a delivery note can''t claim more than what''s left to deliver',
+    format('select public.create_delivery_note(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 5))::text),
+    'still to deliver');
+
+  -- ---- D: dispatch, then deliver ----
+  perform t_err('a delivery can''t be marked delivered before it''s dispatched',
+    format('select public.mark_delivery_delivered(%L::uuid, %L)', v_delivery, 'Chidi'),
+    'dispatched');
+  perform public.dispatch_delivery(v_delivery, null, 'XYZ-987ZZ');
+  perform t_rec('dispatching stamps dispatched_at and can update the vehicle',
+    (select status = 'dispatched' and dispatched_at is not null and vehicle_no = 'XYZ-987ZZ' from deliveries where id = v_delivery));
+
+  perform t_err('a dispatched delivery can''t be dispatched again',
+    format('select public.dispatch_delivery(%L::uuid)', v_delivery), 'pending');
+
+  perform public.mark_delivery_delivered(v_delivery, 'Chidi Okafor', 'https://example.com/proof.jpg');
+  perform t_rec('marking delivered stamps delivered_at and who received it',
+    (select status = 'delivered' and delivered_at is not null and received_by_name = 'Chidi Okafor' from deliveries where id = v_delivery));
+  perform t_su();
+
+  -- ---- E: a failed delivery frees up its claimed quantity ----
+  perform t_as(v_admin);
+  select public.create_delivery_note(v_sale,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 4))) into v_delivery2;
+  perform public.mark_delivery_failed(v_delivery2, 'truck broke down');
+  perform t_rec('a failed delivery is marked as such, not silently deleted',
+    (select status = 'failed' and note = 'truck broke down' from deliveries where id = v_delivery2));
+
+  select public.create_delivery_note(v_sale,
+    jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 4))) into v_delivery2;
+  perform t_rec('the failed delivery''s 4 units can be claimed again by a new delivery note',
+    v_delivery2 is not null);
+  perform t_err('but only 4 are actually free — the 6 already delivered stay claimed',
+    format('select public.create_delivery_note(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 1))::text),
+    'still to deliver');
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

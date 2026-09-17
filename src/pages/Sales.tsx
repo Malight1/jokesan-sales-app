@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, Link2 } from 'lucide-react';
+import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, Link2, Send } from 'lucide-react';
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
-  returns as returnsApi, storeCredit, payments as paymentsApi, IntegrationStatus,
+  returns as returnsApi, storeCredit, payments as paymentsApi, deliveries as deliveriesApi, IntegrationStatus,
   SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -69,6 +69,7 @@ export default function Sales() {
   const [payAmount, setPayAmount] = useState(0);
   const [payType, setPayType] = useState('');
   const [returnFor, setReturnFor] = useState<SalesOrder | null>(null);
+  const [deliverFor, setDeliverFor] = useState<SalesOrder | null>(null);
   const spendCreditMut = useMutation(storeCredit.spend);
   const [orderDiscount, setOrderDiscount] = useState(0);
   const [needsApproval, setNeedsApproval] = useState(false);
@@ -308,6 +309,7 @@ export default function Sales() {
     { icon: <Link2 size={15} />, label: creatingLinkFor ? 'Creating link…' : 'Get payment link', onClick: getPayLink,
       show: s => s.balance > 0 && !s.voided && !!integration?.connected },
     { icon: <Undo2 size={15} />, label: 'Return items', onClick: setReturnFor, show: s => !s.voided },
+    { icon: <Send size={15} />, label: 'Create delivery note', onClick: setDeliverFor, show: s => !s.voided },
     { icon: <Eye size={15} />, label: 'View', onClick: s => setViewId(s.id) },
     { icon: <FileText size={15} />, label: 'Download invoice (PDF)', onClick: downloadInvoice, show: s => !s.voided },
     { icon: <MessageCircle size={15} />, label: 'Send receipt via WhatsApp', onClick: sendWhatsAppReceipt, show: s => !s.voided },
@@ -548,6 +550,16 @@ export default function Sales() {
           onDone={() => { setReturnFor(null); refetch(); refetchGoods(); }}
         />
       )}
+
+      {deliverFor && (
+        <CreateDeliveryModal
+          sale={deliverFor}
+          productName={productName}
+          customerAddress={customers?.find(c => c.id === deliverFor.customer_id)?.address ?? null}
+          onClose={() => setDeliverFor(null)}
+          onDone={() => setDeliverFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -703,6 +715,98 @@ export function ReturnModal({ sale, customerName, productName, companyName, invo
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
         <button type="button" className="btn-primary" disabled={createMut.pending || !canSubmit} onClick={submit}>
           {createMut.pending ? 'Saving…' : 'Record Return'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---- Create a delivery note (partial — a sale can have more than one) ----
+interface DeliveryLine { sale_item_id: string; label: string; max: number; qty: number; }
+function CreateDeliveryModal({ sale, productName, customerAddress, onClose, onDone }: {
+  sale: SalesOrder;
+  productName: (id: string) => string;
+  customerAddress: string | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { data, loading, error } = useQuery<any>(() => salesApi.detail(sale.id), [sale.id]);
+  const createMut = useMutation(deliveriesApi.create);
+  const [lines, setLines] = useState<DeliveryLine[] | null>(null);
+  const [driverName, setDriverName] = useState('');
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [destination, setDestination] = useState(customerAddress ?? '');
+  const [note, setNote] = useState('');
+
+  // The "still to deliver" cap per line is enforced server-side (across
+  // every non-failed delivery note on this sale) — this modal only needs
+  // to stop someone claiming more than the LINE ever sold in total.
+  useEffect(() => {
+    if (data && lines === null) {
+      setLines((data.sale_items ?? []).map((i: any) => ({
+        sale_item_id: i.id, label: productName(i.finished_good_id),
+        max: Number(i.quantity) - Number(i.qty_returned ?? 0), qty: 0,
+      })).filter((l: DeliveryLine) => l.max > 0));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const setLine = (idx: number, qty: number) =>
+    setLines(ls => ls ? ls.map((l, i) => i === idx ? { ...l, qty } : l) : ls);
+
+  const active = (lines ?? []).filter(l => l.qty > 0);
+
+  const submit = async () => {
+    if (active.length === 0) { toast.error('Enter a quantity to deliver.'); return; }
+    const res = await createMut.mutate({
+      saleId: sale.id,
+      items: active.map(l => ({ sale_item_id: l.sale_item_id, qty: l.qty })),
+      driverName: driverName.trim() || null, vehicleNo: vehicleNo.trim() || null,
+      destination: destination.trim() || null, note: note.trim() || null,
+    });
+    if (res) { toast.success('Delivery note created.'); onDone(); }
+    else toast.error(createMut.error ?? 'Could not create the delivery note — it may already be fully claimed by another one.');
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={480}>
+      <div className="modal-header">
+        <h2>Create delivery note</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <div className="modal-body">
+        {loading && <Loading />}
+        {error && <ErrorState message={error} />}
+        {createMut.error && <ErrorState message={createMut.error} />}
+        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Nothing on this sale is left to deliver.</p>}
+        {lines && lines.length > 0 && (
+          <>
+            {lines.map((l, idx) => (
+              <div key={l.sale_item_id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.6rem' }}>
+                <div className="form-group">
+                  <label>{l.label}</label>
+                  <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{l.max.toLocaleString()} on this sale (a second delivery note can claim any leftover)</small>
+                </div>
+                <div className="form-group">
+                  <label>Qty to deliver</label>
+                  <NumberInput value={l.qty} onChange={v => setLine(idx, Math.max(0, Math.min(v, l.max)))} />
+                </div>
+              </div>
+            ))}
+            <div className="grid-2">
+              <div className="form-group"><label>Driver</label><input value={driverName} onChange={e => setDriverName(e.target.value)} /></div>
+              <div className="form-group"><label>Vehicle No.</label><input value={vehicleNo} onChange={e => setVehicleNo(e.target.value)} /></div>
+            </div>
+            <div className="form-group"><label>Destination</label><input value={destination} onChange={e => setDestination(e.target.value)} /></div>
+            <div className="form-group"><label>Note (optional)</label><input value={note} onChange={e => setNote(e.target.value)} /></div>
+          </>
+        )}
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={createMut.pending || active.length === 0} onClick={submit}>
+          {createMut.pending ? 'Saving…' : 'Create Delivery Note'}
         </button>
       </div>
     </Modal>

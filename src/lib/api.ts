@@ -367,6 +367,56 @@ export const sales = {
 };
 
 // ============================================================
+// DELIVERY NOTES AND WAYBILLS (migration 0031, Phase 6d)
+//
+// Stock leaves at the point of sale, exactly as always — a delivery note
+// is paperwork and status only, never a stock or cost record.
+// ============================================================
+export type DeliveryStatus = 'pending' | 'dispatched' | 'delivered' | 'failed';
+export interface Delivery {
+  id: string; branch_id: string; sales_order_id: string; doc_no: string | null;
+  driver_name: string | null; vehicle_no: string | null; destination: string | null;
+  status: DeliveryStatus;
+  dispatched_at: string | null; delivered_at: string | null;
+  received_by_name: string | null; proof_url: string | null; note: string | null;
+  created_at: string;
+}
+export interface DeliveryItem { id: string; delivery_id: string; sale_item_id: string; qty: number; }
+
+export const deliveries = {
+  list: () => runAll<Delivery>((f, t) => supabase.from('deliveries').select('*').order('created_at', { ascending: false }).range(f, t)),
+  forSale: (saleId: string) => run<Delivery[]>(supabase.from('deliveries').select('*').eq('sales_order_id', saleId).order('created_at', { ascending: false })),
+  detail: (id: string) => run<any>(supabase.from('deliveries').select('*, delivery_items(*)').eq('id', id).single()),
+  create: (params: {
+    saleId: string; items: { sale_item_id: string; qty: number }[];
+    driverName?: string | null; vehicleNo?: string | null; destination?: string | null; note?: string | null;
+  }) =>
+    rpc<string>('create_delivery_note', {
+      p_sale: params.saleId, p_items: params.items,
+      p_driver_name: params.driverName ?? null, p_vehicle_no: params.vehicleNo ?? null,
+      p_destination: params.destination ?? null, p_note: params.note ?? null,
+    }),
+  dispatch: (id: string, driverName?: string | null, vehicleNo?: string | null) =>
+    rpcVoid('dispatch_delivery', { p_delivery: id, p_driver_name: driverName ?? null, p_vehicle_no: vehicleNo ?? null }),
+  markDelivered: (id: string, receivedByName?: string | null, proofUrl?: string | null) =>
+    rpcVoid('mark_delivery_delivered', { p_delivery: id, p_received_by_name: receivedByName ?? null, p_proof_url: proofUrl ?? null }),
+  markFailed: (id: string, note?: string | null) =>
+    rpcVoid('mark_delivery_failed', { p_delivery: id, p_note: note ?? null }),
+  // Proof-of-delivery photo → Supabase Storage, confined to the caller's
+  // own tenant folder. The bucket is private (unlike public logos), so
+  // viewing it needs a signed URL, not a plain public one.
+  uploadProof: async (tenantId: string, deliveryId: string, file: File): Promise<string> => {
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const path = `${tenantId}/${deliveryId}.${ext}`;
+    const up = await supabase.storage.from('delivery-proofs').upload(path, file, { upsert: true, contentType: file.type });
+    if (up.error) throw new Error(up.error.message);
+    const signed = await supabase.storage.from('delivery-proofs').createSignedUrl(path, 60 * 60 * 24 * 365);
+    if (signed.error) throw new Error(signed.error.message);
+    return signed.data.signedUrl;
+  },
+};
+
+// ============================================================
 // PURCHASES  (writes go through the create_purchase RPC engine)
 // ============================================================
 export const purchases = {

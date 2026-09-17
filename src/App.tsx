@@ -17,6 +17,7 @@ const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Sales = lazy(() => import('./pages/Sales'));
 const Quotes = lazy(() => import('./pages/Quotes'));
+const Deliveries = lazy(() => import('./pages/Deliveries'));
 const Purchases = lazy(() => import('./pages/Purchases'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Production = lazy(() => import('./pages/Production'));
@@ -65,6 +66,7 @@ export default function App() {
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/sales" element={<Sales />} />
                         <Route path="/quotes" element={<Quotes />} />
+                        <Route path="/deliveries" element={<Deliveries />} />
                         <Route path="/purchases" element={<Purchases />} />
                         <Route path="/inventory" element={<Inventory />} />
                         <Route path="/production" element={<Production />} />

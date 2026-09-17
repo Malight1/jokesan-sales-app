@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6c — units of measure — added; not yet run live).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6d — delivery notes and waybills — added; not yet run live).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6c as of 17 September 2026, but its migration (`0030`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6d as of 17 September 2026, but its migration (`0031`) hasn't been run live yet — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,15 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0029` are live (the user confirmed `0029` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6c (units of measure) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
+Migrations `0017`–`0030` are live (the user confirmed `0030` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6d (delivery notes) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0029`, confirmed by the user. **`0030_units_of_measure.sql` has NOT been run yet.**
-- **This means the live app right now has a "Units" section in the Finished Goods/Materials product modals, and unit-barcode scanning in POS, that will fail** (the `product_units` table and the new `uom_id`/`uom_qty`/`uom_factor` columns don't exist yet) until `0030` is run. Everything else — plain sales, purchases, receiving — is unaffected, since a unit is entirely optional per line. Run `0030` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
+- **Database:** the live Supabase project has run `0001` through `0030`, confirmed by the user. **`0031_deliveries.sql` has NOT been run yet.**
+- **This means the live app right now has a "Deliveries" nav link and a "Create delivery note" action on Sales that will fail** (the `deliveries`/`delivery_items` tables and the `delivery-proofs` storage bucket don't exist yet) until `0031` is run. Everything else is unaffected. Run `0031` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file (it does create a new private Storage bucket via SQL, same as the `logos` bucket already does).
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0030` has actually been run live before assuming Units of Measure work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6d — delivery notes — is next, or 6e/6f if reprioritized). Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0031` has actually been run live before assuming Deliveries work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6e — custom fields — is next, or 6f if reprioritized). Verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 261/261, tsc clean, jest 103/103, build succeeds at ~153 kB gzip (main bundle).
+Current state: DB harness 271/271, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -100,9 +100,10 @@ Current state: DB harness 261/261, tsc clean, jest 103/103, build succeeds at ~1
 | 0027_payments.sql | Pay links + webhook confirmation (`payment_integrations`/`payment_links`/`incoming_payments`, `integration_status()`, `apply_incoming_payment()`), Vault-wrapping RPCs | ✅ yes |
 | 0028_quotes.sql | Quotes and proforma invoices (`quotes`/`quote_items`, `create_quote()`, `update_quote_status()`, `convert_quote()`), `tenants.bank_details` | ✅ yes |
 | 0029_purchase_orders.sql | Order before receiving (`purchase_order_lines`, `goods_receipts`, `create_purchase_order()`, `receive_purchase_order()`, `cancel_purchase_order()`), advance payments, `suppliers.lead_time_days` | ✅ yes |
-| 0030_units_of_measure.sql | Units of measure (`product_units`, `resolve_uom_factor()`), `uom_id`/`uom_qty`/`uom_factor` on `sale_items`/`purchase_items` | ❌ **run this next** |
+| 0030_units_of_measure.sql | Units of measure (`product_units`, `resolve_uom_factor()`), `uom_id`/`uom_qty`/`uom_factor` on `sale_items`/`purchase_items` | ✅ yes |
+| 0031_deliveries.sql | Delivery notes and waybills (`deliveries`, `delivery_items`, `create_delivery_note()`/`dispatch_delivery()`/`mark_delivery_delivered()`/`mark_delivery_failed()`), private `delivery-proofs` Storage bucket | ❌ **run this next** |
 
-**0017 → 0030 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028`, `0029` and `0030` need nothing extra.
+**0017 → 0031 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0031` need nothing extra.
 
 ## Key files
 
@@ -122,6 +123,7 @@ Current state: DB harness 261/261, tsc clean, jest 103/103, build succeeds at ~1
 - `src/pages/Quotes.tsx` — quotes and proforma invoices (migration 0028). `generateQuotePdf` lives in `src/lib/invoice.ts` alongside the invoice/credit-note generators.
 - `src/pages/Purchases.tsx` — also exports `OrderMaterialsModal`/`ReceivePurchaseModal` (migration 0029, Phase 6b) alongside the pre-existing `SupplierReturnModal`/`PurchaseDetail`. "Quick Purchase" (immediate receipt) and "Order Stock" (ordered before received) are two separate buttons on the same page, not two different pages.
 - `src/components/ProductUnitsSection.tsx` — units of measure management (migration 0030, Phase 6c), shared by the Finished Goods and Materials product-edit modals. Only rendered when editing an existing product (a unit needs a real `product_id`).
+- `src/pages/Deliveries.tsx` — delivery notes and waybills (migration 0031, Phase 6d). `Sales.tsx` also has a `CreateDeliveryModal` (unexported, unlike `ReturnModal`) behind its "Create delivery note" row action. `generateWaybillPdf` lives in `src/lib/invoice.ts`.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
@@ -143,10 +145,10 @@ Current state: DB harness 261/261, tsc clean, jest 103/103, build succeeds at ~1
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
-| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes, custom fields, audit-log viewer | 🟡 partial — **6d next up** |
+| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields, audit-log viewer | 🟡 partial — **6e next up** |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0031`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0032`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -193,6 +195,15 @@ A quote is its own document — it never touches stock or money. `convert_quote(
 - **Given how carefully `create_sale` in particular has been rewritten before** (batches → returns → pricing → shifts), this migration copied the exact current body of all three functions verbatim (checked with `diff` against what's actually in `0026`/`0029`) and only inserted the one small conversion block each needed — the same discipline as every "re-copy a whole function" migration this session, after an earlier mistake this session where a body got reconstructed from memory instead of copied.
 - **Frontend, deliberately scoped down:** a "Units" section in the Finished Goods and Materials product-edit modals (`src/components/ProductUnitsSection.tsx`, shared by both) is the only way to define units — this is the prerequisite everything else needs. POS's barcode scanner also matches a unit's barcode and adds that many base units in one tap ("scan a carton, get 12 pieces") — the plan's headline example.
 - **Deliberately NOT built:** a per-line unit *selector* anywhere (POS, Sales, or Purchases) — POS's cart is still one line per product, always in base units; scanning a unit barcode is a quantity-entry shortcut only and does **not** record `uom_id`/`uom_qty` on the resulting `sale_items` row (the row it produces is indistinguishable from someone typing the quantity by hand). Manually recording a sale or purchase *by* a named unit (which would tag the row) isn't wired into any screen yet — only possible by calling the RPC directly with `{uom_id, uom_qty}`, which the backend fully supports and is fully tested. This was a deliberate risk call: retrofitting POS's "one line per product, always base units" cart model for real per-line unit tracking touches checkout, discount tracking, and the offline queue — real design work, not a quick add, and not worth the risk this late in a long session. Also not built: `price_list_items` per-UOM pricing (a price list still only resolves in base units) and a stock-screen toggle to show "12 ctn + 5 pcs" instead of a plain base-unit count.
+
+### Phase 6d, as shipped (0031) — delivery notes and waybills
+
+Stock still leaves at the point of sale, exactly as always — a delivery note is paperwork and status only, and never touches `stock_movements`, `fg_batches`, or `qty_balance`. This is the simplest Phase 6 sub-phase by design (the plan's own words: "the engine stays simple").
+
+- **Engine:** `create_delivery_note(p_sale, p_items, ...)` (a sale can have more than one delivery note — `delivery_items` tracks how much of each sold line has been claimed by a non-failed delivery note so far, the same "remaining" idea Phase 6b uses for receiving), then `dispatch_delivery()` → `mark_delivery_delivered()`, or `mark_delivery_failed()` from either `pending` or `dispatched`. A failed delivery's claimed quantity becomes claimable again by a new delivery note — tested explicitly.
+- **Proof-of-delivery photos** go to a new private `delivery-proofs` Storage bucket, confined to the caller's own tenant folder **from its first migration** — unlike `logos`, which shipped without that check and needed a follow-up fix in `0019`.
+- **Frontend:** a new `/deliveries` page (list + status badges + Dispatch/Mark delivered/Mark failed actions, a signed-URL photo upload on delivery, and a waybill PDF with no prices and space for a signature — `generateWaybillPdf` in `src/lib/invoice.ts`). "Create delivery note" is a row action on Sales, matching the plan's flow (create *from* a sale, not from a standalone Deliveries form).
+- **Deliberately not built:** a `/deliveries` board/kanban view (it's a plain status-badged list, matching the same scope call made for Purchases in 6b) and custom fields on a delivery.
 
 ### Known gaps deferred so far (ask before building unless told to just do it)
 

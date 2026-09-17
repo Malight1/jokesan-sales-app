@@ -412,3 +412,120 @@ export async function generateQuotePdf(d: QuoteData) {
 
   doc.save(`${d.docNo}.pdf`);
 }
+
+// ============================================================
+// DELIVERY NOTE / WAYBILL — no prices, space for a signature (migration
+// 0031). What travels with the goods, not what they cost.
+// ============================================================
+export interface WaybillData {
+  companyName: string;
+  docNo: string;
+  date: string;
+  customerName: string;
+  customerAddress?: string | null;
+  destination?: string | null;
+  driverName?: string | null;
+  vehicleNo?: string | null;
+  items: { name: string; qty: number; unit?: string | null }[];
+  note?: string | null;
+  tin?: string | null;
+  logoDataUrl?: string | null;
+}
+
+export async function generateWaybillPdf(d: WaybillData) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  void autoTable;
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  if (d.logoDataUrl) {
+    try {
+      const fmtType = d.logoDataUrl.includes('png') ? 'PNG' : 'JPEG';
+      doc.addImage(d.logoDataUrl, fmtType, 14, 12, 22, 22);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(d.companyName, 40, 22);
+    } catch { /* ignore bad image */ }
+  } else {
+    doc.setFontSize(19);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(d.companyName, 14, 20);
+  }
+
+  doc.setFontSize(20);
+  doc.setTextColor(37, 99, 235);
+  doc.text('WAYBILL', pageW - 14, 20, { align: 'right' });
+
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(14, 31, pageW - 14, 31);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`No: ${d.docNo}`, pageW - 14, 38, { align: 'right' });
+  doc.text(`Date: ${d.date}`, pageW - 14, 44, { align: 'right' });
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(148, 163, 184);
+  doc.text('DELIVER TO', 14, 40);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(d.customerName, 14, 46);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  let y = 51;
+  if (d.destination) { doc.text(d.destination, 14, y); y += 5; }
+  else if (d.customerAddress) { doc.text(d.customerAddress, 14, y); y += 5; }
+  if (d.driverName || d.vehicleNo) {
+    doc.text(`Driver: ${d.driverName ?? '—'}   Vehicle: ${d.vehicleNo ?? '—'}`, 14, y);
+    y += 5;
+  }
+
+  // No prices, no amounts — only what's travelling.
+  autoTable(doc, {
+    startY: Math.max(y + 6, 56),
+    head: [['Item', 'Quantity']],
+    body: d.items.map(i => [i.name, `${i.qty.toLocaleString()}${i.unit ? ' ' + i.unit : ''}`]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [37, 99, 235] },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: { 1: { halign: 'right' } },
+  });
+
+  let ty = (doc as any).lastAutoTable.finalY + 10;
+  if (d.note) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Note', 14, ty);
+    doc.setFont('helvetica', 'normal');
+    doc.text(doc.splitTextToSize(d.note, pageW - 28), 14, ty + 5);
+    ty += 5 + doc.splitTextToSize(d.note, pageW - 28).length * 4.5 + 8;
+  }
+
+  // Space to sign for what arrived.
+  ty = Math.max(ty, doc.internal.pageSize.getHeight() - 40);
+  doc.setDrawColor(148, 163, 184);
+  doc.line(14, ty, 90, ty);
+  doc.line(pageW - 90, ty, pageW - 14, ty);
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Received by (name & signature)', 14, ty + 5);
+  doc.text('Date', pageW - 90, ty + 5);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+  doc.save(`${d.docNo}.pdf`);
+}

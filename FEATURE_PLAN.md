@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0029, live in production. `0030` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0030, live in production. `0031` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -12,12 +12,12 @@
 | 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
-| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c) + more | 🟡 6a/6b/6c done, 6d next |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0031+ | not started |
+| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c), **0031** (6d) + more | 🟡 6a/6b/6c/6d done, 6e next |
+| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0032+ | not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–6b are live in production; Phase 6c's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6d onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–6c are live in production; Phase 6d's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6e onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -41,6 +41,10 @@ Phases 0–6b are live in production; Phase 6c's code is on `main` but its migra
 **Phase 6c (units of measure), as actually shipped, is scoped down from the plan below**:
 - Built: `product_units`, and `create_sale`/`create_purchase`/`receive_purchase_order` each converting `{uom_id, uom_qty}` to a base-unit quantity in one place — everything below that point (FIFO, COGS, discounts) is completely unchanged, exactly as this plan's "no costing code changes" note intends. Unit management in the Finished Goods/Materials product modals, and POS barcode scanning matching a unit's barcode.
 - **Not built:** any per-line unit *selector* in POS, Sales, or Purchases — POS's cart stays one line per product, always in base units, so scanning a unit barcode is a quantity shortcut only and doesn't tag the resulting `sale_items` row with `uom_id`/`uom_qty` (only a direct RPC call with those fields does, which the engine fully supports). Also not built: `price_list_items` per-UOM pricing, and the stock-screen "12 ctn + 5 pcs" display toggle this plan's screens section describes.
+
+**Phase 6d (delivery notes), as actually shipped, matches the plan below closely** — the simplest Phase 6 sub-phase, by the plan's own design ("the engine stays simple"):
+- Built: `deliveries`/`delivery_items`, `create_delivery_note`/`dispatch_delivery`/`mark_delivery_delivered`/`mark_delivery_failed`, a `/deliveries` list with status actions, "Create delivery note" on Sales, a waybill PDF, and a private `delivery-proofs` Storage bucket confined to the caller's own tenant folder from its first migration (unlike `logos`, which needed a follow-up fix for this).
+- Not built: the `/deliveries` "board" a kanban-style view might imply — it's a plain status-badged list, same scope call as Purchases in 6b.
 
 ---
 
