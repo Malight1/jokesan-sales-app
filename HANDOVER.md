@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 7c — e-invoicing/NRS readiness — added; not yet run live. Phase 6 is fully shipped; 7a done, 7c done, 7b — an AI assistant — still open).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 7b — Ask StockFlow, an AI assistant — added; not yet run live, and needs an Edge Function deployed plus an Anthropic API key set before it works at all. **This closes out the original seven-phase plan in full** — everything in `FEATURE_PLAN.md` has now been attempted.).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 7c as of 17 September 2026, but its migration (`0035`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 7b as of 17 September 2026, but its migration (`0036`) hasn't been run live yet, and its Edge Function (`assistant`) hasn't been deployed or given an `ANTHROPIC_API_KEY` secret — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,21 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0034` are live (the user confirmed `0034` ran right after it shipped — **Phase 6 is fully live, 6a through 6f, and Phase 7a is live too**), and `main`'s **code** is now caught up through Phase 7c (e-invoicing/NRS readiness) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above). **7b was skipped for now** — it needs an Anthropic API key configured as an Edge Function secret before it does anything at all, unlike 7c, which is immediately useful the moment its migration runs.
+Migrations `0017`–`0035` are live (the user confirmed `0035` ran right after it shipped — **Phase 6 is fully live, 6a through 6f, Phase 7a and 7c are live too**), and `main`'s **code** is now caught up through Phase 7b (Ask StockFlow, an AI assistant) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above). **This finishes the original seven-phase plan.**
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0034`, confirmed by the user. **`0035_einvoice.sql` has NOT been run yet.**
-- **This means the live app right now has a Settings → E-Invoicing tab that will fail to load** (it calls `einvoice_readiness()`, which doesn't exist yet), and the Customers/Finished Goods forms won't show their new TIN/B2B-B2C or tax-category/classification-code fields (the `schemaHasEinvoiceFields` guard hides them until the columns exist) — everything else is unaffected. Run `0035` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
+- **Database:** the live Supabase project has run `0001` through `0035`, confirmed by the user. **`0036_assistant.sql` has NOT been run yet, and the `assistant` Edge Function has NOT been deployed.**
+- **This means the live app right now has an "Ask StockFlow" nav item (visible to every role) that will fail** — `assistant_quota()` doesn't exist yet, so the page will error on load — until `0036` is run. Even after that, asking an actual question will fail until the `assistant` Edge Function is deployed AND has an `ANTHROPIC_API_KEY` secret set — see "Setting up the assistant" below for the exact steps. Nothing else is affected in the meantime.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0035` has actually been run live before assuming e-invoicing readiness works for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below — **Phase 7b (an AI assistant over the app's own data) is the only thing left in the plan's original seven phases**, unless reprioritized; 7a's own "produce" suggestion for finished goods (checked against the BOM) is also still open, see "Known gaps deferred so far." Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0036` has actually been run live AND the `assistant` function deployed with its secret before assuming the AI assistant works for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. **The original `FEATURE_PLAN.md` seven phases are now all attempted** — what's left is the deliberately-deferred harder halves noted throughout "Known gaps deferred so far" below (5b/5c, 7a's finished-goods "produce" suggestion, 7c's provider adapter), or a genuinely new phase 8 the user asks for. Verify with the test suite (below) before and after each push, same as always.
+
+### Setting up the assistant (one-time, after `0036` runs)
+
+1. **Deploy the Edge Function:** Supabase dashboard → Edge Functions → New function → name it exactly `assistant` → paste the contents of `supabase/functions/assistant/index.ts`. (Or `supabase functions deploy assistant` from the CLI.)
+2. **Set the secret:** Project Settings → Edge Functions → Secrets → add `ANTHROPIC_API_KEY` with a real Anthropic API key (from console.anthropic.com — StockFlow's own key, billed to StockFlow, never a per-tenant one, and it never reaches the frontend).
+3. That's it — no Vault, no webhook registration, no extension. A tenant needs the Business plan (or trial) to actually ask a question; `tenants.assistant_monthly_limit` (default 100) caps how many per month.
 
 ## Architecture
 
@@ -80,7 +86,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 311/311, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
+Current state: DB harness 317/317, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -105,9 +111,10 @@ Current state: DB harness 311/311, tsc clean, jest 103/103, build succeeds at ~1
 | 0032_custom_fields.sql | Custom fields (`custom_field_defs`, `custom_fields` jsonb on customers/suppliers/finished_goods/materials/sales_orders, `validate_custom_fields()` trigger, `set_custom_fields()` RPC, `cleanup_deleted_custom_field()` trigger) | ✅ yes |
 | 0033_audit_log.sql | Audit log viewer (`audit_row_change()` trigger, attached to `profiles`/`tenants`/`branches`/`payment_types`/`expense_types`/`customer_types`/`price_lists`/`price_list_items` — the sensitive config tables with no RPC of their own to log from) | ✅ yes |
 | 0034_reorder.sql | Smart reorder suggestions for materials (`reorder_suggestions()`, `create_reorder_purchase_orders()`, `tenants.reorder_z`/`reorder_cover_days`/`reorder_default_lead_days`) | ✅ yes |
-| 0035_einvoice.sql | E-invoicing (NRS) readiness (`tenants.rc_number`/`address`, `customers.tin`/`customer_kind`, `finished_goods.tax_category`/`classification_code`, `enforce_invoice_immutability()` trigger, `einvoice_submissions` table, `einvoice_readiness()`) | ❌ **run this next** |
+| 0035_einvoice.sql | E-invoicing (NRS) readiness (`tenants.rc_number`/`address`, `customers.tin`/`customer_kind`, `finished_goods.tax_category`/`classification_code`, `enforce_invoice_immutability()` trigger, `einvoice_submissions` table, `einvoice_readiness()`) | ✅ yes |
+| 0036_assistant.sql | Ask StockFlow, an AI assistant (`assistant_usage`, `tenants.assistant_monthly_limit`, `assistant_quota()`, `check_and_record_assistant_question()`) + the `assistant` Edge Function | ❌ **run this next** |
 
-**0017 → 0035 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0035` need nothing extra.
+**0017 → 0036 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0036` need nothing extra from the SQL side; `0036` additionally needs the `assistant` Edge Function deployed with an `ANTHROPIC_API_KEY` secret — see "Setting up the assistant" above.
 
 ## Key files
 
@@ -132,10 +139,11 @@ Current state: DB harness 311/311, tsc clean, jest 103/103, build succeeds at ~1
 - `src/pages/Audit.tsx` — the audit log viewer (migration 0033, Phase 6f), admin-only. Read-only: `auditLog.list()` in `src/lib/api.ts` is the only wrapper, since nothing in the app ever writes `audit_logs` directly — `log_audit()` (called inline from inside sensitive RPCs since 0021) and `audit_row_change()` (a trigger on config tables that have no RPC of their own) are the only two writers.
 - `src/components/ReorderSuggestions.tsx` — smart reorder suggestions for materials (migration 0034, Phase 7a), rendered at the bottom of `src/pages/Insights.tsx`. `reorder` in `src/lib/api.ts` wraps `reorder_suggestions()` (read) and `create_reorder_purchase_orders()` (turns checked suggestions into real 6b purchase orders, grouped by supplier). The service-level (z) dropdown and cover-days/default-lead-time settings live in `Settings.tsx`'s `BusinessTab`, under a "Reorder suggestions" section.
 - `Settings.tsx`'s `EinvoicingTab` — e-invoicing (NRS) readiness score (migration 0035, Phase 7c), wrapping `compliance.einvoiceReadiness()` in `src/lib/api.ts`. TIN/RC number/business address live in `BusinessTab`'s "Tax & compliance" section; a customer's TIN/B2B-B2C is on the Customers form; a product's tax category/classification code is on the Finished Goods form.
+- `src/pages/Assistant.tsx` — Ask StockFlow, a small chat UI (migration 0036, Phase 7b), open to every role. `assistant` in `src/lib/api.ts` wraps `assistant_quota()` (read) and calls the `assistant` Edge Function (`supabase/functions/assistant/index.ts`) for an actual question — that function is the only thing that talks to Claude; every tool call inside it runs through a Supabase client built from the asking user's own JWT, so RLS and role/branch checks apply exactly as if the user called the RPC themselves.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
-- `supabase/functions/paystack-verify/index.ts`, `supabase/functions/invite-teammate/index.ts`, `supabase/functions/payments-connect/index.ts`, `supabase/functions/payment-link-create/index.ts`, `supabase/functions/payments-webhook/index.ts` — Deno Edge Functions, deployed manually via the Supabase dashboard, not part of the frontend build or the DB test suite (the last three are migration `0027`'s, Phase 5a).
+- `supabase/functions/paystack-verify/index.ts`, `supabase/functions/invite-teammate/index.ts`, `supabase/functions/payments-connect/index.ts`, `supabase/functions/payment-link-create/index.ts`, `supabase/functions/payments-webhook/index.ts`, `supabase/functions/assistant/index.ts` — Deno Edge Functions, deployed manually via the Supabase dashboard, not part of the frontend build or the DB test suite (the middle three are migration `0027`'s, Phase 5a; the last is `0036`'s, Phase 7b — the only one whose secret is StockFlow's own key rather than something a tenant connects).
 - `src/pages/Settings.tsx`'s Payments tab, `src/pages/Sales.tsx`'s "Get payment link" row action — the frontend half of Phase 5a. `payments` in `src/lib/api.ts` wraps `integration_status()` and the two Edge Functions a signed-in user calls (`payments-connect`, `payment-link-create`) — `payments-webhook` is never called by the app, only by Paystack.
 - `.claude/launch.json` — the `stockflow` dev-server config used by the Browser-pane preview tooling (`cd repo && BROWSER=none PORT=3000 npm start`).
 
@@ -154,9 +162,9 @@ Current state: DB harness 311/311, tsc clean, jest 103/103, build succeeds at ~1
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
 | 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields (**6e, 0032**), audit-log viewer (**6f, 0033**) | ✅ done |
-| 7 | Smart reorder suggestions (**7a, 0034** — materials only), an AI assistant over the app's own data (7b), e-invoicing (NRS) readiness (**7c, 0035**) | 🟡 7a/7c done, 7b not started (needs an Anthropic API key first) |
+| 7 | Smart reorder suggestions (**7a, 0034** — materials only), an AI assistant over the app's own data (**7b, 0036**), e-invoicing (NRS) readiness (**7c, 0035**) | ✅ done — **all of FEATURE_PLAN.md now attempted** |
 
-Next migration number is **`0036`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0037`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -256,6 +264,17 @@ The plan's own words for this function: "plain SQL, so the numbers can be checke
 - **Frontend:** a new Settings → E-Invoicing tab with the score, a checklist of what's missing, and where to go fix each thing; TIN moved out from behind the "Charge VAT" toggle (a business needs its TIN for e-invoicing whether or not it charges VAT — this was a real, if minor, pre-existing gap) into an always-visible "Tax & compliance" section alongside the new RC number and address fields. Customers gained a B2B/B2C toggle and a TIN field (shown only for B2B); Finished Goods gained tax category and classification code fields.
 - **Deliberately not built — the plan's own explicit reservation, not a scope cut:** the actual submission adapter (`einvoice-submit` Edge Function, `submitInvoice(doc) → {irn, qr}`) and printing an IRN/QR on the invoice PDF. The plan's own words: "Action for you: start talks with one or two accredited providers... get the current field specification from them." There's no provider chosen yet, so there's nothing real to adapt to — `einvoice_submissions` (the table a future adapter will write to) exists and is ready, but nothing writes it yet.
 
+### Phase 7b, as shipped (0036) — Ask StockFlow, an AI assistant
+
+**This closes out the original seven-phase plan in full.** Built right after 7c rather than before it, on purpose — see that section's opening note for why.
+
+- **The model never touches the database and is never trusted with a number of its own.** The `assistant` Edge Function is the only thing that calls Claude. Every fact in an answer comes from one of seven read-only RPCs it's allowed to call as tools (`dashboard_summary`, `stock_levels`, `reorder_suggestions`, `batch_trace`, `report_product_profitability`, `report_returns`, `report_discounts`) — and it calls them through a Supabase client built from the **asking user's own JWT**, forwarded straight from the request's `Authorization` header. A cashier asking "what should I reorder?" gets exactly the RPC's own "your role isn't allowed to view reorder suggestions" refusal relayed back honestly — the system prompt explicitly instructs the model to report a failed or refused tool call plainly rather than paper over it. No branch or role restriction is bypassed just because a model is asking on the user's behalf; the database is still the only real security boundary, same as everywhere else in the app.
+- **This is the one Phase 6+ feature that DOES call `require_feature()` again**, breaking from the "not DB-plan-gated" pattern established since Phase 5 (custom fields, audit logging, reorder, e-invoicing). The reason is concrete, not aesthetic: every other one of those features costs StockFlow nothing extra to run; every assistant question costs a real, metered call against the Anthropic API. `check_and_record_assistant_question()` checks the Business plan and a monthly quota (`tenants.assistant_monthly_limit`, default 100) and **increments the counter atomically before the Edge Function spends anything on Claude** — a rejected question (wrong plan, quota used up) never reaches the API at all. Rejecting the 101st question doesn't itself get counted (the whole statement, increment included, rolls back together with the exception), so the stored count never exceeds the limit.
+- **A real engine bug found and fixed in the Edge Function itself, not the database:** every deliberate error the function returns (`quota exceeded`, `not authenticated`, `assistant not configured`, a failed Claude call) is returned as an HTTP **200** with `{error: "..."}` in the body, not a 4xx/5xx. `supabase.functions.invoke()` treats any non-2xx response as a generic `FunctionsHttpError` and discards the actual response body — an existing pattern already visible in this codebase's own `payments.createLink()` (`if (error) return { error: error.message }`, never looking at the body). A non-2xx status here would have silently swallowed every one of this function's carefully worded messages ("This business has used all 100 assistant questions...") behind a generic "non-2xx status code" string. Worth remembering for any future Edge Function whose error text the user actually needs to see.
+- **One model for now** (`claude-haiku-4-5-20251001`) — the plan's "Haiku for everyday questions, Sonnet for analysis" split needs a real classifier to route well; not built this sitting, and documented as a deferred nicety rather than silently ignored.
+- **Frontend:** a new `/assistant` page ("Ask StockFlow" in the nav, under Overview — visible to **every role**, unlike Audit or E-Invoicing, since the underlying tool calls already gate by role on their own), a plain chat UI showing questions left this month, and an upsell card below the Business plan. The Edge Function returns the full running `messages` array (Claude's own content-block format) back to the frontend each turn, which just resends it as `history` on the next question — no conversation state is persisted server-side, and no new table was needed for chat history.
+- **Deliberately not built:** an MCP server so owners can ask from Claude or ChatGPT directly (the plan's own explicit "later" note) and the Haiku/Sonnet routing mentioned above.
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).
@@ -285,7 +304,9 @@ The plan's own words for this function: "plain SQL, so the numbers can be checke
 - Reorder suggestions have no branch selector — they're always for the caller's own working branch (`resolve_branch(null)`), same simplification as several other single-branch-implicit screens (e.g. Adjust Stock).
 - No e-invoicing submission adapter or IRN/QR on the invoice PDF (Phase 7c's own explicit reservation — see that section above) — there's no accredited provider chosen yet to adapt to.
 - `einvoice_submissions` exists with a read policy but nothing writes it yet — it's scaffolding for the day a provider is connected.
-- 7b (an AI assistant over the app's own data) is the only piece of the original seven-phase plan not started — see "Phase 7c, as shipped" above for why 7c was picked first.
+- 7b shipped, closing out the original seven-phase plan. What's actually left across the whole plan is narrower now: 5b/5c (dedicated virtual accounts, a bank feed), 7a's finished-goods "produce" suggestion, 7c's provider adapter, and the assistant's own two "Deliberately not built" items just above.
+- The assistant always uses one model (Haiku 4.5) — no Sonnet escalation for "analysis" questions (the plan's own distinction), and no MCP server for asking from outside the app (also the plan's own "later" note).
+- The assistant's monthly quota is a single number per tenant, not broken down by user or role — one chatty staff member can use up the whole business's budget for the month.
 
 ## How the user works
 

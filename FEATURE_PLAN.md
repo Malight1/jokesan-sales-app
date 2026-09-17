@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0034, live in production — **all of Phase 6 (6a–6f) and Phase 7a are now live**. `0035` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0035, live in production — **all of Phase 6 (6a–6f), and 7a and 7c, are now live**. `0036` (this session's work) is on `main` but **not yet run live**, and its Edge Function isn't deployed yet either — see `HANDOVER.md`'s "Where things actually stand" and "Setting up the assistant." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -13,11 +13,11 @@
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
 | 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c), **0031** (6d), **0032** (6e), **0033** (6f) | ✅ done |
-| 7 | Smart reorder (materials), assistant, e-invoicing readiness | 0032–0033 | **0034** (7a, materials only), **0035** (7c) | 🟡 7a/7c done, 7b not started |
+| 7 | Smart reorder (materials), assistant, e-invoicing readiness | 0032–0033 | **0034** (7a, materials only), **0035** (7c), **0036** (7b) + assistant Edge Function | ✅ done |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–7a are live in production; Phase 7c's code is on `main` but its migration hasn't run yet. **7b (an AI assistant) is the only piece of this plan not yet started** — it was deliberately skipped ahead of 7c since it needs an Anthropic API key configured before it does anything, unlike 7c which is useful the moment its migration runs (see `HANDOVER.md`'s "Phase 7c, as shipped" for the reasoning). The rest of this document is the original plan for 7b, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+**Every phase in this document has now been attempted** — Phases 0–7a and 7c are live in production; Phase 7b's code is on `main` but its migration hasn't run yet, and its Edge Function needs deploying and an `ANTHROPIC_API_KEY` secret before it actually answers anything (see `HANDOVER.md`). What's genuinely left, across the whole plan, is narrower than a phase: 5b/5c (dedicated virtual accounts, a bank feed), 7a's own finished-goods "produce" suggestion, 7c's provider adapter, and the assistant's own two small deferred items — see `HANDOVER.md`'s "Known gaps deferred so far" for the complete, current list. Cross-check specifics (column names, function signatures) against what actually exists before assuming anything below this line is still accurate — it's the plan as originally written, not a live status report.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -62,6 +62,10 @@ Phases 0–7a are live in production; Phase 7c's code is on `main` but its migra
 **Phase 7c (e-invoicing readiness) was built before 7b (the assistant)** — a deliberate reordering, not the plan's own sequence. 7b needs an Anthropic API key configured as an Edge Function secret before it produces anything; 7c needs nothing external and is immediately useful the moment its migration runs, well ahead of the 2027/2028 enforcement dates this plan describes. As actually shipped:
 - Built: the master data this plan names (business TIN/RC number/address, a customer's TIN and B2B-vs-B2C, a product's tax category and classification code), a real database trigger enforcing that an issued invoice's commercial value can't change once created (corrections are a return or credit note only), and a readiness score in Settings exactly as this plan's own words describe ("Completeness checks appear in Settings as an 'E-invoice readiness' score").
 - Not built — this plan's own explicit reservation, not a scope cut: the actual submission adapter and provider integration ("Action for you: start talks with one or two accredited providers... get the current field specification from them"). `einvoice_submissions` (the table a future adapter will write to) and the IRN/QR fields on the invoice PDF both wait on that provider choice.
+
+**Phase 7b (Ask StockFlow), as actually shipped, closes out this document in full** — built right after 7c, matching this plan's own description closely:
+- Built: the `assistant` Edge Function, calling Claude with the exact tool set this plan names (`dashboard_summary`, `stock_levels`, `reorder_suggestions`, `batch_trace`, and all three `report_*` functions), each one called "with the user's own login" exactly as this plan specifies — a Supabase client built from the asking user's own JWT, so a role's normal restrictions apply automatically, with no special-casing needed in the assistant itself. Business plan only, with a monthly question limit per business (`assistant_usage`), matching this plan's "Limits and rollout" section.
+- Not built: the Haiku-for-everyday / Sonnet-for-analysis model split (one model, Haiku 4.5, is used throughout — routing well between the two needs a real classifier this session didn't build) and the "later" MCP server for asking from outside the app.
 
 ---
 

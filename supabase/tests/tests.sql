@@ -2240,6 +2240,55 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 40. the AI assistant's monthly question quota (0036) ----------
+do $$
+declare
+  v_admin uuid := '00000000-0000-0000-0000-000000000001';
+  v_store uuid := '00000000-0000-0000-0000-000000000003';
+  v_q     jsonb;
+begin
+  -- ---- A: the assistant is a Business-plan feature, enforced server-side
+  --    (unlike custom fields/audit/reorder, a question here has a real
+  --    per-call cost against the Anthropic API) ----
+  perform t_as(v_admin);
+  perform t_err('the assistant is not available below the Business plan',
+    'select public.check_and_record_assistant_question()', 'Business plan');
+  perform t_su();
+
+  update tenants set plan = 'business', assistant_monthly_limit = 2 where id = t_id('tenant');
+
+  -- ---- B: any role may ask (the underlying tool RPCs, not this quota
+  --    check, are what actually restrict a role's view) ----
+  perform t_as(v_store);
+  select public.check_and_record_assistant_question() into v_q;
+  perform t_rec('a question is recorded and counted against the monthly limit',
+    (v_q->>'used')::int = 1 and (v_q->>'remaining')::int = 1);
+  perform t_su();
+
+  perform t_as(v_admin);
+  select public.check_and_record_assistant_question() into v_q;
+  perform t_rec('a second question uses up the rest of a 2-question limit',
+    (v_q->>'used')::int = 2 and (v_q->>'remaining')::int = 0);
+
+  perform t_err('a third question is refused once the monthly limit is used up',
+    'select public.check_and_record_assistant_question()', 'used all 2');
+
+  -- ---- C: the rejected attempt didn't itself get counted ----
+  select public.assistant_quota() into v_q;
+  perform t_rec('the quota reader agrees: still exactly 2 used, not 3',
+    (v_q->>'used')::int = 2 and (v_q->>'enabled')::boolean);
+  perform t_su();
+
+  -- ---- D: usage is readable by admin/accounts only ----
+  declare v_n int;
+  begin
+    perform t_as(v_store);
+    select count(*) into v_n from assistant_usage where tenant_id = t_id('tenant');
+    perform t_rec('inventory cannot see assistant usage rows (RLS, not an error)', v_n = 0, v_n::text);
+    perform t_su();
+  end;
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

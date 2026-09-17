@@ -1009,6 +1009,28 @@ export const compliance = {
 };
 
 // ============================================================
+// ASK STOCKFLOW — an AI assistant over the app's own data (migration
+// 0036, Phase 7b)
+//
+// The `assistant` Edge Function is the only thing that calls Claude —
+// it runs every tool call as the asking user's own login, so a role's
+// normal restrictions (what they can see, which branch) apply exactly as
+// they would from the UI. This module never talks to the model directly.
+// ============================================================
+export interface AssistantQuota { enabled: boolean; used: number; limit: number; remaining: number; }
+export interface AssistantResponse { answer?: string; quota?: { used: number; limit: number; remaining: number }; messages?: any[]; }
+
+export const assistant = {
+  quota: () => rpc<AssistantQuota>('assistant_quota'),
+  ask: async (question: string, history?: any[]): Promise<AssistantResponse> => {
+    const { data, error } = await supabase.functions.invoke('assistant', { body: { question, history } });
+    if (error) throw new Error(error.message);
+    if (data?.error) throw new Error(data.error);
+    return data as AssistantResponse;
+  },
+};
+
+// ============================================================
 // SHIFTS AND CASH-UP (migration 0026)
 //
 // create_sale/record_sale_payment/create_sale_return/spend_store_credit

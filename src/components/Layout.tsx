@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles
 } from 'lucide-react';
 import { stock, branches as branchesApi, platform, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
@@ -22,6 +22,7 @@ const navItems = [
     section: 'Overview',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/assistant', label: 'Ask StockFlow', icon: Sparkles },
     ],
   },
   {
@@ -104,6 +105,7 @@ const pageTitles: Record<string, string> = {
   '/profile': 'My Profile',
   '/settings': 'Settings',
   '/audit': 'Audit Log',
+  '/assistant': 'Ask StockFlow',
   '/platform': 'Platform Admin',
 };
 
