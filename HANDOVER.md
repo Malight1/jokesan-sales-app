@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 14 September 2026 (Phase 5a added).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 5a merged and live; workflow moved to committing directly on `main`).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). **Production is currently behind** — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production is caught up through Phase 5a as of 17 September 2026 — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -21,18 +21,19 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 6. **Every change to stock or money goes through a `SECURITY DEFINER` RPC**, never a direct table write from the app. New money tables get a `guard_money_write` trigger and branch-scoped read policies (see "Engine conventions" below) — this is the single most important pattern to keep following.
 7. **The user prefers autonomous, uninterrupted building.** "Proceed" means keep shipping through a whole phase — verify with the test suite, not by asking. Pause only when genuinely blocked on a decision only the user can make.
 8. **Commit messages end with** `Co-Authored-By: Claude <model> <noreply@anthropic.com>` (model name matches whichever Claude model is doing the commit).
+9. **Work directly on `main`, no feature branches** (changed 17 September 2026 — Phases 0–4 and 5a were each built on their own branch first; the user asked to stop doing that). Commit and push straight to `main` as work lands. This means `main` can carry unfinished or unverified work mid-phase — still run the full test suite (below) before *and* after each push, since there's no longer a review branch to catch a regression before it's live. The two old branches (`feature/batch-expiry-foundations`, `feature/payment-confirmation`) are fully merged and just sitting there; leave them alone unless asked to delete them.
 
-## Where things actually stand (14 September 2026)
+## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0026` are **live in production** and `main` is deployed on Vercel — the user ran them and confirmed the Paystack/paid-plan items from before this work are also done. Phase 5a (this session's work) is on a fresh branch, not yet merged.
+Everything through Phase 5a is **live**: migrations `0017`–`0027` have run, the three new Edge Functions (`payments-connect`, `payment-link-create`, `payments-webhook`) are deployed, `main` has both feature branches merged in, and Vercel is deployed from `main`. Nothing is sitting unmerged right now.
 
-- **Git:** `main` has Phases 0–4 (`0017`–`0026`) merged and pushed — that's what's live. Phase 5a is on branch `feature/payment-confirmation`, built and tested but **not pushed, not merged, not deployed.**
-- **Database:** the live Supabase project has run `0017` through `0026`. `0027_payments.sql` (this session's work) exists only as a file on the feature branch, verified against the PGlite test harness — never against the real project, and it contains one thing the harness *can't* verify (see below).
-- **Before `0027` goes live:** run it in the Supabase SQL editor same as always, **then check that the `vault` extension is enabled** (Database → Extensions → `supabase_vault`) — if it isn't, the migration's Vault-wrapping functions (`store_tenant_paystack_secret`, `get_tenant_paystack_secret`) silently don't get created (the migration itself still succeeds; it just skips that one conditional block), and Settings → Payments will fail to connect until the extension is turned on and the migration is re-run.
-- **Three new Edge Functions to deploy manually** (Supabase dashboard → Edge Functions), same as `paystack-verify`/`invite-teammate` always have been: `payments-connect`, `payment-link-create`, and `payments-webhook` — the last one needs `--no-verify-jwt` if deployed via CLI, since Paystack can't send a Supabase auth token. After deploying, no per-tenant webhook registration step exists yet (deferred — see gaps below); for now, tell each connecting business to paste the `payments-webhook` function's URL into their own Paystack dashboard under Settings → API Keys & Webhooks.
+- **Git:** `main` only, per the workflow change above — the two old feature branches are merged and untouched. Check `git log -10` for the real recent history rather than assuming anything is still pending on a branch.
+- **Database:** the live Supabase project has run `0001` through `0027`, confirmed by the user. `supabase_vault` was already installed on this project (no toggle needed); `store_tenant_paystack_secret`/`get_tenant_paystack_secret` both exist, confirmed by querying `pg_proc`.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
+- Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
+- Still pending from before Phase 4: nothing known — the paid-plan/Paystack-Business-test-payment items from `HANDOVER.md`'s original list were confirmed done by the user on 14 September 2026.
 
-**What to do with a fresh session:** read this file, then run `git log --oneline main..feature/payment-confirmation` to see what's only on the branch, then decide whether to keep building (Phase 5b/5c or Phase 6, see below) or stop and get the user to run `0027`, enable Vault, deploy the three Edge Functions, and merge first. Don't assume either — ask if genuinely unclear, but if the user says "proceed" or "continue," the default is to keep building forward on the same branch.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then keep building forward per "Phase status" below (Phase 6 is next). No branch decisions to make now that everything commits straight to `main` — just verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 

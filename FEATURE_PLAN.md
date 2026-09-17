@@ -1,8 +1,8 @@
 # StockFlow Feature Plan: closing the competitor gaps
 
-**Date:** 12 September 2026. **Status updated:** 14 September 2026 — see `HANDOVER.md` for the fuller picture (what's actually live vs. what's only on a branch).
+**Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0020, all live in production, along with everything through Phase 4 (`0017`–`0026`).
+**Starts from:** migrations 0001–0027, all live in production — everything through Phase 5a. Work now commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–4 are live in production. Phase 5a is done, tested (DB harness, tsc, jest, production build all verified — see `HANDOVER.md`), and committed to `feature/payment-confirmation` — **not yet pushed, merged, or deployed.** The rest of this document is the original plan for Phases 5b onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–5a are live in production on `main` (migrations `0017`–`0027`, three Edge Functions deployed). The rest of this document is the original plan for Phases 5b onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
