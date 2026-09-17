@@ -19,6 +19,9 @@ export interface Customer {
   // Custom fields (migration 0032). Optional so screens keep working
   // against a database that hasn't run it yet.
   custom_fields?: Record<string, any>;
+  // E-invoicing (NRS) readiness (migration 0035, Phase 7c).
+  tin?: string | null;
+  customer_kind?: 'b2b' | 'b2c';
 }
 // customer_types with its price list, for resolving a sale's price
 // (migration 0025) — lookups.customerTypes() stays the plain id/name form
@@ -49,6 +52,9 @@ export interface FinishedGood {
   batch_prefix?: string | null;
   nafdac_no?: string | null;
   custom_fields?: Record<string, any>;
+  // E-invoicing (NRS) readiness (migration 0035, Phase 7c).
+  tax_category?: string | null;
+  classification_code?: string | null;
 }
 export interface SalesOrder {
   id: string; transaction_date: string; customer_id: string | null;
@@ -911,6 +917,8 @@ export const tenantApi = {
     bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
     // Smart reorder suggestions (migration 0034).
     reorder_z?: number; reorder_cover_days?: number; reorder_default_lead_days?: number;
+    // E-invoicing (NRS) readiness (migration 0035).
+    rc_number?: string | null; address?: string | null;
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };
@@ -978,6 +986,26 @@ export const reorder = {
     rpc<ReorderOrdersResult>('create_reorder_purchase_orders', {
       p_material_ids: materialIds ?? null, ...(branchId ? { p_branch: branchId } : {}),
     }),
+};
+
+// ============================================================
+// E-INVOICING (NRS) READINESS (migration 0035, Phase 7c)
+//
+// Nigeria's e-invoicing mandate isn't enforced yet and needs an
+// accredited provider StockFlow hasn't chosen — so there's no submission
+// here, only a readiness score for the master data a future provider
+// will want (business TIN/RC number/address, a B2B customer's TIN, a
+// product's tax category and classification code).
+// ============================================================
+export interface EinvoiceReadiness {
+  overall_percent: number;
+  business: { tin: boolean; rc_number: boolean; address: boolean };
+  products: { total: number; ready: number };
+  customers_b2b: { total: number; ready: number };
+}
+
+export const compliance = {
+  einvoiceReadiness: () => rpc<EinvoiceReadiness>('einvoice_readiness'),
 };
 
 // ============================================================

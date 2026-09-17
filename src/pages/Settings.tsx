@@ -4,8 +4,8 @@ import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
-  customFieldDefs, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
-  CustomFieldDef, CustomFieldEntity,
+  customFieldDefs, compliance, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
+  CustomFieldDef, CustomFieldEntity, EinvoiceReadiness,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -17,7 +17,7 @@ import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
 
-type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes' | 'custom_fields';
+type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes' | 'custom_fields' | 'einvoicing';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'business', label: 'Business & Profile', icon: <Building2 size={15} /> },
@@ -29,6 +29,7 @@ const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'pricing', label: 'Pricing', icon: <Tag size={15} /> },
   { id: 'recipes', label: 'Recipes (BOM)', icon: <FlaskConical size={15} /> },
   { id: 'custom_fields', label: 'Custom Fields', icon: <ListPlus size={15} /> },
+  { id: 'einvoicing', label: 'E-Invoicing', icon: <ShieldCheck size={15} /> },
 ];
 
 const roleOptions = [
@@ -80,6 +81,7 @@ export default function Settings() {
       {tab === 'pricing' && <PricingTab />}
       {tab === 'recipes' && <RecipesTab />}
       {tab === 'custom_fields' && <CustomFieldsTab />}
+      {tab === 'einvoicing' && <EinvoicingTab />}
     </div>
   );
 }
@@ -459,6 +461,10 @@ function BusinessTab() {
   const [vatEnabled, setVatEnabled] = useState(tenant?.vat_enabled ?? false);
   const [vatRate, setVatRate] = useState(tenant?.vat_rate ?? 7.5);
   const [tin, setTin] = useState(tenant?.tin ?? '');
+  // E-invoicing (NRS) readiness (migration 0035, Phase 7c).
+  const hasEinvoiceFields = tenant?.rc_number !== undefined;
+  const [rcNumber, setRcNumber] = useState(tenant?.rc_number ?? '');
+  const [bizAddress, setBizAddress] = useState(tenant?.address ?? '');
   // Invoice numbering and expiry settings (migrations 0021/0022). Only
   // offered once the database has them.
   const hasExpirySettings = tenant?.expiry_warning_days !== undefined;
@@ -534,6 +540,7 @@ function BusinessTab() {
         reorder_cover_days: Math.round(Number(reorderCoverDays) || 14),
         reorder_default_lead_days: Math.round(Number(reorderDefaultLead) || 7),
       } : {}),
+      ...(hasEinvoiceFields ? { rc_number: rcNumber.trim() || null, address: bizAddress.trim() || null } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
     if (invPrefix !== null && invPrefix.trim() !== (prefixQ.data ?? 'INV-')) {
@@ -610,15 +617,33 @@ function BusinessTab() {
             Charge VAT on sales
           </label>
           {vatEnabled && (
-            <div className="grid-2">
+            <div className="form-group">
+              <label>VAT Rate (%)</label>
+              <NumberInput value={vatRate} onChange={setVatRate} />
+            </div>
+          )}
+
+          <hr className="divider" />
+          <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>Tax & compliance</p>
+          <div className="grid-2">
+            <div className="form-group">
+              <label>TIN (Tax ID — shown on invoices)</label>
+              <input value={tin} onChange={e => setTin(e.target.value)} placeholder="e.g. 01234567-0001" />
+            </div>
+            {hasEinvoiceFields && (
               <div className="form-group">
-                <label>VAT Rate (%)</label>
-                <NumberInput value={vatRate} onChange={setVatRate} />
+                <label>RC Number (CAC registration)</label>
+                <input value={rcNumber} onChange={e => setRcNumber(e.target.value)} placeholder="e.g. RC1234567" />
               </div>
-              <div className="form-group">
-                <label>TIN (Tax ID — shown on invoices)</label>
-                <input value={tin} onChange={e => setTin(e.target.value)} placeholder="e.g. 01234567-0001" />
-              </div>
+            )}
+          </div>
+          {hasEinvoiceFields && (
+            <div className="form-group">
+              <label>Business Address</label>
+              <input value={bizAddress} onChange={e => setBizAddress(e.target.value)} placeholder="Street, city, state" />
+              <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
+                TIN, RC number and this address are the master data Nigeria's e-invoicing (NRS) rollout will want — see Settings → E-Invoicing for readiness.
+              </small>
             </div>
           )}
 
@@ -1738,6 +1763,97 @@ function CustomFieldsTab() {
           onCancel={() => setDeleteDef(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// E-INVOICING (NRS) READINESS (migration 0035, Phase 7c)
+// ============================================================
+function EinvoicingTab() {
+  const { tenant } = useAuth();
+  const enabled = hasFeature(tenant?.plan, 'einvoicing');
+  const { data, loading, error, refetch } = useQuery<EinvoiceReadiness>(() => compliance.einvoiceReadiness(), []);
+
+  if (!enabled) {
+    return (
+      <div className="card" style={{ maxWidth: 520, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+        <ShieldCheck size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
+        <h3 style={{ marginBottom: '0.35rem' }}>E-invoicing readiness</h3>
+        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+          See exactly what master data Nigeria's e-invoicing (NRS) rollout will want, well before the deadline —
+          on the {planFor('einvoicing')} plan and above.
+        </p>
+      </div>
+    );
+  }
+
+  if (loading) return <Loading />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (!data) return null;
+
+  const pct = data.overall_percent;
+  const pctColor = pct >= 80 ? '#16a34a' : pct >= 40 ? '#d97706' : '#dc2626';
+  const Row = ({ ok, label }: { ok: boolean; label: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', padding: '0.3rem 0' }}>
+      {ok ? <Check size={15} color="#16a34a" /> : <X size={15} color="#dc2626" />}
+      <span style={{ color: ok ? '#1e293b' : '#64748b' }}>{label}</span>
+    </div>
+  );
+
+  return (
+    <div className="grid-2" style={{ alignItems: 'start' }}>
+      <div className="card">
+        <h3 style={{ marginBottom: '0.25rem' }}>Readiness Score</h3>
+        <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
+          Nigeria's e-invoicing mandate isn't enforced yet — businesses over ₦1–5bn turnover from January 2027,
+          everyone else (most StockFlow customers) live July 2027, enforced January 2028. It needs an accredited
+          access-point provider, which StockFlow hasn't connected yet — this score covers only the master data
+          you can get ready today.
+        </p>
+        <div style={{ fontSize: '2.5rem', fontWeight: 800, color: pctColor, lineHeight: 1 }}>{pct}%</div>
+        <div style={{ height: 8, background: '#f1f5f9', borderRadius: 4, marginTop: '0.5rem', marginBottom: '1.25rem', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: pctColor, borderRadius: 4 }} />
+        </div>
+
+        <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' }}>Business</p>
+        <Row ok={data.business.tin} label="TIN on file" />
+        <Row ok={data.business.rc_number} label="RC (CAC) number on file" />
+        <Row ok={data.business.address} label="Business address on file" />
+        <small style={{ color: '#94a3b8', fontSize: '0.72rem', display: 'block', marginTop: '0.35rem' }}>
+          Fill these in under Settings → Business & Profile → Tax & compliance.
+        </small>
+
+        <hr className="divider" />
+        <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' }}>Products</p>
+        <p style={{ fontSize: '0.88rem' }}>
+          <strong>{data.products.ready}</strong> of <strong>{data.products.total}</strong> products have a tax
+          category and classification code.
+        </p>
+        <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Add these under Finished Goods → Edit for each product.</small>
+
+        <hr className="divider" />
+        <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' }}>B2B Customers</p>
+        <p style={{ fontSize: '0.88rem' }}>
+          <strong>{data.customers_b2b.ready}</strong> of <strong>{data.customers_b2b.total}</strong> B2B customers have a TIN on file.
+        </p>
+        <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Mark a customer B2B and add their TIN under Customers → Edit.</small>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: '0.5rem' }}>When you're ready to connect a provider</h3>
+        <p style={{ color: '#64748b', fontSize: '0.85rem' }}>
+          Invoices go through an accredited access-point provider, which returns a reference number (IRN) and a QR
+          code for the invoice. StockFlow hasn't partnered with one yet — that's a business decision for you, not
+          something we can pick on your behalf. Once you have, we build the adapter against their field
+          specification (it has changed before, so get the current one directly from them).
+        </p>
+        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.75rem' }}>
+          Everything else is already in place for that day: sequential invoice numbers, credit notes as their own
+          linked documents rather than edits, and an issued invoice's value can no longer change once it's created
+          — corrections only ever happen through a return or credit note.
+        </p>
+      </div>
     </div>
   );
 }

@@ -49,6 +49,9 @@ export interface Tenant {
   reorder_z?: number;
   reorder_cover_days?: number;
   reorder_default_lead_days?: number;
+  // E-invoicing (NRS) readiness (migration 0035, Phase 7c). Optional until it has run.
+  rc_number?: string | null;
+  address?: string | null;
 }
 
 interface AuthState {

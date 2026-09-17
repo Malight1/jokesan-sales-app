@@ -2186,6 +2186,60 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 39. e-invoicing readiness (0035) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_sale    uuid;
+  v_cust    uuid;
+  v_cust2   uuid;
+  v_good    uuid;
+  v_before  jsonb;
+  v_after   jsonb;
+begin
+  perform t_as(v_admin);
+  insert into customers (tenant_id, first_name, custom_fields) values (t_id('tenant'), 'Reassign Target', '{"cac_number":"RC000001"}'::jsonb) returning id into v_cust2;
+  execute format('select public.create_sale(null, current_date, null, 1000, %L::jsonb)', t_items(t_id('soap'), 1, 100)) into v_sale;
+  perform t_su();
+
+  -- ---- A: an issued invoice's commercial value can't be edited directly ----
+  perform t_err('an issued invoice''s total can''t be changed directly',
+    format('update sales_orders set total_amount = 1 where id = %L::uuid', v_sale), 'can''t be edited');
+  perform t_err('an issued invoice''s customer can''t be reassigned',
+    format('update sales_orders set customer_id = %L::uuid where id = %L::uuid', v_cust2, v_sale), 'can''t be edited');
+  perform t_ok('an unrelated column (notes) can still be edited after issue',
+    format('update sales_orders set notes = %L where id = %L::uuid', 'called customer to confirm', v_sale));
+
+  -- ---- B: only admin/accounts may view e-invoicing readiness ----
+  perform t_as(v_store);
+  perform t_err('inventory cannot view e-invoicing readiness', 'select public.einvoice_readiness()', 'not allowed');
+  perform t_su();
+
+  -- ---- C: the score reflects what's actually missing, then improves ----
+  perform t_as(v_admin);
+  select public.einvoice_readiness() into v_before;
+  perform t_rec('missing business fields show up as false',
+    (v_before->'business'->>'rc_number')::boolean is false and (v_before->'business'->>'address')::boolean is false);
+  perform t_su();
+
+  update tenants set tin = 'TIN-112233', rc_number = 'RC123456', address = '12 Industrial Way, Lagos' where id = t_id('tenant');
+  insert into customers (tenant_id, first_name, customer_kind, tin, custom_fields)
+    values (t_id('tenant'), 'B2B Buyer', 'b2b', 'TIN-998877', '{"cac_number":"RC000002"}'::jsonb) returning id into v_cust;
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup, tax_category, classification_code)
+    values (t_id('tenant'), 'Readiness Test Soap', 'pcs', 5, 100, 1.5, 'Standard-rated', '12345678') returning id into v_good;
+
+  perform t_as(v_admin);
+  select public.einvoice_readiness() into v_after;
+  perform t_rec('business fields now show as complete',
+    (v_after->'business'->>'tin')::boolean and (v_after->'business'->>'rc_number')::boolean and (v_after->'business'->>'address')::boolean);
+  perform t_rec('the one b2b customer with a tin counts as ready',
+    (v_after->'customers_b2b'->>'total')::int >= 1 and (v_after->'customers_b2b'->>'ready')::int >= 1);
+  perform t_rec('overall readiness improved once the gaps were filled',
+    (v_after->>'overall_percent')::int > (v_before->>'overall_percent')::int);
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

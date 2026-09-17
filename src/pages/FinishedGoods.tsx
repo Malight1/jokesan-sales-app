@@ -27,6 +27,8 @@ const emptyForm = {
   openingQty: 0, openingCost: 0,
   // Batch and expiry (migration 0022)
   track_batches: false, shelf_life_days: 0, pick_rule: 'fifo' as 'fifo' | 'fefo', batch_prefix: '', nafdac_no: '',
+  // E-invoicing (NRS) readiness (migration 0035, Phase 7c)
+  tax_category: '', classification_code: '',
   custom_fields: {} as Record<string, any>,
 };
 
@@ -68,21 +70,25 @@ export default function FinishedGoods() {
       name: g.name, unit: g.unit ?? 'pcs', selling_price: g.selling_price, min_stock_level: g.min_stock_level,
       default_markup: g.default_markup, barcode: g.barcode ?? '', openingQty: 0, openingCost: 0,
       track_batches: !!g.track_batches, shelf_life_days: g.shelf_life_days ?? 0, pick_rule: g.pick_rule ?? 'fifo',
-      batch_prefix: g.batch_prefix ?? '', nafdac_no: g.nafdac_no ?? '', custom_fields: g.custom_fields ?? {},
+      batch_prefix: g.batch_prefix ?? '', nafdac_no: g.nafdac_no ?? '',
+      tax_category: g.tax_category ?? '', classification_code: g.classification_code ?? '',
+      custom_fields: g.custom_fields ?? {},
     });
     setShowModal(true);
   };
 
   const reload = () => { refetch(); levelsQ.refetch(); };
 
-  // Batch columns exist once migration 0022 has run; until then, don't send
-  // them (Postgres would reject the whole save).
+  // Batch/custom-field/e-invoicing columns exist once their migrations
+  // have run; until then, don't send them (Postgres would reject the save).
   const schemaHasBatches = (rows ?? []).some(r => 'track_batches' in r);
   const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
+  const schemaHasEinvoiceFields = (rows ?? []).some(r => 'tax_category' in r);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { openingQty, openingCost, barcode, track_batches, shelf_life_days, pick_rule, batch_prefix, nafdac_no, custom_fields, ...editable } = form;
+    const { openingQty, openingCost, barcode, track_batches, shelf_life_days, pick_rule, batch_prefix, nafdac_no,
+            tax_category, classification_code, custom_fields, ...editable } = form;
     const batchFields = {
       track_batches, pick_rule,
       shelf_life_days: shelf_life_days > 0 ? Math.round(shelf_life_days) : null,
@@ -93,6 +99,7 @@ export default function FinishedGoods() {
     const payload = {
       ...editable, barcode: barcode.trim() || null,
       ...(schemaHasBatches || touchedBatch ? batchFields : {}),
+      ...(schemaHasEinvoiceFields ? { tax_category: tax_category.trim() || null, classification_code: classification_code.trim() || null } : {}),
       ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
     };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
@@ -296,6 +303,23 @@ export default function FinishedGoods() {
                     <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Printed on batch labels.</small>
                   </div>
                 </div>
+
+                {schemaHasEinvoiceFields && (
+                  <>
+                    <hr className="divider" />
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>E-invoicing (NRS)</p>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label>Tax category</label>
+                        <input value={form.tax_category} onChange={e => setForm(f => ({ ...f, tax_category: e.target.value }))} placeholder="e.g. Standard-rated" />
+                      </div>
+                      <div className="form-group">
+                        <label>Classification code</label>
+                        <input value={form.classification_code} onChange={e => setForm(f => ({ ...f, classification_code: e.target.value }))} placeholder="Product/service code" />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {editRow && <ProductUnitsSection productKind="finished_good" productId={editRow.id} baseUnitLabel={form.unit} />}
                 <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}

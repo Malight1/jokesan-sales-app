@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 7a — smart reorder suggestions for materials — added; not yet run live. Phase 6 is fully shipped).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 7c — e-invoicing/NRS readiness — added; not yet run live. Phase 6 is fully shipped; 7a done, 7c done, 7b — an AI assistant — still open).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 7a as of 17 September 2026, but its migration (`0034`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 7c as of 17 September 2026, but its migration (`0035`) hasn't been run live yet — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,15 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0033` are live (the user confirmed `0033` ran right after it shipped — **Phase 6 is fully live, 6a through 6f**), and `main`'s **code** is now caught up through Phase 7a (smart reorder suggestions for materials) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
+Migrations `0017`–`0034` are live (the user confirmed `0034` ran right after it shipped — **Phase 6 is fully live, 6a through 6f, and Phase 7a is live too**), and `main`'s **code** is now caught up through Phase 7c (e-invoicing/NRS readiness) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above). **7b was skipped for now** — it needs an Anthropic API key configured as an Edge Function secret before it does anything at all, unlike 7c, which is immediately useful the moment its migration runs.
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0033`, confirmed by the user. **`0034_reorder.sql` has NOT been run yet.**
-- **This means the live app right now has a "Reorder Suggestions" section on Insights that will fail to load** (it calls `reorder_suggestions()`, which doesn't exist yet) — the rest of Insights (margin erosion, dead stock, debtor aging, profit trend) is unaffected, since that section fails independently and just shows nothing rather than erroring the whole page. Inventory role also just gained access to `/insights` itself (see "Phase 7a, as shipped" below) — until `0034` runs, that's the only thing they'll see there. Run `0034` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
+- **Database:** the live Supabase project has run `0001` through `0034`, confirmed by the user. **`0035_einvoice.sql` has NOT been run yet.**
+- **This means the live app right now has a Settings → E-Invoicing tab that will fail to load** (it calls `einvoice_readiness()`, which doesn't exist yet), and the Customers/Finished Goods forms won't show their new TIN/B2B-B2C or tax-category/classification-code fields (the `schemaHasEinvoiceFields` guard hides them until the columns exist) — everything else is unaffected. Run `0035` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0034` has actually been run live before assuming reorder suggestions work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below — **Phase 7b (an AI assistant over the app's own data) or 7c (e-invoicing readiness) is next**, unless reprioritized; 7a's own "produce" suggestion for finished goods (checked against the BOM) is also still open, see "Known gaps deferred so far." Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0035` has actually been run live before assuming e-invoicing readiness works for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below — **Phase 7b (an AI assistant over the app's own data) is the only thing left in the plan's original seven phases**, unless reprioritized; 7a's own "produce" suggestion for finished goods (checked against the BOM) is also still open, see "Known gaps deferred so far." Verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 303/303, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
+Current state: DB harness 311/311, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -104,9 +104,10 @@ Current state: DB harness 303/303, tsc clean, jest 103/103, build succeeds at ~1
 | 0031_deliveries.sql | Delivery notes and waybills (`deliveries`, `delivery_items`, `create_delivery_note()`/`dispatch_delivery()`/`mark_delivery_delivered()`/`mark_delivery_failed()`), private `delivery-proofs` Storage bucket | ✅ yes |
 | 0032_custom_fields.sql | Custom fields (`custom_field_defs`, `custom_fields` jsonb on customers/suppliers/finished_goods/materials/sales_orders, `validate_custom_fields()` trigger, `set_custom_fields()` RPC, `cleanup_deleted_custom_field()` trigger) | ✅ yes |
 | 0033_audit_log.sql | Audit log viewer (`audit_row_change()` trigger, attached to `profiles`/`tenants`/`branches`/`payment_types`/`expense_types`/`customer_types`/`price_lists`/`price_list_items` — the sensitive config tables with no RPC of their own to log from) | ✅ yes |
-| 0034_reorder.sql | Smart reorder suggestions for materials (`reorder_suggestions()`, `create_reorder_purchase_orders()`, `tenants.reorder_z`/`reorder_cover_days`/`reorder_default_lead_days`) | ❌ **run this next** |
+| 0034_reorder.sql | Smart reorder suggestions for materials (`reorder_suggestions()`, `create_reorder_purchase_orders()`, `tenants.reorder_z`/`reorder_cover_days`/`reorder_default_lead_days`) | ✅ yes |
+| 0035_einvoice.sql | E-invoicing (NRS) readiness (`tenants.rc_number`/`address`, `customers.tin`/`customer_kind`, `finished_goods.tax_category`/`classification_code`, `enforce_invoice_immutability()` trigger, `einvoice_submissions` table, `einvoice_readiness()`) | ❌ **run this next** |
 
-**0017 → 0034 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0034` need nothing extra.
+**0017 → 0035 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0035` need nothing extra.
 
 ## Key files
 
@@ -130,6 +131,7 @@ Current state: DB harness 303/303, tsc clean, jest 103/103, build succeeds at ~1
 - `src/components/CustomFieldsSection.tsx` — custom fields (migration 0032, Phase 6e), shared by the Customers/Suppliers/Finished Goods/Materials forms and the Sale detail screen. Definitions are managed under Settings → Custom Fields (`CustomFieldsTab` in `Settings.tsx`); `customFieldDefs`/`customFields` in `src/lib/api.ts` wrap `custom_field_defs` and the `set_custom_fields()` RPC — the latter is the only way to set a sale's fields, since `sales_orders` has no direct write policy.
 - `src/pages/Audit.tsx` — the audit log viewer (migration 0033, Phase 6f), admin-only. Read-only: `auditLog.list()` in `src/lib/api.ts` is the only wrapper, since nothing in the app ever writes `audit_logs` directly — `log_audit()` (called inline from inside sensitive RPCs since 0021) and `audit_row_change()` (a trigger on config tables that have no RPC of their own) are the only two writers.
 - `src/components/ReorderSuggestions.tsx` — smart reorder suggestions for materials (migration 0034, Phase 7a), rendered at the bottom of `src/pages/Insights.tsx`. `reorder` in `src/lib/api.ts` wraps `reorder_suggestions()` (read) and `create_reorder_purchase_orders()` (turns checked suggestions into real 6b purchase orders, grouped by supplier). The service-level (z) dropdown and cover-days/default-lead-time settings live in `Settings.tsx`'s `BusinessTab`, under a "Reorder suggestions" section.
+- `Settings.tsx`'s `EinvoicingTab` — e-invoicing (NRS) readiness score (migration 0035, Phase 7c), wrapping `compliance.einvoiceReadiness()` in `src/lib/api.ts`. TIN/RC number/business address live in `BusinessTab`'s "Tax & compliance" section; a customer's TIN/B2B-B2C is on the Customers form; a product's tax category/classification code is on the Finished Goods form.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
@@ -152,9 +154,9 @@ Current state: DB harness 303/303, tsc clean, jest 103/103, build succeeds at ~1
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
 | 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields (**6e, 0032**), audit-log viewer (**6f, 0033**) | ✅ done |
-| 7 | Smart reorder suggestions (**7a, 0034** — materials only), an AI assistant over the app's own data (7b), e-invoicing (NRS) readiness (7c) | 🟡 7a done, 7b/7c not started |
+| 7 | Smart reorder suggestions (**7a, 0034** — materials only), an AI assistant over the app's own data (7b), e-invoicing (NRS) readiness (**7c, 0035**) | 🟡 7a/7c done, 7b not started (needs an Anthropic API key first) |
 
-Next migration number is **`0035`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0036`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -243,6 +245,17 @@ The plan's own words for this function: "plain SQL, so the numbers can be checke
 - **Frontend:** `ReorderSuggestions.tsx` replaces the old ad-hoc "reorder forecast" card that used to live in `Insights.tsx` (usage over 90 days ÷ current balance — no lead time, no supplier, no safety stock, no action). The new section: a checkbox list of what's suggested with the plain-language reason per material, and a "Create Purchase Order(s)" button.
 - **Deliberately not built — this is the bigger half of the plan's own Phase 7a:** a "produce" suggestion for finished goods, checked against the BOM's feasibility ("can make 140 of the 200 needed; short 20kg SLS → added to the order"). That needs real recipe-feasibility logic (multi-level BOM resolution, partial-feasibility math, cross-linking a finished-good shortfall back into the material order) this migration doesn't build — a materials-only version was judged the disciplined, shippable-in-one-sitting cut, matching how nearly every other Phase 6 sub-phase deferred its own harder half (6b's Orders/Receipts tab split, 6c's per-line unit selector, 6f's diff-viewer modal). Also not built: a seasonal factor (the plan's own "later" note) and a reorder list on a dedicated inventory dashboard widget (it lives only on Insights for now).
 
+### Phase 7c, as shipped (0035) — e-invoicing (NRS) readiness
+
+**7b (an AI assistant) was skipped in favor of 7c.** 7b needs an Anthropic API key configured as a Supabase Edge Function secret before it does anything at all — same class of external dependency as Phase 5a's Paystack integration. 7c has no such dependency: the moment its migration runs, the readiness score is genuinely useful, well ahead of the actual 2027/2028 enforcement dates. This was a judgment call, not a user instruction — 7b (the assistant) is still fully open and is probably the natural next thing to build.
+
+- **Master data:** `tenants.rc_number`/`address` (TIN already existed), `customers.tin`/`customer_kind` (`b2b`/`b2c`, defaults `b2c`), `finished_goods.tax_category`/`classification_code` — exactly the fields this plan's Phase 7c section names.
+- **`enforce_invoice_immutability()`** is a real, enforced guarantee, not just an absence of a write policy: once a sale has been fully processed (`sales_orders.processed = true`, set as the very last step of `create_sale`'s own two-step insert-then-finalize flow), its customer, branch, subtotal, VAT amount/rate, total, COGS and gross profit can never change again — only a return or credit note (Phase 2) can adjust the picture from there. `doc_no` already had its own such guard since 0021; `transaction_date` is deliberately **not** protected, since fixing a mis-keyed date is a normal admin correction, not a change to the invoice's commercial value (see the migration's own comment for why — a real test in this session initially assumed it should be protected and had to be walked back once an existing test's legitimate date-backdating broke against it).
+- **`einvoice_readiness()`** returns a 0–100% score, averaged equally across three checks: the three business fields, the fraction of finished goods with both a tax category and a classification code, and the fraction of *B2B* customers (not all customers — a B2C sale doesn't need one) with a TIN on file. An empty catalog or zero B2B customers score that check as 100% rather than 0%, so a brand-new tenant isn't penalized for data it doesn't have yet.
+- **Not DB-plan-gated** (same pattern as custom fields and audit logging) — `feature_level()` already mapped `einvoicing` to the Business plan; the Settings → E-Invoicing tab uses that for its upsell card, but the RPC itself only checks role (`admin`, `accounts`), not plan.
+- **Frontend:** a new Settings → E-Invoicing tab with the score, a checklist of what's missing, and where to go fix each thing; TIN moved out from behind the "Charge VAT" toggle (a business needs its TIN for e-invoicing whether or not it charges VAT — this was a real, if minor, pre-existing gap) into an always-visible "Tax & compliance" section alongside the new RC number and address fields. Customers gained a B2B/B2C toggle and a TIN field (shown only for B2B); Finished Goods gained tax category and classification code fields.
+- **Deliberately not built — the plan's own explicit reservation, not a scope cut:** the actual submission adapter (`einvoice-submit` Edge Function, `submitInvoice(doc) → {irn, qr}`) and printing an IRN/QR on the invoice PDF. The plan's own words: "Action for you: start talks with one or two accredited providers... get the current field specification from them." There's no provider chosen yet, so there's nothing real to adapt to — `einvoice_submissions` (the table a future adapter will write to) exists and is ready, but nothing writes it yet.
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).
@@ -270,6 +283,9 @@ The plan's own words for this function: "plain SQL, so the numbers can be checke
 - No finished-goods "produce" suggestion checked against BOM feasibility (Phase 7a's own second half — see that section above) — reorder suggestions cover raw materials only.
 - No seasonal factor in the reorder math (the plan's own "later" note) — a repeat spike from the same month last year (December, Ramadan) isn't accounted for.
 - Reorder suggestions have no branch selector — they're always for the caller's own working branch (`resolve_branch(null)`), same simplification as several other single-branch-implicit screens (e.g. Adjust Stock).
+- No e-invoicing submission adapter or IRN/QR on the invoice PDF (Phase 7c's own explicit reservation — see that section above) — there's no accredited provider chosen yet to adapt to.
+- `einvoice_submissions` exists with a read policy but nothing writes it yet — it's scaffolding for the day a provider is connected.
+- 7b (an AI assistant over the app's own data) is the only piece of the original seven-phase plan not started — see "Phase 7c, as shipped" above for why 7c was picked first.
 
 ## How the user works
 

@@ -12,7 +12,10 @@ import OfflineBanner from '../components/OfflineBanner';
 import CustomFieldsSection from '../components/CustomFieldsSection';
 import Modal from '../components/Modal';
 
-const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '', price_list_id: '', custom_fields: {} as Record<string, any> };
+const emptyForm = {
+  first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '', price_list_id: '',
+  tin: '', customer_kind: 'b2c' as 'b2b' | 'b2c', custom_fields: {} as Record<string, any>,
+};
 
 export default function Customers() {
   const toast = useToast();
@@ -40,21 +43,25 @@ export default function Customers() {
     setForm({
       first_name: c.first_name ?? '', last_name: c.last_name ?? '', company_store: c.company_store ?? '',
       address: c.address ?? '', phone: c.phone ?? '', customer_type_id: c.customer_type_id ?? '',
-      price_list_id: c.price_list_id ?? '', custom_fields: c.custom_fields ?? {},
+      price_list_id: c.price_list_id ?? '', tin: c.tin ?? '', customer_kind: c.customer_kind ?? 'b2c',
+      custom_fields: c.custom_fields ?? {},
     });
     setShowModal(true);
   };
 
-  // The custom_fields column exists once migration 0032 has run; until
-  // then, don't send it (Postgres would reject the whole save).
+  // The custom_fields/tin/customer_kind columns exist once their
+  // migrations have run; until then, don't send them (Postgres would
+  // reject the whole save).
   const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
+  const schemaHasEinvoiceFields = (rows ?? []).some(r => 'customer_kind' in r);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { price_list_id, custom_fields, ...rest } = form;
+    const { price_list_id, tin, customer_kind, custom_fields, ...rest } = form;
     const payload = {
       ...rest, customer_type_id: form.customer_type_id || null,
       ...(tiersEnabled ? { price_list_id: price_list_id || null } : {}),
+      ...(schemaHasEinvoiceFields ? { tin: tin.trim() || null, customer_kind } : {}),
       ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
     };
     const res = editRow
@@ -164,6 +171,23 @@ export default function Customers() {
                       {priceLists?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
                     <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Overrides the customer type below for this one customer.</small>
+                  </div>
+                )}
+                {schemaHasEinvoiceFields && (
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label>Business type</label>
+                      <select value={form.customer_kind} onChange={e => setForm(f => ({ ...f, customer_kind: e.target.value as 'b2b' | 'b2c' }))}>
+                        <option value="b2c">B2C — individual</option>
+                        <option value="b2b">B2B — registered business</option>
+                      </select>
+                    </div>
+                    {form.customer_kind === 'b2b' && (
+                      <div className="form-group">
+                        <label>TIN</label>
+                        <input value={form.tin} onChange={e => setForm(f => ({ ...f, tin: e.target.value }))} placeholder="e.g. 01234567-0001" />
+                      </div>
+                    )}
                   </div>
                 )}
                 <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}
