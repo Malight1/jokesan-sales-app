@@ -2090,6 +2090,102 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 38. smart reorder suggestions for materials (0034) ----------
+do $$
+declare
+  v_admin    uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier  uuid := '00000000-0000-0000-0000-000000000002';
+  v_mat      uuid;
+  v_mat2     uuid;
+  v_supplier uuid;
+  v_po       uuid;
+  v_line1    uuid;
+  v_row      record;
+  v_row2     record;
+  v_result   jsonb;
+  v_new_po   uuid;
+  d          int;
+begin
+  perform t_as(v_admin);
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level)
+    values (t_id('tenant'), 'Reorder Test Chemical', 'kg', 'raw', 5) returning id into v_mat;
+  insert into suppliers (tenant_id, company_store) values (t_id('tenant'), 'Reorder Test Supplier') returning id into v_supplier;
+  perform t_su();
+
+  -- ---- A: only admin/inventory may view reorder suggestions ----
+  perform t_as(v_cashier);
+  perform t_err('sales cannot view reorder suggestions',
+    format('select * from public.reorder_suggestions(%L::uuid)', t_id('lagos')),
+    'not allowed');
+  perform t_su();
+
+  -- ---- B: learn a real lead time the same way 6b's own test does — order,
+  --    backdate when it was ordered (the whole script is one transaction,
+  --    so now() won't advance on its own), then receive in full ----
+  perform t_as(v_admin);
+  select public.create_purchase_order(v_supplier,
+    jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 950, 'unit_cost', 10))) into v_po;
+  select id into v_line1 from purchase_order_lines where purchase_order_id = v_po;
+  perform t_su();
+  update purchase_orders set ordered_at = now() - interval '6 days' where id = v_po;
+
+  perform t_as(v_admin);
+  perform public.receive_purchase_order(v_po, jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 950)));
+  perform t_su();
+  perform t_rec('the learned lead time is 6 days, not the tenant default',
+    (select lead_time_days = 6 from suppliers where id = v_supplier));
+
+  -- ---- C: 10kg/day of production consumption for 90 days, exactly — a
+  --    clean, checkable series. Inserted directly rather than through 90
+  --    real production runs; the FIFO layer and qty_balance are adjusted
+  --    to match, so "books balance everywhere" still holds at the end. ----
+  for d in 0..89 loop
+    insert into stock_movements (tenant_id, branch_id, product_kind, product_id, movement_type, quantity, created_at)
+    values (t_id('tenant'), t_id('lagos'), 'material', v_mat, 'PRODUCTION', -10, (current_date - d)::timestamptz + interval '12 hours');
+  end loop;
+  update materials set qty_balance = qty_balance - 900 where id = v_mat;
+  update purchase_items set qty_remaining = qty_remaining - 900 where material_id = v_mat;
+
+  perform t_as(v_admin);
+  select * into v_row from public.reorder_suggestions(t_id('lagos')) where product_id = v_mat;
+  perform t_su();
+
+  perform t_rec('daily usage is computed correctly from 90 days of steady consumption',
+    v_row.daily_usage = 10);
+  perform t_rec('a perfectly steady usage series has zero variance, so zero safety stock',
+    v_row.daily_stddev = 0 and v_row.safety_stock = 0);
+  perform t_rec('the reorder point is daily usage times the learned lead time',
+    v_row.reorder_point = 60);
+  perform t_rec('on hand reflects the 950kg received less 900kg consumed',
+    v_row.on_hand = 50);
+  perform t_rec('suggested qty covers lead time plus the cover-days setting, less on hand (10 x 20 - 50 = 150)',
+    v_row.suggested_qty = 150);
+  perform t_rec('the reason sentence is built from the real numbers',
+    v_row.reason like '%10%kg a day%' and v_row.reason like '%Reorder Test Supplier takes 6 days%'
+    and v_row.reason like '%Order 150 kg%');
+
+  -- ---- D: "Create orders" turns the suggestion into a real purchase order ----
+  perform t_as(v_admin);
+  select public.create_reorder_purchase_orders(array[v_mat], t_id('lagos')) into v_result;
+  v_new_po := (v_result->'created'->0->>'purchase_order_id')::uuid;
+  perform t_rec('create_reorder_purchase_orders makes a real order for the right supplier and quantity',
+    (select supplier_id = v_supplier and status = 'ordered' from purchase_orders where id = v_new_po)
+    and (select qty_ordered = 150 from purchase_order_lines where purchase_order_id = v_new_po and material_id = v_mat));
+  perform t_rec('nothing was skipped — the material has a known supplier',
+    jsonb_array_length(v_result->'skipped') = 0);
+  perform t_su();
+
+  -- ---- E: a material with no purchase history at all suggests nothing,
+  --    rather than erroring on a missing supplier or lead time ----
+  perform t_as(v_admin);
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level)
+    values (t_id('tenant'), 'Never Bought Chemical', 'kg', 'raw', 5) returning id into v_mat2;
+  select * into v_row2 from public.reorder_suggestions(t_id('lagos')) where product_id = v_mat2;
+  perform t_rec('a material with no usage history suggests nothing, and has no supplier',
+    v_row2.suggested_qty = 0 and v_row2.supplier_id is null);
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

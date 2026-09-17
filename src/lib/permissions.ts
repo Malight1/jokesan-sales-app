@@ -4,7 +4,7 @@ import { Role } from './AuthContext';
 export const ROLE_ROUTES: Record<Role, string[]> = {
   admin: ['*'],
   sales: ['/', '/profile', '/pos', '/sales', '/quotes', '/deliveries', '/customers', '/finished-goods', '/stock-alerts', '/match-payment'],
-  inventory: ['/', '/profile', '/inventory', '/finished-goods', '/production', '/batches', '/purchases', '/suppliers', '/stock-movement', '/stock-alerts', '/transfers', '/import'],
+  inventory: ['/', '/profile', '/inventory', '/finished-goods', '/production', '/batches', '/purchases', '/suppliers', '/stock-movement', '/stock-alerts', '/transfers', '/import', '/insights'],
   accounts: ['/', '/profile', '/expenses', '/reports', '/sales', '/quotes', '/deliveries', '/purchases', '/batches', '/stock-alerts', '/insights', '/match-payment'],
 };
 

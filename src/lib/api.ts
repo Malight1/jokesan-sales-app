@@ -909,6 +909,8 @@ export const tenantApi = {
     shift_rules?: Partial<ShiftRules>;
     // Printed on a proforma invoice only (migration 0028) — a plain quote doesn't need it.
     bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
+    // Smart reorder suggestions (migration 0034).
+    reorder_z?: number; reorder_cover_days?: number; reorder_default_lead_days?: number;
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };
@@ -946,6 +948,35 @@ export const transfers = {
       p_from: p.fromBranchId, p_to: p.toBranchId, p_kind: p.kind,
       p_product: p.productId, p_qty: p.qty, p_note: p.note ?? null,
       ...(p.batchId ? { p_batch: p.batchId } : {}),
+    }),
+};
+
+// ============================================================
+// SMART REORDER (migration 0034, Phase 7a) — raw materials only. A
+// "produce" suggestion for finished goods, checked against the BOM's
+// feasibility, is deliberately not built yet — see HANDOVER.md.
+// ============================================================
+export interface ReorderSuggestion {
+  product_kind: 'material';
+  product_id: string; name: string; unit: string | null; branch_id: string;
+  daily_usage: number; daily_stddev: number; on_hand: number; on_order: number;
+  lead_time_days: number; supplier_id: string | null; supplier_name: string | null;
+  safety_stock: number; reorder_point: number; cover_days: number;
+  suggested_qty: number; reason: string;
+}
+export interface ReorderOrdersResult {
+  created: { supplier_id: string; purchase_order_id: string }[];
+  skipped: { material_id: string; name: string }[];
+}
+
+export const reorder = {
+  suggestions: (branchId?: string | null) =>
+    rpc<ReorderSuggestion[]>('reorder_suggestions', branchId ? { p_branch: branchId } : undefined),
+  // p_material_ids narrows which suggested materials to order; omit to
+  // order everything currently suggested.
+  createOrders: (materialIds?: string[] | null, branchId?: string | null) =>
+    rpc<ReorderOrdersResult>('create_reorder_purchase_orders', {
+      p_material_ids: materialIds ?? null, ...(branchId ? { p_branch: branchId } : {}),
     }),
 };
 

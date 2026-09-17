@@ -38,6 +38,15 @@ const roleOptions = [
   { value: 'accounts', label: 'Accounts — finance & reports' },
 ];
 
+// z for a target service level — the database only ever stores and uses
+// the raw z number (tenants.reorder_z); this mapping is presentation only.
+const SERVICE_LEVELS = [
+  { z: 0.84, label: '80% — leaner stock, more chance of running short' },
+  { z: 1.28, label: '90%' },
+  { z: 1.65, label: '95% — recommended' },
+  { z: 2.33, label: '99% — heavier buffer, rarely runs short' },
+];
+
 export default function Settings() {
   const { tenant } = useAuth();
   const isMultiBranch = tenant?.type === 'multi_branch';
@@ -468,6 +477,11 @@ function BusinessTab() {
   const [bankName, setBankName] = useState(tenant?.bank_details?.bank_name ?? '');
   const [bankAccountName, setBankAccountName] = useState(tenant?.bank_details?.account_name ?? '');
   const [bankAccountNumber, setBankAccountNumber] = useState(tenant?.bank_details?.account_number ?? '');
+  // Smart reorder suggestions (migration 0034, Phase 7a).
+  const hasReorderSettings = tenant?.reorder_z !== undefined;
+  const [reorderZ, setReorderZ] = useState(tenant?.reorder_z ?? 1.65);
+  const [reorderCoverDays, setReorderCoverDays] = useState(tenant?.reorder_cover_days ?? 14);
+  const [reorderDefaultLead, setReorderDefaultLead] = useState(tenant?.reorder_default_lead_days ?? 7);
   const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
   const [invPrefix, setInvPrefix] = useState<string | null>(null);
   const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
@@ -514,6 +528,11 @@ function BusinessTab() {
       } : {}),
       ...(hasBankDetails ? {
         bank_details: { bank_name: bankName.trim(), account_name: bankAccountName.trim(), account_number: bankAccountNumber.trim() },
+      } : {}),
+      ...(hasReorderSettings ? {
+        reorder_z: Number(reorderZ) || 1.65,
+        reorder_cover_days: Math.round(Number(reorderCoverDays) || 14),
+        reorder_default_lead_days: Math.round(Number(reorderDefaultLead) || 7),
       } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
@@ -686,6 +705,32 @@ function BusinessTab() {
                   <input value={bankAccountName} onChange={e => setBankAccountName(e.target.value)} placeholder="Account name" />
                 </div>
                 <input value={bankAccountNumber} onChange={e => setBankAccountNumber(e.target.value)} placeholder="Account number" style={{ marginTop: '0.5rem' }} />
+              </div>
+            </>
+          )}
+
+          {hasReorderSettings && (
+            <>
+              <hr className="divider" />
+              <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>Reorder suggestions</p>
+              <div className="grid-2">
+                <div className="form-group">
+                  <label>Safety stock service level</label>
+                  <select value={reorderZ} onChange={e => setReorderZ(Number(e.target.value))}>
+                    {SERVICE_LEVELS.map(l => <option key={l.z} value={l.z}>{l.label}</option>)}
+                  </select>
+                  <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>How much buffer stock to hold against unusually heavy usage.</small>
+                </div>
+                <div className="form-group">
+                  <label>Cover days</label>
+                  <NumberInput value={reorderCoverDays} onChange={setReorderCoverDays} />
+                  <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Extra days of stock a suggested order aims to leave you with.</small>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Default lead time (days)</label>
+                <NumberInput value={reorderDefaultLead} onChange={setReorderDefaultLead} />
+                <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Used only for a material whose supplier hasn't delivered a full order yet, so there's nothing learned to go on.</small>
               </div>
             </>
           )}

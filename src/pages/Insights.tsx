@@ -1,12 +1,13 @@
 import React from 'react';
-import { TrendingUp, TrendingDown, PackageX, Clock, AlertTriangle, Target, Lightbulb, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, PackageX, AlertTriangle, Target, Lightbulb, CheckCircle2 } from 'lucide-react';
 import {
-  sales as salesApi, materials as materialsApi, finishedGoods as goodsApi,
+  sales as salesApi, finishedGoods as goodsApi,
   production as productionApi, stock, customers as customersApi,
-  SalesOrder, Material, FinishedGood, ProductionRun, StockMovement, Customer,
+  SalesOrder, FinishedGood, ProductionRun, StockMovement, Customer,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { Loading, ErrorState } from '../components/DataStates';
+import ReorderSuggestions from '../components/ReorderSuggestions';
 import './Insights.scss';
 
 const fmt = (n: number) => '₦' + Math.round(n || 0).toLocaleString();
@@ -23,20 +24,18 @@ interface Insight {
 
 export default function Insights() {
   const salesQ = useQuery<SalesOrder[]>(() => salesApi.list(), []);
-  const matsQ = useQuery<Material[]>(() => materialsApi.list(), []);
   const goodsQ = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const prodQ = useQuery<ProductionRun[]>(() => productionApi.list(), []);
   const moveQ = useQuery<StockMovement[]>(() => stock.movements(1000), []);
   const custQ = useQuery<Customer[]>(() => customersApi.list(), []);
 
-  const loading = salesQ.loading || matsQ.loading || goodsQ.loading || prodQ.loading || moveQ.loading;
-  const error = salesQ.error || matsQ.error || goodsQ.error || prodQ.error || moveQ.error;
+  const loading = salesQ.loading || goodsQ.loading || prodQ.loading || moveQ.loading;
+  const error = salesQ.error || goodsQ.error || prodQ.error || moveQ.error;
 
   if (loading) return <Loading label="Analysing your business…" />;
-  if (error) return <ErrorState message={error} onRetry={() => { salesQ.refetch(); matsQ.refetch(); goodsQ.refetch(); prodQ.refetch(); moveQ.refetch(); }} />;
+  if (error) return <ErrorState message={error} onRetry={() => { salesQ.refetch(); goodsQ.refetch(); prodQ.refetch(); moveQ.refetch(); }} />;
 
   const sales = (salesQ.data ?? []).filter(s => !s.voided);
-  const mats = matsQ.data ?? [];
   const goods = goodsQ.data ?? [];
   const runs = (prodQ.data ?? []).filter(r => !r.voided);
   const moves = moveQ.data ?? [];
@@ -71,26 +70,11 @@ export default function Insights() {
     }
   });
 
-  // ---- 2. Reorder forecast (materials running out) ----
-  const periodDays = 90;
-  const since = Date.now() - periodDays * 86400000;
-  mats.forEach(m => {
-    const used = moves
-      .filter(mv => mv.product_kind === 'material' && mv.product_id === m.id && mv.movement_type === 'PRODUCTION' && new Date(mv.created_at).getTime() > since)
-      .reduce((s, mv) => s + Math.abs(mv.quantity), 0);
-    if (used <= 0 || m.qty_balance <= 0) return;
-    const daily = used / periodDays;
-    const daysLeft = Math.floor(m.qty_balance / daily);
-    if (daysLeft <= 21) {
-      insights.push({
-        severity: daysLeft <= 7 ? 'danger' : 'warning',
-        icon: <Clock size={18} />,
-        title: `${m.name} runs out in ~${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
-        detail: <>You use about <strong>{daily.toFixed(1)} {m.unit ?? 'units'}/day</strong> and have <strong>{m.qty_balance.toLocaleString()} {m.unit ?? ''}</strong> left.</>,
-        action: `Reorder ${m.name} now to avoid stopping production.`,
-      });
-    }
-  });
+  // Reorder forecasting used to be a crude client-side guess here (usage
+  // over 90 days ÷ qty balance, no lead time, no supplier, no safety
+  // stock). It's now real, server-computed math with an actionable
+  // "Create Purchase Orders" button — see the ReorderSuggestions section
+  // rendered below the insight grid (migration 0034, Phase 7a).
 
   // ---- 3. Dead stock (finished goods not selling) ----
   goods.forEach(g => {
@@ -195,6 +179,8 @@ export default function Insights() {
           ))}
         </div>
       )}
+
+      <ReorderSuggestions />
     </div>
   );
 }

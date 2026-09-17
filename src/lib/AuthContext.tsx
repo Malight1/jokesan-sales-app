@@ -45,6 +45,10 @@ export interface Tenant {
   };
   // Printed on a proforma invoice only (migration 0028).
   bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
+  // Smart reorder suggestions (migration 0034, Phase 7a). Optional until it has run.
+  reorder_z?: number;
+  reorder_cover_days?: number;
+  reorder_default_lead_days?: number;
 }
 
 interface AuthState {

@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0032, live in production. `0033` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0033, live in production — **all of Phase 6 (6a–6f) is now live**. `0034` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -13,11 +13,11 @@
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
 | 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c), **0031** (6d), **0032** (6e), **0033** (6f) | ✅ done |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0034+ | not started |
+| 7 | Smart reorder (materials), assistant, e-invoicing readiness | 0032–0033 | **0034** (7a, materials only) | 🟡 7a done, 7b/7c not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–6e are live in production; Phase 6f's code is on `main` but its migration hasn't run yet — **this is the last sub-phase of Phase 6**, so once `0033` runs, all of Phase 6 is live and Phase 7 is next. The rest of this document is the original plan for Phase 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–6f are live in production; Phase 7a's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for the remainder of Phase 7 (7b, 7c), unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -54,6 +54,10 @@ Phases 0–6e are live in production; Phase 6f's code is on `main` but its migra
 **Phase 6f (audit log viewer), as actually shipped, closes out Phase 6** — built largely as the plan below describes, with one addition beyond it:
 - Built: a generic `audit_row_change()` trigger on the tables this plan names (roles, settings, branches, payment types) plus `expense_types`/`customer_types`/`price_lists`/`price_list_items` — the plan's "price changes" bullet, made concrete. Everything else sensitive (voids, returns, discount overrides, shift variance, batch write-offs/recalls) was already logging inline via `log_audit()` since Phase 0, so this phase's only new engine work was the tables with no RPC of their own to log from. A new `/audit` page (admin), with a before/after summary per row, a date-range filter, and "export per year" satisfied by picking a year and using the existing per-page Export button rather than a bespoke export path.
 - Not built: a dedicated diff-viewer modal (an inline one-line summary stands in for it) and distinct-value dropdown filters for action/entity (the search box covers the same ground).
+
+**Phase 7a (smart reorder), as actually shipped, is scoped to materials only** — this plan's own two halves (a material "order" suggestion, and a finished-goods "produce" suggestion checked against the BOM's feasibility) were split, and only the first was built:
+- Built: `reorder_suggestions()` with the exact formula this plan describes — a real 90-day daily usage series (not an approximation), weighted 60/40 towards the last 30 days, a genuine population standard deviation for safety stock, the learned supplier lead time from 6b, and a plain-language reason sentence built in SQL. `create_reorder_purchase_orders()` turns checked suggestions into real purchase orders grouped by supplier, matching this plan's "Create orders" button description. Landed on Insights, as this plan says, with the inventory role newly given access to that page (it had none before).
+- Not built: the finished-goods "produce" suggestion checked against BOM feasibility ("can make 140 of the 200 needed; short 20kg SLS"), a seasonal factor (this plan's own "later" note), and a reorder-list widget on a dedicated inventory dashboard (Insights is the only place it lives for now).
 
 ---
 
