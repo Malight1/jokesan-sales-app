@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, X, Pencil, Trash2 } from 'lucide-react';
-import { customers as customersApi, lookups, pricing, Customer, PriceList } from '../lib/api';
+import { customers as customersApi, lookups, pricing, customFieldDefs, Customer, PriceList, CustomFieldDef } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -9,9 +9,10 @@ import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
+import CustomFieldsSection from '../components/CustomFieldsSection';
 import Modal from '../components/Modal';
 
-const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '', price_list_id: '' };
+const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', phone: '', customer_type_id: '', price_list_id: '', custom_fields: {} as Record<string, any> };
 
 export default function Customers() {
   const toast = useToast();
@@ -20,6 +21,7 @@ export default function Customers() {
   const { data: rows, loading, error, refetch, isOffline } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'customers-list' });
   const { data: types } = useQuery(() => lookups.customerTypes(), []);
   const { data: priceLists } = useQuery<PriceList[]>(() => pricing.lists().catch(() => []), []);
+  const { data: customFieldDefsData } = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('customer').catch(() => []), []);
   const createMut = useMutation(customersApi.create);
   const updateMut = useMutation((id: string, c: Partial<Customer>) => customersApi.update(id, c));
   const removeMut = useMutation(customersApi.remove);
@@ -38,17 +40,22 @@ export default function Customers() {
     setForm({
       first_name: c.first_name ?? '', last_name: c.last_name ?? '', company_store: c.company_store ?? '',
       address: c.address ?? '', phone: c.phone ?? '', customer_type_id: c.customer_type_id ?? '',
-      price_list_id: c.price_list_id ?? '',
+      price_list_id: c.price_list_id ?? '', custom_fields: c.custom_fields ?? {},
     });
     setShowModal(true);
   };
 
+  // The custom_fields column exists once migration 0032 has run; until
+  // then, don't send it (Postgres would reject the whole save).
+  const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { price_list_id, ...rest } = form;
+    const { price_list_id, custom_fields, ...rest } = form;
     const payload = {
       ...rest, customer_type_id: form.customer_type_id || null,
       ...(tiersEnabled ? { price_list_id: price_list_id || null } : {}),
+      ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
     };
     const res = editRow
       ? await updateMut.mutate(editRow.id, payload)
@@ -159,6 +166,8 @@ export default function Customers() {
                     <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Overrides the customer type below for this one customer.</small>
                   </div>
                 )}
+                <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}
+                  onChange={cf => setForm(f => ({ ...f, custom_fields: cf }))} />
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
 import { Plus, X, Pencil, Trash2 } from 'lucide-react';
-import { suppliers as suppliersApi, Supplier } from '../lib/api';
+import { suppliers as suppliersApi, customFieldDefs, Supplier, CustomFieldDef } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
+import CustomFieldsSection from '../components/CustomFieldsSection';
 import Modal from '../components/Modal';
 
-const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', email: '', phone: '' };
+const emptyForm = { first_name: '', last_name: '', company_store: '', address: '', email: '', phone: '', custom_fields: {} as Record<string, any> };
 
 export default function Suppliers() {
   const toast = useToast();
   const { data: rows, loading, error, refetch } = useQuery<Supplier[]>(() => suppliersApi.list(), []);
+  const { data: customFieldDefsData } = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('supplier').catch(() => []), []);
   const createMut = useMutation(suppliersApi.create);
   const updateMut = useMutation((id: string, s: Partial<Supplier>) => suppliersApi.update(id, s));
   const removeMut = useMutation(suppliersApi.remove);
@@ -29,14 +31,20 @@ export default function Suppliers() {
     setEditRow(s);
     setForm({
       first_name: s.first_name ?? '', last_name: s.last_name ?? '', company_store: s.company_store ?? '',
-      address: s.address ?? '', email: s.email ?? '', phone: s.phone ?? '',
+      address: s.address ?? '', email: s.email ?? '', phone: s.phone ?? '', custom_fields: s.custom_fields ?? {},
     });
     setShowModal(true);
   };
 
+  // The custom_fields column exists once migration 0032 has run; until
+  // then, don't send it (Postgres would reject the whole save).
+  const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = editRow ? await updateMut.mutate(editRow.id, form) : await createMut.mutate(form);
+    const { custom_fields, ...rest } = form;
+    const payload = { ...rest, ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}) };
+    const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (res) {
       toast.success(editRow ? 'Supplier updated.' : 'Supplier added.');
       setShowModal(false);
@@ -121,6 +129,8 @@ export default function Suppliers() {
                   <div className="form-group"><label>Email</label><input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                   <div className="form-group"><label>Phone</label><input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
                 </div>
+                <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}
+                  onChange={cf => setForm(f => ({ ...f, custom_fields: cf }))} />
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

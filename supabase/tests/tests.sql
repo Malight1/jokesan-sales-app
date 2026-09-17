@@ -1912,6 +1912,122 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 36. custom fields (0032) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_cust    uuid;
+  v_mat     uuid;
+  v_cfsoap  uuid;
+  v_sale    uuid;
+begin
+  -- ---- A: only admin may define a custom field ----
+  perform t_as(v_cashier);
+  perform t_err('sales cannot define a custom field',
+    format('insert into custom_field_defs (tenant_id, entity, key, label, type) values (%L::uuid, %L, %L, %L, %L)',
+      t_id('tenant'), 'customer', 'cac_number', 'CAC Number', 'text'),
+    'row-level security');
+  perform t_su();
+
+  perform t_as(v_admin);
+  insert into custom_field_defs (tenant_id, entity, key, label, type, required)
+    values (t_id('tenant'), 'customer', 'cac_number', 'CAC Number', 'text', true);
+  insert into custom_field_defs (tenant_id, entity, key, label, type, options)
+    values (t_id('tenant'), 'customer', 'loyalty_tier', 'Loyalty Tier', 'select', '["Bronze","Silver","Gold"]'::jsonb);
+  insert into custom_field_defs (tenant_id, entity, key, label, type)
+    values (t_id('tenant'), 'material', 'reorder_multiple', 'Reorder Multiple', 'number');
+  insert into custom_field_defs (tenant_id, entity, key, label, type, show_on_invoice)
+    values (t_id('tenant'), 'sale', 'po_reference', 'Customer PO Reference', 'text', true);
+  insert into custom_field_defs (tenant_id, entity, key, label, type)
+    values (t_id('tenant'), 'sale', 'delivery_promised', 'Delivery Promised', 'date');
+  perform t_rec('the definitions were created',
+    (select count(*) = 5 from custom_field_defs where tenant_id = t_id('tenant')));
+
+  -- ---- B: an unknown key is rejected outright ----
+  perform t_err('an unknown custom field key is rejected',
+    format('insert into customers (tenant_id, first_name, custom_fields) values (%L::uuid, %L, %L::jsonb)',
+      t_id('tenant'), 'Bad Key Customer', '{"not_a_field":"x"}'),
+    'Unknown custom field');
+
+  -- ---- C: a required field must be present ----
+  perform t_err('a required custom field blocks the save when missing',
+    format('insert into customers (tenant_id, first_name, custom_fields) values (%L::uuid, %L, %L::jsonb)',
+      t_id('tenant'), 'No CAC Customer', '{"loyalty_tier":"Gold"}'),
+    'is required');
+
+  -- ---- D: a select value outside its options is rejected ----
+  perform t_err('a select field outside its options is rejected',
+    format('insert into customers (tenant_id, first_name, custom_fields) values (%L::uuid, %L, %L::jsonb)',
+      t_id('tenant'), 'Bad Tier Customer', '{"cac_number":"RC123456","loyalty_tier":"Platinum"}'),
+    'allowed options');
+
+  -- ---- E: a valid save persists ----
+  insert into customers (tenant_id, first_name, custom_fields)
+    values (t_id('tenant'), 'Good Customer', '{"cac_number":"RC123456","loyalty_tier":"Gold"}'::jsonb) returning id into v_cust;
+  perform t_rec('valid custom field values persist on the customer',
+    (select custom_fields = '{"cac_number":"RC123456","loyalty_tier":"Gold"}'::jsonb from customers where id = v_cust));
+
+  -- ---- F: a number field rejects a non-numeric value ----
+  perform t_err('a number field rejects a non-numeric value',
+    format('insert into materials (tenant_id, name, unit, type_of_material, min_stock_level, custom_fields) values (%L::uuid, %L, %L, %L, %L, %L::jsonb)',
+      t_id('tenant'), 'CF Test Chemical', 'kg', 'raw', 5, '{"reorder_multiple":"abc"}'),
+    'must be a number');
+
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level, custom_fields)
+    values (t_id('tenant'), 'CF Test Chemical', 'kg', 'raw', 5, '{"reorder_multiple":25}'::jsonb) returning id into v_mat;
+  perform t_rec('a valid number value persists on the material',
+    (select (custom_fields->>'reorder_multiple')::numeric = 25 from materials where id = v_mat));
+
+  -- ---- G: a sale is created fine even though a sale-entity field is defined —
+  --    required isn't enforced at creation (create_sale has no way to supply
+  --    custom_fields), only through set_custom_fields afterwards ----
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (t_id('tenant'), 'CF Test Soap', 'pcs', 5, 100, 1.5) returning id into v_cfsoap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_cfsoap, 10, 40, 'Opening balance');
+  execute format('select public.create_sale(%L::uuid, current_date, null, 1000, %L::jsonb)', v_cust, t_items(v_cfsoap, 1, 100)) into v_sale;
+  perform t_rec('a sale saves with no custom fields even though one is defined on ''sale''',
+    (select custom_fields = '{}'::jsonb from sales_orders where id = v_sale));
+  perform t_su();
+
+  -- ---- H: set_custom_fields is the only way to fill in a sale's fields
+  --    afterwards (sales_orders has no direct write policy at all) ----
+  perform t_as(v_store);
+  perform t_err('inventory cannot set a sale''s custom fields',
+    format('select public.set_custom_fields(%L, %L::uuid, %L::jsonb)', 'sale', v_sale, '{"po_reference":"PO-778"}'),
+    'not allowed');
+  perform t_su();
+
+  perform t_as(v_cashier);
+  perform public.set_custom_fields('sale', v_sale, '{"po_reference":"PO-778","delivery_promised":"2026-10-01"}'::jsonb);
+  perform t_err('a bad date is rejected even through set_custom_fields',
+    format('select public.set_custom_fields(%L, %L::uuid, %L::jsonb)', 'sale', v_sale, '{"delivery_promised":"not-a-date"}'),
+    'valid date');
+  perform t_su();
+  -- Read as superuser, not the cashier — the cashier's own branch (Abuja)
+  -- can't see this Lagos-branch sale under branch-scoped RLS, even though
+  -- set_custom_fields (SECURITY DEFINER, role-checked only) could still
+  -- write it — same as every other cross-branch engine write in this app.
+  perform t_rec('set_custom_fields fills in a sale''s custom fields',
+    (select custom_fields = '{"po_reference":"PO-778","delivery_promised":"2026-10-01"}'::jsonb from sales_orders where id = v_sale));
+
+  -- ---- I: an unknown entity is rejected outright ----
+  perform t_as(v_admin);
+  perform t_err('an unknown entity is rejected',
+    format('select public.set_custom_fields(%L, %L::uuid, %L::jsonb)', 'widget', v_sale, '{}'),
+    'Unknown entity');
+
+  -- ---- J: deleting a definition strips its key everywhere, so the next
+  --    save on that row isn't blocked as "unknown field" ----
+  delete from custom_field_defs where tenant_id = t_id('tenant') and entity = 'customer' and key = 'loyalty_tier';
+  perform t_rec('deleting a definition strips its key from existing rows',
+    (select not (custom_fields ? 'loyalty_tier') and custom_fields ? 'cac_number' from customers where id = v_cust));
+  perform t_ok('a customer whose stale key was cleaned up can be saved again',
+    format('update customers set custom_fields = custom_fields || %L::jsonb where id = %L::uuid', '{"cac_number":"RC999999"}', v_cust));
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

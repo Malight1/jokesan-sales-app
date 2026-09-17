@@ -16,6 +16,9 @@ export interface Customer {
   credit_balance?: number;
   // Overrides their customer type's price list (migration 0025).
   price_list_id?: string | null;
+  // Custom fields (migration 0032). Optional so screens keep working
+  // against a database that hasn't run it yet.
+  custom_fields?: Record<string, any>;
 }
 // customer_types with its price list, for resolving a sale's price
 // (migration 0025) — lookups.customerTypes() stays the plain id/name form
@@ -26,12 +29,14 @@ export interface CustomerType extends Lookup {
 export interface Supplier {
   id: string; first_name: string | null; last_name: string | null;
   company_store: string | null; address: string | null; email: string | null; phone: string | null;
+  custom_fields?: Record<string, any>;
 }
 export interface Material {
   id: string; name: string; unit: string | null; type_of_material: string;
   qty_balance: number; min_stock_level: number; barcode: string | null;
   // Record the supplier's batch number and expiry on purchases (0022).
   track_batches?: boolean;
+  custom_fields?: Record<string, any>;
 }
 export interface FinishedGood {
   id: string; name: string; unit: string | null; qty_balance: number;
@@ -43,6 +48,7 @@ export interface FinishedGood {
   pick_rule?: 'fifo' | 'fefo';
   batch_prefix?: string | null;
   nafdac_no?: string | null;
+  custom_fields?: Record<string, any>;
 }
 export interface SalesOrder {
   id: string; transaction_date: string; customer_id: string | null;
@@ -56,6 +62,9 @@ export interface SalesOrder {
   // Cumulative return adjustment (0023). total_amount/gross_profit stay as
   // invoiced; these two track what's been given back since.
   returned_total?: number; returned_profit?: number;
+  // Set only after the fact, via customFields.set('sale', ...) — create_sale
+  // has no way to supply these at creation time (migration 0032).
+  custom_fields?: Record<string, any>;
 }
 export type PurchaseOrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';
 export interface PurchaseOrder {
@@ -285,6 +294,42 @@ export const productUnits = {
     if (r.error) throw new Error(r.error.message);
     return r.data as ProductUnit | null;
   },
+};
+
+// ============================================================
+// CUSTOM FIELDS (migration 0032, Phase 6e)
+//
+// One custom_field_defs row per field an admin defines; the value lives
+// in a custom_fields jsonb column on the entity's own row. Customers,
+// suppliers, finished goods and materials all have a direct write policy
+// already, so their custom fields are set as part of the normal
+// create/update call. A sale doesn't — sales_orders is RPC-only — so
+// customFields.set() (set_custom_fields) is the only way to fill in a
+// sale's fields, always after the fact.
+// ============================================================
+export type CustomFieldEntity = 'customer' | 'supplier' | 'finished_good' | 'material' | 'sale';
+export interface CustomFieldDef {
+  id: string; entity: CustomFieldEntity; key: string; label: string;
+  type: 'text' | 'number' | 'date' | 'select';
+  options: string[] | null;
+  required: boolean;
+  show_on_invoice: boolean;
+  sort_order: number;
+}
+
+export const customFieldDefs = {
+  list: () => run<CustomFieldDef[]>(supabase.from('custom_field_defs').select('*').order('entity').order('sort_order')),
+  forEntity: (entity: CustomFieldEntity) =>
+    run<CustomFieldDef[]>(supabase.from('custom_field_defs').select('*').eq('entity', entity).order('sort_order')),
+  create: (d: { entity: CustomFieldEntity; key: string; label: string; type: CustomFieldDef['type']; options?: string[] | null; required?: boolean; show_on_invoice?: boolean; sort_order?: number }) =>
+    run<CustomFieldDef>(supabase.from('custom_field_defs').insert(d).select().single()),
+  remove: (id: string) => del(supabase.from('custom_field_defs').delete().eq('id', id)),
+};
+
+export const customFields = {
+  // The only path for a sale; also usable for the other four entities.
+  set: (entity: CustomFieldEntity, entityId: string, fields: Record<string, any>) =>
+    rpcVoid('set_custom_fields', { p_entity: entity, p_entity_id: entityId, p_fields: fields }),
 };
 
 // ============================================================

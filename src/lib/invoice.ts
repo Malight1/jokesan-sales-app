@@ -19,6 +19,8 @@ export interface InvoiceData {
   vatRate?: number;
   tin?: string | null;
   logoDataUrl?: string | null;
+  // Sale-entity custom fields flagged show_on_invoice (migration 0032).
+  customFields?: { label: string; value: any }[];
 }
 
 // Async because jsPDF and its autotable plugin are now loaded on first use.
@@ -87,6 +89,10 @@ export async function generateInvoicePdf(d: InvoiceData) {
   let y = 51;
   if (d.customerPhone) { doc.text(d.customerPhone, 14, y); y += 5; }
   if (d.customerAddress) { doc.text(d.customerAddress, 14, y); y += 5; }
+  if (d.customFields && d.customFields.length > 0) {
+    y += 1;
+    d.customFields.forEach(f => { doc.text(`${f.label}: ${f.value}`, 14, y); y += 5; });
+  }
 
   // Items
   autoTable(doc, {

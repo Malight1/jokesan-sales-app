@@ -3,7 +3,8 @@ import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, L
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
   returns as returnsApi, storeCredit, payments as paymentsApi, deliveries as deliveriesApi, IntegrationStatus,
-  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType,
+  customFieldDefs, customFields as customFieldsApi,
+  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType, CustomFieldDef,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -19,6 +20,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
 import NumberInput from '../components/NumberInput';
 import ApprovalModal from '../components/ApprovalModal';
+import CustomFieldsSection from '../components/CustomFieldsSection';
 import './Sales.scss';
 import Modal from '../components/Modal';
 
@@ -57,6 +59,7 @@ export default function Sales() {
   const { data: integration } = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus(), []);
   const [creatingLinkFor, setCreatingLinkFor] = useState<string | null>(null);
   const { data: custTypes } = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled]);
+  const { data: saleFieldDefs } = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('sale').catch(() => []), []);
 
   const createMut = useMutation(salesApi.create);
   const payMut = useMutation(salesApi.addPayment);
@@ -216,6 +219,10 @@ export default function Sales() {
       const cust = customers?.find(c => c.id === s.customer_id);
       let logo: string | null = null;
       if (tenant?.logo_url) { try { logo = await branding.toDataUrl(tenant.logo_url); } catch { /* skip logo */ } }
+      const invoiceFields = (saleFieldDefs ?? [])
+        .filter(d => d.show_on_invoice)
+        .map(d => ({ label: d.label, value: detail.custom_fields?.[d.key] }))
+        .filter(f => f.value !== undefined && f.value !== null && f.value !== '');
       await generateInvoicePdf({
         companyName: tenant?.name ?? 'My Business',
         invoiceNo: invoiceNo(s),
@@ -229,6 +236,7 @@ export default function Sales() {
         total: s.total_amount, paid: s.amount_paid, balance: s.balance,
         subtotal: s.subtotal, vatAmount: s.vat_amount, vatRate: s.vat_rate,
         tin: tenant?.tin, logoDataUrl: logo,
+        customFields: invoiceFields.length > 0 ? invoiceFields : undefined,
       });
       toast.success('Invoice downloaded.');
     } catch (e: any) {
@@ -472,7 +480,7 @@ export default function Sales() {
 
       {viewId && (
         <SaleDetail id={viewId} onClose={() => setViewId(null)} customerName={customerName} productName={productName}
-                    isAdmin={isAdmin} onVoidedReturn={refetch} />
+                    isAdmin={isAdmin} onVoidedReturn={refetch} customFieldDefs={saleFieldDefs} />
       )}
 
       {voidFor && (
@@ -814,12 +822,13 @@ function CreateDeliveryModal({ sale, productName, customerAddress, onClose, onDo
 }
 
 // ---- Sale detail (fetches items + payments) ----
-function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedReturn }: {
+function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedReturn, customFieldDefs: fieldDefs }: {
   id: string; onClose: () => void;
   customerName: (id: string | null) => string;
   productName: (id: string) => string;
   isAdmin: boolean;
   onVoidedReturn: () => void;
+  customFieldDefs?: CustomFieldDef[] | null;
 }) {
   const { data, loading, error, refetch } = useQuery<any>(() => salesApi.detail(id), [id]);
   const { data: creditNotes, refetch: refetchReturns } = useQuery(() => returnsApi.sales.forSale(id), [id]);
@@ -828,6 +837,24 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
   const [downloading, setDownloading] = useState<string | null>(null);
   const voidMut = useMutation(returnsApi.sales.void);
   const [voidTarget, setVoidTarget] = useState<{ id: string; doc_no: string | null } | null>(null);
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
+  const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
+  const saveFieldsMut = useMutation((v: Record<string, any>) => customFieldsApi.set('sale', id, v));
+
+  useEffect(() => {
+    if (data && !customFieldsDirty) setCustomFieldValues(data.custom_fields ?? {});
+  }, [data, customFieldsDirty]);
+
+  const saveCustomFields = async () => {
+    const res = await saveFieldsMut.mutate(customFieldValues);
+    if (res !== null) {
+      toast.success('Custom fields saved.');
+      setCustomFieldsDirty(false);
+      refetch();
+    } else {
+      toast.error(saveFieldsMut.error ?? 'Could not save custom fields.');
+    }
+  };
 
   const confirmVoid = async () => {
     if (!voidTarget) return;
@@ -942,6 +969,18 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
                       ))}
                     </tbody>
                   </table>
+                </>
+              )}
+              {fieldDefs && fieldDefs.length > 0 && (
+                <>
+                  <CustomFieldsSection defs={fieldDefs} values={customFieldValues}
+                    onChange={v => { setCustomFieldValues(v); setCustomFieldsDirty(true); }} />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button type="button" className="btn-secondary btn-sm" disabled={!customFieldsDirty || saveFieldsMut.pending}
+                            onClick={saveCustomFields}>
+                      {saveFieldsMut.pending ? 'Saving…' : 'Save custom fields'}
+                    </button>
+                  </div>
                 </>
               )}
             </>

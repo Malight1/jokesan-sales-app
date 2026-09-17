@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, X, Package, Pencil, Trash2, ScanLine, Wand2, Printer, SlidersHorizontal } from 'lucide-react';
-import { materials as materialsApi, stock, Material, StockLevel } from '../lib/api';
+import { materials as materialsApi, stock, customFieldDefs, Material, StockLevel, CustomFieldDef } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -13,6 +13,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
 import ProductUnitsSection from '../components/ProductUnitsSection';
+import CustomFieldsSection from '../components/CustomFieldsSection';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
@@ -27,6 +28,7 @@ const emptyForm = {
   // Batch and expiry (migration 0022): records the supplier's batch and
   // expiry on each purchase, and picks earliest-expiry-first in production.
   track_batches: false,
+  custom_fields: {} as Record<string, any>,
 };
 
 export default function Inventory() {
@@ -37,6 +39,7 @@ export default function Inventory() {
   const { multi, myBranchId, myBranchName } = useBranches();
   const { data: rows, loading, error, refetch } = useQuery<Material[]>(() => materialsApi.list(), []);
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(null), []);
+  const { data: customFieldDefsData } = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('material').catch(() => []), []);
   const createMut = useMutation(materialsApi.create);
   const updateMut = useMutation((id: string, m: Partial<Material>) => materialsApi.update(id, m));
   const removeMut = useMutation(materialsApi.remove);
@@ -64,23 +67,25 @@ export default function Inventory() {
     setForm({
       name: m.name, unit: m.unit ?? '', type_of_material: m.type_of_material,
       min_stock_level: m.min_stock_level, barcode: m.barcode ?? '', openingQty: 0, openingCost: 0,
-      track_batches: !!m.track_batches,
+      track_batches: !!m.track_batches, custom_fields: m.custom_fields ?? {},
     });
     setShowModal(true);
   };
 
   const reload = () => { refetch(); levelsQ.refetch(); };
 
-  // The track_batches column exists once migration 0022 has run; until
-  // then, don't send it (Postgres would reject the whole save).
+  // The track_batches/custom_fields columns exist once their migrations
+  // have run; until then, don't send them (Postgres would reject the save).
   const schemaHasBatches = (rows ?? []).some(r => 'track_batches' in r);
+  const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { openingQty, openingCost, barcode, track_batches, ...editable } = form;
+    const { openingQty, openingCost, barcode, track_batches, custom_fields, ...editable } = form;
     const payload = {
       ...editable, barcode: barcode.trim() || null,
       ...(schemaHasBatches || track_batches ? { track_batches } : {}),
+      ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
     };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (!res) {
@@ -280,6 +285,8 @@ export default function Inventory() {
                 </label>
 
                 {editRow && <ProductUnitsSection productKind="material" productId={editRow.id} baseUnitLabel={form.unit} />}
+                <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}
+                  onChange={cf => setForm(f => ({ ...f, custom_fields: cf }))} />
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

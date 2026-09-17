@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6d — delivery notes and waybills — added; not yet run live).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6e — custom fields — added; not yet run live).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6d as of 17 September 2026, but its migration (`0031`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6e as of 17 September 2026, but its migration (`0032`) hasn't been run live yet — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,15 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0030` are live (the user confirmed `0030` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6d (delivery notes) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
+Migrations `0017`–`0031` are live (the user confirmed `0031` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6e (custom fields) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0030`, confirmed by the user. **`0031_deliveries.sql` has NOT been run yet.**
-- **This means the live app right now has a "Deliveries" nav link and a "Create delivery note" action on Sales that will fail** (the `deliveries`/`delivery_items` tables and the `delivery-proofs` storage bucket don't exist yet) until `0031` is run. Everything else is unaffected. Run `0031` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file (it does create a new private Storage bucket via SQL, same as the `logos` bucket already does).
+- **Database:** the live Supabase project has run `0001` through `0031`, confirmed by the user. **`0032_custom_fields.sql` has NOT been run yet.**
+- **This means the live app right now has a "Custom Fields" tab under Settings, and a custom-fields section on the Customers/Suppliers/Finished Goods/Materials forms and the Sale detail screen, that will fail** (the `custom_field_defs` table and `custom_fields` columns don't exist yet) until `0032` is run. Everything else is unaffected — every new query is wrapped in `.catch(() => [])`, so the forms themselves still work, they just won't show a custom-fields section. Run `0032` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0031` has actually been run live before assuming Deliveries work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6e — custom fields — is next, or 6f if reprioritized). Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0032` has actually been run live before assuming custom fields work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6f — audit log viewer — is next, or Phase 7 if reprioritized). Verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 271/271, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
+Current state: DB harness 286/286, tsc clean, jest 103/103, build succeeds at ~154 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -101,9 +101,10 @@ Current state: DB harness 271/271, tsc clean, jest 103/103, build succeeds at ~1
 | 0028_quotes.sql | Quotes and proforma invoices (`quotes`/`quote_items`, `create_quote()`, `update_quote_status()`, `convert_quote()`), `tenants.bank_details` | ✅ yes |
 | 0029_purchase_orders.sql | Order before receiving (`purchase_order_lines`, `goods_receipts`, `create_purchase_order()`, `receive_purchase_order()`, `cancel_purchase_order()`), advance payments, `suppliers.lead_time_days` | ✅ yes |
 | 0030_units_of_measure.sql | Units of measure (`product_units`, `resolve_uom_factor()`), `uom_id`/`uom_qty`/`uom_factor` on `sale_items`/`purchase_items` | ✅ yes |
-| 0031_deliveries.sql | Delivery notes and waybills (`deliveries`, `delivery_items`, `create_delivery_note()`/`dispatch_delivery()`/`mark_delivery_delivered()`/`mark_delivery_failed()`), private `delivery-proofs` Storage bucket | ❌ **run this next** |
+| 0031_deliveries.sql | Delivery notes and waybills (`deliveries`, `delivery_items`, `create_delivery_note()`/`dispatch_delivery()`/`mark_delivery_delivered()`/`mark_delivery_failed()`), private `delivery-proofs` Storage bucket | ✅ yes |
+| 0032_custom_fields.sql | Custom fields (`custom_field_defs`, `custom_fields` jsonb on customers/suppliers/finished_goods/materials/sales_orders, `validate_custom_fields()` trigger, `set_custom_fields()` RPC, `cleanup_deleted_custom_field()` trigger) | ❌ **run this next** |
 
-**0017 → 0031 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0031` need nothing extra.
+**0017 → 0032 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` through `0032` need nothing extra.
 
 ## Key files
 
@@ -124,6 +125,7 @@ Current state: DB harness 271/271, tsc clean, jest 103/103, build succeeds at ~1
 - `src/pages/Purchases.tsx` — also exports `OrderMaterialsModal`/`ReceivePurchaseModal` (migration 0029, Phase 6b) alongside the pre-existing `SupplierReturnModal`/`PurchaseDetail`. "Quick Purchase" (immediate receipt) and "Order Stock" (ordered before received) are two separate buttons on the same page, not two different pages.
 - `src/components/ProductUnitsSection.tsx` — units of measure management (migration 0030, Phase 6c), shared by the Finished Goods and Materials product-edit modals. Only rendered when editing an existing product (a unit needs a real `product_id`).
 - `src/pages/Deliveries.tsx` — delivery notes and waybills (migration 0031, Phase 6d). `Sales.tsx` also has a `CreateDeliveryModal` (unexported, unlike `ReturnModal`) behind its "Create delivery note" row action. `generateWaybillPdf` lives in `src/lib/invoice.ts`.
+- `src/components/CustomFieldsSection.tsx` — custom fields (migration 0032, Phase 6e), shared by the Customers/Suppliers/Finished Goods/Materials forms and the Sale detail screen. Definitions are managed under Settings → Custom Fields (`CustomFieldsTab` in `Settings.tsx`); `customFieldDefs`/`customFields` in `src/lib/api.ts` wrap `custom_field_defs` and the `set_custom_fields()` RPC — the latter is the only way to set a sale's fields, since `sales_orders` has no direct write policy.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
@@ -145,10 +147,10 @@ Current state: DB harness 271/271, tsc clean, jest 103/103, build succeeds at ~1
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
-| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields, audit-log viewer | 🟡 partial — **6e next up** |
+| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure (**6c, 0030**), delivery notes (**6d, 0031**), custom fields (**6e, 0032**), audit-log viewer | 🟡 partial — **6f next up** |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0032`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0033`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -205,6 +207,16 @@ Stock still leaves at the point of sale, exactly as always — a delivery note i
 - **Frontend:** a new `/deliveries` page (list + status badges + Dispatch/Mark delivered/Mark failed actions, a signed-URL photo upload on delivery, and a waybill PDF with no prices and space for a signature — `generateWaybillPdf` in `src/lib/invoice.ts`). "Create delivery note" is a row action on Sales, matching the plan's flow (create *from* a sale, not from a standalone Deliveries form).
 - **Deliberately not built:** a `/deliveries` board/kanban view (it's a plain status-badged list, matching the same scope call made for Purchases in 6b) and custom fields on a delivery.
 
+### Phase 6e, as shipped (0032) — custom fields
+
+An admin defines a field once (Settings → Custom Fields — key, label, type, and for a `select` field its options), and it shows up right away on that entity's own form. There's no per-field migration: the value lives in a single `custom_fields` jsonb column already sitting on customers, suppliers, finished goods, materials and sales orders.
+
+- **Engine:** `custom_field_defs` is a plain admin-only config table, same RLS shape as `customer_types`/`payment_types` (0017) — read by all four roles, written only by admin. `validate_custom_fields()` (a `before insert or update of custom_fields` trigger on all five tables) rejects an unknown key outright, checks a `number`/`date`/`select` value's type, and enforces `required` — but **only** for the four master-data entities, not a sale. `cleanup_deleted_custom_field()` (an `after delete` trigger on `custom_field_defs`) strips a removed field's key from every row that has it, so deleting a definition can't brick a later save of some other field on the same row by leaving a now-"unknown" key behind.
+- **A sale's fields are set after the fact, never at creation.** `sales_orders` has no direct write policy (RPC-only, per 0017), and `create_sale` — already rewritten three times for batches/returns/pricing — has no parameter for custom fields. Retrofitting it wasn't worth the risk this late in a long session, so `set_custom_fields(p_entity, p_entity_id, p_fields)` is the one RPC that fills them in afterwards; it's also the call the frontend uses for the other four entities, which otherwise just include `custom_fields` in their normal `create`/`update` payload since they already have a direct write policy.
+- **Not DB-plan-gated, matching the established pattern since Phase 5.** `feature_level()` (0021) maps `custom_fields` to the Business plan, and `src/lib/features.ts` mirrors that for the Settings → Custom Fields tab's upsell card — but neither `set_custom_fields()` nor the direct-write path calls `require_feature()`, the same as every RPC added in 0027 through 0031. Only Phases 0–3's RPCs (`create_purchase`, batch/expiry, returns, pricing) actually enforce a plan server-side; this migration follows the newer, UI-only-gating precedent rather than introducing a third pattern.
+- **Frontend:** a `CustomFieldsSection` component (shared by the Customers, Suppliers, Finished Goods and Materials forms, and the Sale detail screen) renders one input per definition; Settings → Custom Fields manages the definitions themselves. A sale field flagged `show_on_invoice` prints on the invoice PDF (`generateInvoicePdf`'s new `customFields` array in `src/lib/invoice.ts`).
+- **Deliberately not built** (see FEATURE_PLAN.md's own Phase 6e note): DataTable optional columns for a custom field, and including custom fields in the CSV/Excel exporters — both are generic features the app doesn't have anywhere yet (no table has configurable columns, and `exporters.ts` takes an explicit column list per call site), not something specific to this phase to bolt on affordably in one sitting.
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).
@@ -224,6 +236,9 @@ Stock still leaves at the point of sale, exactly as always — a delivery note i
 - No "Orders"/"Receipts" tab split on Purchases (Phase 6b) — everything is one list with a status column; no PO PDF/WhatsApp send to the supplier; no inventory-dashboard "open purchases" card.
 - A goods receipt's unit cost defaults to the order line's quoted cost but can be edited at receiving time (a supplier's invoice price sometimes differs from the quote) — there's no flag or report yet showing which receipts didn't match what was ordered.
 - Voiding a "Quick purchase" (`void_purchase`) is unchanged and still admin-only; there's no equivalent void for an already-received goods receipt — only `cancel_purchase_order()` (which just stops future receiving) exists for the new ordered path.
+- No DataTable optional columns or CSV/Excel export inclusion for custom fields (Phase 6e) — see that section above.
+- A required custom field on a sale isn't enforced anywhere, by design (see Phase 6e above) — a cashier can leave it blank forever unless a report or reminder is built later to flag it.
+- `custom_field_defs.type` can be changed after values already exist under it without re-validating those existing rows — the next save of that row is what would first surface a now-mismatched value.
 
 ## How the user works
 

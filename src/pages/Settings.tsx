@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
-  TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
+  customFieldDefs, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
+  CustomFieldDef, CustomFieldEntity,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -16,7 +17,7 @@ import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
 
-type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes';
+type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes' | 'custom_fields';
 
 const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'business', label: 'Business & Profile', icon: <Building2 size={15} /> },
@@ -27,6 +28,7 @@ const ALL_TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'types', label: 'Types', icon: <Tags size={15} /> },
   { id: 'pricing', label: 'Pricing', icon: <Tag size={15} /> },
   { id: 'recipes', label: 'Recipes (BOM)', icon: <FlaskConical size={15} /> },
+  { id: 'custom_fields', label: 'Custom Fields', icon: <ListPlus size={15} /> },
 ];
 
 const roleOptions = [
@@ -68,6 +70,7 @@ export default function Settings() {
       {tab === 'types' && <TypesTab />}
       {tab === 'pricing' && <PricingTab />}
       {tab === 'recipes' && <RecipesTab />}
+      {tab === 'custom_fields' && <CustomFieldsTab />}
     </div>
   );
 }
@@ -1523,6 +1526,173 @@ function ApprovalPinCard() {
           {saveMut.pending ? 'Saving…' : 'Set PIN'}
         </button>
       </form>
+    </div>
+  );
+}
+
+// ============================================================
+// CUSTOM FIELDS (migration 0032, Phase 6e)
+// ============================================================
+const ENTITY_LABEL: Record<CustomFieldEntity, string> = {
+  customer: 'Customers', supplier: 'Suppliers', finished_good: 'Finished Goods', material: 'Materials', sale: 'Sales',
+};
+const ENTITY_ORDER: CustomFieldEntity[] = ['customer', 'supplier', 'finished_good', 'material', 'sale'];
+
+function CustomFieldsTab() {
+  const toast = useToast();
+  const { tenant } = useAuth();
+  const enabled = hasFeature(tenant?.plan, 'custom_fields');
+  const { data: defs, loading, refetch } = useQuery<CustomFieldDef[]>(() => customFieldDefs.list(), []);
+  const createMut = useMutation(customFieldDefs.create);
+  const removeMut = useMutation(customFieldDefs.remove);
+
+  const [entity, setEntity] = useState<CustomFieldEntity>('customer');
+  const [key, setKey] = useState('');
+  const [label, setLabel] = useState('');
+  const [type, setType] = useState<CustomFieldDef['type']>('text');
+  const [options, setOptions] = useState('');
+  const [required, setRequired] = useState(false);
+  const [showOnInvoice, setShowOnInvoice] = useState(false);
+  const [deleteDef, setDeleteDef] = useState<CustomFieldDef | null>(null);
+
+  const resetForm = () => { setEntity('customer'); setKey(''); setLabel(''); setType('text'); setOptions(''); setRequired(false); setShowOnInvoice(false); };
+
+  const addField = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const slug = key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '');
+    if (!slug || !label.trim()) { toast.error('Enter a key and a label.'); return; }
+    if (type === 'select' && !options.trim()) { toast.error('List at least one option, separated by commas.'); return; }
+    const res = await createMut.mutate({
+      entity, key: slug, label: label.trim(), type,
+      options: type === 'select' ? options.split(',').map(o => o.trim()).filter(Boolean) : null,
+      required, show_on_invoice: entity === 'sale' ? showOnInvoice : false,
+    });
+    if (res) { toast.success(`${res.label} added.`); resetForm(); refetch(); }
+    else toast.error(createMut.error ?? 'Could not add that field — is the key already used on this entity?');
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteDef) return;
+    const res = await removeMut.mutate(deleteDef.id);
+    if (res !== null) { toast.success(`${deleteDef.label} removed.`); refetch(); }
+    else toast.error(removeMut.error ?? 'Could not remove it.');
+    setDeleteDef(null);
+  };
+
+  if (!enabled) {
+    return (
+      <div className="card" style={{ maxWidth: 520, textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+        <ListPlus size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
+        <h3 style={{ marginBottom: '0.35rem' }}>Custom fields</h3>
+        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+          Track things StockFlow doesn't have a column for — a CAC number, a shelf position, a delivery
+          reference — on customers, suppliers, products and sales, on the {planFor('custom_fields')} plan and above.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <h3 style={{ marginBottom: '0.25rem' }}>Add a Custom Field</h3>
+        <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
+          It appears on that entity's form right away. "Show on invoice" only applies to a sale field.
+        </p>
+        <form onSubmit={addField}>
+          <div className="grid-2">
+            <div className="form-group">
+              <label>Applies to</label>
+              <select value={entity} onChange={e => setEntity(e.target.value as CustomFieldEntity)}>
+                {ENTITY_ORDER.map(en => <option key={en} value={en}>{ENTITY_LABEL[en]}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Label</label>
+              <input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. CAC Number" />
+            </div>
+          </div>
+          <div className="grid-2">
+            <div className="form-group">
+              <label>Key</label>
+              <input value={key} onChange={e => setKey(e.target.value)} placeholder="e.g. cac_number" />
+              <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Lowercase, no spaces — used internally.</small>
+            </div>
+            <div className="form-group">
+              <label>Type</label>
+              <select value={type} onChange={e => setType(e.target.value as CustomFieldDef['type'])}>
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="date">Date</option>
+                <option value="select">Select (choose one)</option>
+              </select>
+            </div>
+          </div>
+          {type === 'select' && (
+            <div className="form-group">
+              <label>Options (comma-separated)</label>
+              <input value={options} onChange={e => setOptions(e.target.value)} placeholder="e.g. Bronze, Silver, Gold" />
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+              <input type="checkbox" style={{ width: 'auto' }} checked={required} onChange={e => setRequired(e.target.checked)} />
+              Required{entity === 'sale' ? ' (only checked when filled in from the sale detail screen)' : ''}
+            </label>
+            {entity === 'sale' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={showOnInvoice} onChange={e => setShowOnInvoice(e.target.checked)} />
+                Show on invoice
+              </label>
+            )}
+          </div>
+          <button className="btn-primary" type="submit" disabled={createMut.pending}>
+            <Plus size={15} /> Add Field
+          </button>
+        </form>
+      </div>
+
+      {loading ? <Loading /> : ENTITY_ORDER.map(en => {
+        const rows = (defs ?? []).filter(d => d.entity === en);
+        if (rows.length === 0) return null;
+        return (
+          <div className="card" key={en} style={{ marginBottom: '1.25rem' }}>
+            <h3 style={{ marginBottom: '0.75rem' }}>{ENTITY_LABEL[en]}</h3>
+            <div className="lookup-list">
+              {rows.map(d => (
+                <div key={d.id} className="lookup-row">
+                  <span style={{ flex: 1 }}>
+                    <strong>{d.label}</strong>
+                    <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}> · {d.key} · {d.type}{d.required ? ' · required' : ''}{d.show_on_invoice ? ' · on invoice' : ''}</span>
+                    {d.type === 'select' && d.options && (
+                      <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}> ({d.options.join(', ')})</span>
+                    )}
+                  </span>
+                  <div className="lookup-row-actions">
+                    <button className="lookup-action danger" onClick={() => setDeleteDef(d)} title="Remove" aria-label={`Remove ${d.label}`}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {(defs ?? []).length === 0 && !loading && (
+        <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No custom fields yet — add your first one above.</p>
+      )}
+
+      {deleteDef && (
+        <ConfirmDialog
+          title="Remove Custom Field"
+          message={<>Remove <strong>{deleteDef.label}</strong>? Values already saved under this key are cleared from every record, and the field disappears from every form.</>}
+          confirmLabel="Remove"
+          pending={removeMut.pending}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteDef(null)}
+        />
+      )}
     </div>
   );
 }

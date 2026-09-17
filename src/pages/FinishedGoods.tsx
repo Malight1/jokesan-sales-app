@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, X, Pencil, Trash2, ScanLine, Wand2, Printer, SlidersHorizontal } from 'lucide-react';
-import { finishedGoods as goodsApi, stock, FinishedGood, StockLevel } from '../lib/api';
+import { finishedGoods as goodsApi, stock, customFieldDefs, FinishedGood, StockLevel, CustomFieldDef } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -13,6 +13,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
 import ProductUnitsSection from '../components/ProductUnitsSection';
+import CustomFieldsSection from '../components/CustomFieldsSection';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
@@ -26,6 +27,7 @@ const emptyForm = {
   openingQty: 0, openingCost: 0,
   // Batch and expiry (migration 0022)
   track_batches: false, shelf_life_days: 0, pick_rule: 'fifo' as 'fifo' | 'fefo', batch_prefix: '', nafdac_no: '',
+  custom_fields: {} as Record<string, any>,
 };
 
 export default function FinishedGoods() {
@@ -40,6 +42,7 @@ export default function FinishedGoods() {
   const { multi, myBranchId, myBranchName } = useBranches();
   const { data: rows, loading, error, refetch } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const levelsQ = useQuery<StockLevel[]>(() => stock.levels(null), []);
+  const { data: customFieldDefsData } = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('finished_good').catch(() => []), []);
   const createMut = useMutation(goodsApi.create);
   const updateMut = useMutation((id: string, g: Partial<FinishedGood>) => goodsApi.update(id, g));
   const removeMut = useMutation(goodsApi.remove);
@@ -65,7 +68,7 @@ export default function FinishedGoods() {
       name: g.name, unit: g.unit ?? 'pcs', selling_price: g.selling_price, min_stock_level: g.min_stock_level,
       default_markup: g.default_markup, barcode: g.barcode ?? '', openingQty: 0, openingCost: 0,
       track_batches: !!g.track_batches, shelf_life_days: g.shelf_life_days ?? 0, pick_rule: g.pick_rule ?? 'fifo',
-      batch_prefix: g.batch_prefix ?? '', nafdac_no: g.nafdac_no ?? '',
+      batch_prefix: g.batch_prefix ?? '', nafdac_no: g.nafdac_no ?? '', custom_fields: g.custom_fields ?? {},
     });
     setShowModal(true);
   };
@@ -75,10 +78,11 @@ export default function FinishedGoods() {
   // Batch columns exist once migration 0022 has run; until then, don't send
   // them (Postgres would reject the whole save).
   const schemaHasBatches = (rows ?? []).some(r => 'track_batches' in r);
+  const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { openingQty, openingCost, barcode, track_batches, shelf_life_days, pick_rule, batch_prefix, nafdac_no, ...editable } = form;
+    const { openingQty, openingCost, barcode, track_batches, shelf_life_days, pick_rule, batch_prefix, nafdac_no, custom_fields, ...editable } = form;
     const batchFields = {
       track_batches, pick_rule,
       shelf_life_days: shelf_life_days > 0 ? Math.round(shelf_life_days) : null,
@@ -89,6 +93,7 @@ export default function FinishedGoods() {
     const payload = {
       ...editable, barcode: barcode.trim() || null,
       ...(schemaHasBatches || touchedBatch ? batchFields : {}),
+      ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
     };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (!res) {
@@ -293,6 +298,8 @@ export default function FinishedGoods() {
                 </div>
 
                 {editRow && <ProductUnitsSection productKind="finished_good" productId={editRow.id} baseUnitLabel={form.unit} />}
+                <CustomFieldsSection defs={customFieldDefsData} values={form.custom_fields}
+                  onChange={cf => setForm(f => ({ ...f, custom_fields: cf }))} />
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
