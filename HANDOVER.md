@@ -1,6 +1,6 @@
 # StockFlow — Handover Doc
 
-Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6a — quotes and proforma invoices — added; not yet run live).
+Paste this file's path (or contents) into a new Claude Code chat to resume work with full context. Last updated: 17 September 2026 (Phase 6b — purchase orders — added; not yet run live).
 
 ## What this is
 
@@ -8,7 +8,7 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 **Location:** `/Users/mubby/Documents/jokesan-sales-app`
 **Repo:** https://github.com/Malight1/jokesan-sales-app
-**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6a as of 17 September 2026, but its migration (`0028`) hasn't been run live yet — see "Where things actually stand" below.
+**Deploy:** Vercel, auto-deploys `main` (check `vercel.json` for the SPA rewrite). Production code is caught up through Phase 6b as of 17 September 2026, but its migration (`0029`) hasn't been run live yet — see "Where things actually stand" below.
 **Owner:** oguntunde722@gmail.com. A separate account, oguntunde123@gmail.com, is the pitch/demo account — sample data must only ever go there.
 
 ## Hard constraints — do not violate
@@ -25,15 +25,15 @@ Paste this file's path (or contents) into a new Claude Code chat to resume work 
 
 ## Where things actually stand (17 September 2026)
 
-Migrations `0017`–`0027` are live, and `main`'s **code** is now caught up through Phase 6a (quotes) — but `main`'s workflow changed to commit-directly (rule 9 above), so this is the first time the frontend has shipped slightly AHEAD of its own migration.
+Migrations `0017`–`0028` are live (the user confirmed `0028` ran right after it shipped), and `main`'s **code** is now caught up through Phase 6b (purchase orders) — one migration ahead again, since the workflow is commit-directly with no branch buffer (rule 9 above).
 
 - **Git:** `main` only — the two old feature branches are merged and untouched.
-- **Database:** the live Supabase project has run `0001` through `0027`, confirmed by the user. **`0028_quotes.sql` has NOT been run yet.**
-- **This means the live app right now has a "Quotes" nav link and `/quotes` route whose queries will fail** (the `quotes`/`quote_items` tables don't exist yet) until `0028` is run. Run it in the Supabase SQL editor as soon as possible after this deploy — no Vault, no Edge Function, no extension involved this time, just the one file.
+- **Database:** the live Supabase project has run `0001` through `0028`, confirmed by the user. **`0029_purchase_orders.sql` has NOT been run yet.**
+- **This means the live app right now has "Order Stock"/"Receive"/"Cancel order" actions on Purchases whose queries will fail** (the `purchase_order_lines`/`goods_receipts` tables and new `purchase_orders` columns don't exist yet) until `0029` is run. The existing "Quick Purchase" flow is unaffected — it only touches columns that already exist. Run `0029` in the Supabase SQL editor as soon as possible — no Vault, no Edge Function, no extension involved, just the one file.
 - `0026`'s shift requirement remains **opt-in** (`shift_rules.required_for` defaults to empty) — turning on "Require an open till before selling" under Settings → Business is a separate, deliberate step for whoever wants it.
 - Each business that connects Paystack still has to paste the `payments-webhook` function's URL into their own Paystack dashboard by hand (Settings → API Keys & Webhooks) — there's no auto-registration step yet (see "Known gaps deferred so far").
 
-**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0028` has actually been run live before assuming the Quotes feature works for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6b — purchase orders — is next). Verify with the test suite (below) before and after each push, same as always.
+**What to do with a fresh session:** read this file, then run `git log --oneline -15` to see recent work, then check whether `0029` has actually been run live before assuming Purchase Orders work for real users — `main`'s code and the live database can now be one migration apart, since there's no branch buffer anymore. Keep building forward per "Phase status" below (Phase 6c — units of measure — is next, or 6d/6e/6f if reprioritized). Verify with the test suite (below) before and after each push, same as always.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ CI=true npm run build   # uses --max-old-space-size=8192; don't strip that flag,
 rm -rf build            # clean up — build/ isn't committed
 ```
 
-Current state: DB harness 235/235, tsc clean, jest 103/103, build succeeds at ~153 kB gzip (main bundle).
+Current state: DB harness 253/253, tsc clean, jest 103/103, build succeeds at ~153 kB gzip (main bundle).
 
 ## Migration reference (`supabase/migrations/`)
 
@@ -98,9 +98,10 @@ Current state: DB harness 235/235, tsc clean, jest 103/103, build succeeds at ~1
 | 0025_pricing.sql | Price lists, quantity breaks, per-role discount limits with manager-PIN approval, below-cost warning | ✅ yes |
 | 0026_shifts.sql | Registers, shifts, cash-up (`open_shift`/`close_shift`/`add_cash_movement`/`x_report`/`z_report`), `payment_types.method_group` | ✅ yes |
 | 0027_payments.sql | Pay links + webhook confirmation (`payment_integrations`/`payment_links`/`incoming_payments`, `integration_status()`, `apply_incoming_payment()`), Vault-wrapping RPCs | ✅ yes |
-| 0028_quotes.sql | Quotes and proforma invoices (`quotes`/`quote_items`, `create_quote()`, `update_quote_status()`, `convert_quote()`), `tenants.bank_details` | ❌ **run this next** |
+| 0028_quotes.sql | Quotes and proforma invoices (`quotes`/`quote_items`, `create_quote()`, `update_quote_status()`, `convert_quote()`), `tenants.bank_details` | ✅ yes |
+| 0029_purchase_orders.sql | Order before receiving (`purchase_order_lines`, `goods_receipts`, `create_purchase_order()`, `receive_purchase_order()`, `cancel_purchase_order()`), advance payments, `suppliers.lead_time_days` | ❌ **run this next** |
 
-**0017 → 0028 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` needs nothing extra.
+**0017 → 0029 must run in that exact order**, in one sitting if possible — several depend on functions or columns the previous one added. Each file's own header comment states what it must run after; trust the file over this table if they ever disagree. `0027` additionally needed the `vault` extension enabled (Database → Extensions → `supabase_vault`) — already confirmed done. `0028` and `0029` need nothing extra.
 
 ## Key files
 
@@ -118,6 +119,7 @@ Current state: DB harness 235/235, tsc clean, jest 103/103, build succeeds at ~1
 - `src/components/ApprovalModal.tsx`, `src/components/LinePriceModal.tsx` — manager-PIN approval and per-line price/discount editing, shared between POS and Sales.
 - `src/pages/Sales.tsx` — exports `ReturnModal`, reused by `POS.tsx` for the "Returns" counter flow. If you need the return UI somewhere else, import it from here rather than duplicating it.
 - `src/pages/Quotes.tsx` — quotes and proforma invoices (migration 0028). `generateQuotePdf` lives in `src/lib/invoice.ts` alongside the invoice/credit-note generators.
+- `src/pages/Purchases.tsx` — also exports `OrderMaterialsModal`/`ReceivePurchaseModal` (migration 0029, Phase 6b) alongside the pre-existing `SupplierReturnModal`/`PurchaseDetail`. "Quick Purchase" (immediate receipt) and "Order Stock" (ordered before received) are two separate buttons on the same page, not two different pages.
 - `src/pages/Dashboard.tsx` — exports `CashierDashboard`/`InventoryDashboard`/`OwnerDashboard`/`DashboardView`, one genuinely different layout per role, all driven by the single `dashboard_summary()` payload.
 - `src/dev/DashboardPreview.tsx` (route `/__dev/dashboards`) — renders all three dashboards from fixture data with no sign-in needed. Registered in `App.tsx` only when `NODE_ENV === 'development'`; confirmed stripped from the production bundle by grepping the built JS for the chunk name.
 - `supabase/tests/` — `harness.js` (the PGlite runner), `pre.sql` (a legacy pre-0020 tenant, for backfill/migration testing), `tests.sql` (the whole scenario suite — 220+ assertions and counting), `README.md`.
@@ -139,10 +141,10 @@ Current state: DB harness 235/235, tsc clean, jest 103/103, build succeeds at ~1
 | 3 | Price lists, quantity breaks, per-role discount limits with manager PIN, below-cost warning | ✅ done (0025) |
 | 4 | Shifts and cash-up (X/Z reports) | ✅ done (0026) |
 | 5 | Automatic payment confirmation — **5a (pay links) done (0027)**; 5b (dedicated virtual accounts) and 5c (bank feed) not started | 🟡 partial |
-| 6 | Quotes (**6a done, 0028**), real purchase orders, units of measure, delivery notes, custom fields, audit-log viewer | 🟡 partial — **6b next up** |
+| 6 | Quotes (**6a, 0028**), real purchase orders (**6b, 0029**), units of measure, delivery notes, custom fields, audit-log viewer | 🟡 partial — **6c next up** |
 | 7 | Smart reorder suggestions, an AI assistant over the app's own data, e-invoicing (NRS) readiness | not started |
 
-Next migration number is **`0029`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
+Next migration number is **`0030`** (the plan document's original numbering assumed Phase 2 would be one migration; it became two — `0023` + `0024` — so everything from Phase 5 onward is shifted by one versus what `FEATURE_PLAN.md` literally says. Trust the migrations directory, not the plan doc's file names, for what number to use next).
 
 ### Phase 4, as shipped (0026)
 
@@ -171,6 +173,17 @@ A quote is its own document — it never touches stock or money. `convert_quote(
 - **Frontend:** new `/quotes` page (`src/pages/Quotes.tsx`) — list, a create modal reusing the same line-item editor shape as Sales, per-quote status actions, "Convert to sale" (with the same manager-PIN modal Sales uses), a PDF (`generateQuotePdf` in `src/lib/invoice.ts`, titled "QUOTATION" or "PROFORMA INVOICE"), and WhatsApp send. `tenants.bank_details` (Settings → Business) prints only on a proforma.
 - **Deliberately not built:** the owner dashboard's "open quote value" card that FEATURE_PLAN.md's Phase 6a section mentions.
 
+### Phase 6b, as shipped (0029) — order before receiving
+
+"Quick purchase" (`create_purchase`) is unchanged — a supplier who delivers on the spot still gets stock and cost recorded in one step, now with a real `PO-` number too. The new path is for a supplier who ships later: `create_purchase_order()` places the order (no stock, nothing owed — you don't owe for goods you haven't got), then one or more `receive_purchase_order()` calls create the actual FIFO layers as things arrive, each its own `GRN-` numbered document.
+
+- **What you owe grows only by what's actually received**, never by what was merely ordered. `purchase_orders.total_amount`/`balance` start at 0 when an order is placed and increase with each receipt — a PO's "order value" (what the plan's schema sketch calls the total) only exists as the sum of `purchase_order_lines.qty_ordered × unit_cost`, computed on demand, not stored as the accounting total.
+- **Cancelling an order keeps what already arrived.** A partially-received order that gets cancelled stops accepting further receipts; the FIFO layers from what was already received are untouched.
+- **Advance payments:** `record_purchase_payment()`'s old "can't pay more than the balance" cap is gone — paying a supplier ahead of receiving anything is normal, and the resulting negative balance is the intended "supplier owes you goods" signal (this changes behavior for the existing Quick Purchase path too, not just orders — a deliberate, low-risk relaxation, not scoped to order status).
+- **`suppliers.lead_time_days`** is set to the days between `ordered_at` and the order's *final* receipt, once fully received — a "most recently observed" value, not a rolling average (the plan's "learned from ordered_at → received_at" doesn't specify how; this is the simplest reading of it).
+- **Frontend:** Purchases gets "Order Stock" (place an order) alongside the existing "Quick Purchase" button, plus per-order "Receive" (a modal, line by line, with batch/expiry fields for materials that track them) and "Cancel order" actions. A new "Order" status column/badge (Ordered/Partially received/Received/Cancelled) sits next to the existing payment-status badge.
+- **Deliberately not built:** a separate "Orders" / "Receipts" tab split (the plan's own sketch) — everything lives in the one existing Purchases list with a status column instead; a PDF or WhatsApp send for a purchase order to the supplier; the inventory dashboard's "open purchases" card showing real orders on the way.
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).
@@ -187,6 +200,9 @@ A quote is its own document — it never touches stock or money. `convert_quote(
 - No owner-dashboard "open quote value" card (Phase 6a) — `quotes.total` where `status not in ('converted','declined','cancelled')` is all that card would need.
 - An expired quote (past `valid_until`) isn't blocked from being converted or flagged anywhere — there's no scheduled job or check for it, matching FEATURE_PLAN.md's own note that this is worked out from the date, not enforced.
 - No PDF/WhatsApp for a converted quote's resulting invoice from the Quotes page itself — go to Sales to get the real invoice once a quote converts.
+- No "Orders"/"Receipts" tab split on Purchases (Phase 6b) — everything is one list with a status column; no PO PDF/WhatsApp send to the supplier; no inventory-dashboard "open purchases" card.
+- A goods receipt's unit cost defaults to the order line's quoted cost but can be edited at receiving time (a supplier's invoice price sometimes differs from the quote) — there's no flag or report yet showing which receipts didn't match what was ordered.
+- Voiding a "Quick purchase" (`void_purchase`) is unchanged and still admin-only; there's no equivalent void for an already-received goods receipt — only `cancel_purchase_order()` (which just stops future receiving) exists for the new ordered path.
 
 ## How the user works
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, Undo2 } from 'lucide-react';
+import { Plus, X, Eye, Wallet, Ban, Undo2, PackagePlus, PackageCheck } from 'lucide-react';
 import {
   purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, lookups,
-  returns as returnsApi, PurchaseOrder, Supplier, Material, Lookup,
+  returns as returnsApi, PurchaseOrder, PurchaseOrderLine, Supplier, Material, Lookup,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -25,6 +25,17 @@ const statusMap: Record<string, { label: string; cls: string }> = {
   full: { label: 'Full Payment', cls: 'badge-success' },
   part: { label: 'Part Payment', cls: 'badge-warning' },
   unpaid: { label: 'Unpaid', cls: 'badge-danger' },
+};
+
+// Ordered before received (migration 0029). A purchase with no status
+// column yet (pre-migration data) reads as 'received', same as its
+// database default — nothing to show differently for it.
+const orderStatusMap: Record<string, { label: string; cls: string }> = {
+  ordered: { label: 'Ordered', cls: 'badge-primary' },
+  partial: { label: 'Partially received', cls: 'badge-warning' },
+  received: { label: 'Received', cls: 'badge-success' },
+  cancelled: { label: 'Cancelled', cls: 'badge-gray' },
+  draft: { label: 'Draft', cls: 'badge-gray' },
 };
 
 // Supplier batch and expiry only show for materials that track them (0022).
@@ -57,6 +68,10 @@ export default function Purchases() {
   const [payAmount, setPayAmount] = useState(0);
   const [payType, setPayType] = useState('');
   const [returnFor, setReturnFor] = useState<PurchaseOrder | null>(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [receiveFor, setReceiveFor] = useState<PurchaseOrder | null>(null);
+  const [cancelFor, setCancelFor] = useState<PurchaseOrder | null>(null);
+  const cancelMut = useMutation(purchasesApi.cancelOrder);
 
   const blankItem = (): LineItem => ({ material_id: '', qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
   const tracksBatches = (materialId: string) => !!materials?.find(m => m.id === materialId)?.track_batches;
@@ -140,23 +155,45 @@ export default function Purchases() {
     }
   };
 
+  const handleCancelOrder = async () => {
+    if (!cancelFor) return;
+    const res = await cancelMut.mutate(cancelFor.id, null);
+    if (res !== null) {
+      toast.success('Order cancelled — whatever already arrived stays in stock.');
+      setCancelFor(null);
+      refetch();
+    } else {
+      toast.error(cancelMut.error ?? 'Could not cancel.');
+    }
+  };
+
   const columns: Column<PurchaseOrder>[] = [
+    { key: 'doc_no', header: 'No.', value: p => p.doc_no ?? '', render: p => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{p.doc_no}</span> },
     { key: 'purchase_date', header: 'Date', value: p => p.purchase_date },
     { key: 'supplier', header: 'Supplier', value: p => supplierName(p.supplier_id) },
+    { key: 'order_status', header: 'Order', value: p => p.status ?? 'received',
+      render: p => {
+        const s = orderStatusMap[p.status ?? 'received'];
+        return <span className={s?.cls ?? 'badge-gray'}>{s?.label ?? p.status}</span>;
+      } },
     { key: 'total_amount', header: 'Total', align: 'right', value: p => p.total_amount, render: p => fmt(p.total_amount) },
     { key: 'total_paid', header: 'Paid', align: 'right', value: p => p.total_paid, render: p => fmt(p.total_paid) },
     { key: 'balance', header: 'Balance', align: 'right', value: p => p.balance, render: p => <BalanceFigure balance={p.balance} /> },
-    { key: 'payment_status', header: 'Status', value: p => p.voided ? 'Voided' : (statusMap[p.payment_status]?.label ?? p.payment_status),
+    { key: 'payment_status', header: 'Payment', value: p => p.voided ? 'Voided' : (statusMap[p.payment_status]?.label ?? p.payment_status),
       render: p => p.voided
         ? <span className="badge-gray" style={{ textDecoration: 'line-through' }}>Voided</span>
         : <span className={statusMap[p.payment_status]?.cls ?? 'badge-gray'}>{statusMap[p.payment_status]?.label ?? p.payment_status}</span> },
   ];
 
   const rowActions: RowAction<PurchaseOrder>[] = [
+    { icon: <PackageCheck size={15} />, label: 'Receive', onClick: setReceiveFor,
+      show: p => canCreatePurchase && (p.status === 'ordered' || p.status === 'partial') },
     { icon: <Wallet size={15} />, label: 'Record payment', onClick: openPay, show: p => p.balance > 0 && !p.voided },
-    { icon: <Undo2 size={15} />, label: 'Return to supplier', onClick: setReturnFor, show: p => !p.voided && canReturn },
+    { icon: <Undo2 size={15} />, label: 'Return to supplier', onClick: setReturnFor, show: p => !p.voided && canReturn && p.status !== 'ordered' },
     { icon: <Eye size={15} />, label: 'View', onClick: p => setViewId(p.id) },
-    { icon: <Ban size={15} />, label: 'Void purchase', onClick: setVoidFor, show: p => !p.voided && isAdmin, variant: 'danger' },
+    { icon: <Ban size={15} />, label: 'Cancel order', onClick: setCancelFor,
+      show: p => canCreatePurchase && (p.status === 'ordered' || p.status === 'partial'), variant: 'danger' },
+    { icon: <Ban size={15} />, label: 'Void purchase', onClick: setVoidFor, show: p => !p.voided && isAdmin && (p.status ?? 'received') === 'received', variant: 'danger' },
   ];
 
   return (
@@ -166,7 +203,12 @@ export default function Purchases() {
           <h1>Purchases</h1>
           <p>{rows ? `${rows.length} purchase orders` : ' '}</p>
         </div>
-        {canCreatePurchase && <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Purchase</button>}
+        {canCreatePurchase && (
+          <div style={{ display: 'flex', gap: '0.6rem' }}>
+            <button className="btn-secondary" onClick={() => setShowOrderModal(true)}><PackagePlus size={16} /> Order Stock</button>
+            <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> Quick Purchase</button>
+          </div>
+        )}
       </div>
 
       <DataTable
@@ -338,6 +380,36 @@ export default function Purchases() {
           onDone={() => { setReturnFor(null); refetch(); }}
         />
       )}
+
+      {showOrderModal && (
+        <OrderMaterialsModal
+          suppliers={suppliers ?? []}
+          materials={materials ?? []}
+          onClose={() => setShowOrderModal(false)}
+          onDone={() => { setShowOrderModal(false); refetch(); }}
+        />
+      )}
+
+      {receiveFor && (
+        <ReceivePurchaseModal
+          purchase={receiveFor}
+          materialName={(id: string) => materials?.find(m => m.id === id)?.name ?? '—'}
+          materialTracksBatches={tracksBatches}
+          onClose={() => setReceiveFor(null)}
+          onDone={() => { setReceiveFor(null); refetch(); }}
+        />
+      )}
+
+      {cancelFor && (
+        <ConfirmDialog
+          title="Cancel Order"
+          message={<>Cancel order <strong>{cancelFor.doc_no}</strong> from <strong>{supplierName(cancelFor.supplier_id)}</strong>? Anything already received stays in stock — only what hasn't arrived yet is cancelled.</>}
+          confirmLabel="Cancel Order"
+          pending={cancelMut.pending}
+          onConfirm={handleCancelOrder}
+          onCancel={() => setCancelFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -433,6 +505,199 @@ function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
         <button type="button" className="btn-primary" disabled={createMut.pending || active.length === 0} onClick={submit}>
           {createMut.pending ? 'Saving…' : 'Record Return'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---- Order materials, no stock yet (migration 0029) ----
+interface OrderLine { material_id: string; qty: number; unit_cost: number; }
+function OrderMaterialsModal({ suppliers, materials, onClose, onDone }: {
+  suppliers: Supplier[]; materials: Material[]; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const createMut = useMutation(purchasesApi.createOrder);
+  const blankLine = (): OrderLine => ({ material_id: '', qty: 1, unit_cost: 0 });
+  const [supplierId, setSupplierId] = useState('');
+  const [expectedDate, setExpectedDate] = useState('');
+  const [lines, setLines] = useState<OrderLine[]>([blankLine()]);
+
+  const addLine = () => setLines(ls => [...ls, blankLine()]);
+  const removeLine = (idx: number) => setLines(ls => ls.filter((_, i) => i !== idx));
+  const updateLine = (idx: number, field: keyof OrderLine, value: any) =>
+    setLines(ls => ls.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+
+  const validLines = lines.filter(l => l.material_id && l.qty > 0);
+  const total = validLines.reduce((s, l) => s + l.qty * l.unit_cost, 0);
+  const canSubmit = validLines.length > 0;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) { toast.error('Add at least one material with a quantity.'); return; }
+    const res = await createMut.mutate({
+      supplierId: supplierId || null,
+      lines: validLines.map(l => ({ material_id: l.material_id, qty: Number(l.qty), unit_cost: Number(l.unit_cost) })),
+      expectedDate: expectedDate || null,
+    });
+    if (res) { toast.success('Order placed — nothing is owed until it\'s received.'); onDone(); }
+    else toast.error(createMut.error ?? 'Could not place the order.');
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div className="modal-header">
+        <h2>Order Materials</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <form onSubmit={submit}>
+        <div className="modal-body">
+          {createMut.error && <ErrorState message={createMut.error} />}
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+            No stock moves and nothing is owed yet — that happens when you receive it.
+          </p>
+          <div className="grid-2">
+            <div className="form-group">
+              <label>Supplier</label>
+              <select value={supplierId} onChange={e => setSupplierId(e.target.value)}>
+                <option value="">— select —</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} — {s.company_store}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Expected date (optional)</label>
+              <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} />
+            </div>
+          </div>
+
+          <h3 className="section-title">Materials</h3>
+          {lines.map((line, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-end', marginBottom: '0.6rem' }}>
+              <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+                <label>Material</label>
+                <select value={line.material_id} onChange={e => updateLine(idx, 'material_id', e.target.value)}>
+                  <option value="">— select —</option>
+                  {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label>Qty</label>
+                <NumberInput value={line.qty} onChange={v => updateLine(idx, 'qty', v)} />
+              </div>
+              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label>Unit Cost (₦)</label>
+                <NumberInput value={line.unit_cost} onChange={v => updateLine(idx, 'unit_cost', v)} />
+              </div>
+              <div style={{ minWidth: 90, textAlign: 'right', fontWeight: 600, paddingBottom: 8 }}>{fmt(line.qty * line.unit_cost)}</div>
+              {lines.length > 1 && (
+                <button type="button" className="remove-item" onClick={() => removeLine(idx)} style={{ marginBottom: 8 }}><X size={14} /></button>
+              )}
+            </div>
+          ))}
+          <button type="button" className="btn-ghost btn-sm" onClick={addLine}><Plus size={14} /> Add material</button>
+
+          <div className="total-row" style={{ marginTop: '1rem' }}>
+            <strong>Order Value: {fmt(total)}</strong>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={createMut.pending || !canSubmit}>
+            {createMut.pending ? 'Placing…' : 'Place Order'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ---- Receive some or all of an order (migration 0029) ----
+interface ReceiveLine { line_id: string; material_id: string; label: string; remaining: number; unit_cost: number; qty: number; supplier_batch_no: string; expiry_date: string; }
+function ReceivePurchaseModal({ purchase, materialName, materialTracksBatches, onClose, onDone }: {
+  purchase: PurchaseOrder;
+  materialName: (id: string) => string;
+  materialTracksBatches: (id: string) => boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const { data: poLines, loading, error } = useQuery<PurchaseOrderLine[]>(() => purchasesApi.lines(purchase.id), [purchase.id]);
+  const receiveMut = useMutation(purchasesApi.receive);
+  const [lines, setLines] = useState<ReceiveLine[] | null>(null);
+
+  useEffect(() => {
+    if (poLines && lines === null) {
+      setLines(poLines
+        .filter(l => l.qty_received < l.qty_ordered)
+        .map(l => ({
+          line_id: l.id, material_id: l.material_id, label: materialName(l.material_id),
+          remaining: l.qty_ordered - l.qty_received, unit_cost: l.unit_cost,
+          qty: l.qty_ordered - l.qty_received, supplier_batch_no: '', expiry_date: '',
+        })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poLines]);
+
+  const setLine = (idx: number, field: keyof ReceiveLine, value: any) =>
+    setLines(ls => ls ? ls.map((l, i) => i === idx ? { ...l, [field]: value } : l) : ls);
+
+  const active = (lines ?? []).filter(l => l.qty > 0);
+  const total = active.reduce((s, l) => s + l.qty * l.unit_cost, 0);
+
+  const submit = async () => {
+    if (active.length === 0) { toast.error('Enter a quantity for at least one line.'); return; }
+    const res = await receiveMut.mutate(purchase.id, active.map(l => ({
+      line_id: l.line_id, qty: Number(l.qty), unit_cost: Number(l.unit_cost),
+      ...(l.supplier_batch_no.trim() ? { supplier_batch_no: l.supplier_batch_no.trim() } : {}),
+      ...(l.expiry_date ? { expiry_date: l.expiry_date } : {}),
+    })));
+    if (res) { toast.success('Receipt recorded — stock updated.'); onDone(); }
+    else toast.error(receiveMut.error ?? 'Could not record the receipt.');
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={560}>
+      <div className="modal-header">
+        <h2>Receive {purchase.doc_no}</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <div className="modal-body">
+        {loading && <Loading />}
+        {error && <ErrorState message={error} />}
+        {receiveMut.error && <ErrorState message={receiveMut.error} />}
+        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Everything on this order has already been received.</p>}
+        {lines && lines.map((l, idx) => (
+          <div key={l.line_id} style={{ marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid #f1f5f9' }}>
+            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-end' }}>
+              <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+                <label>{l.label}</label>
+                <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>{l.remaining.toLocaleString()} still expected</small>
+              </div>
+              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label>Qty received</label>
+                <NumberInput value={l.qty} onChange={v => setLine(idx, 'qty', Math.max(0, Math.min(v, l.remaining)))} />
+              </div>
+              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                <label>Unit Cost (₦)</label>
+                <NumberInput value={l.unit_cost} onChange={v => setLine(idx, 'unit_cost', v)} />
+              </div>
+            </div>
+            {materialTracksBatches(l.material_id) && (
+              <div className="grid-2" style={{ marginTop: '0.5rem' }}>
+                <input value={l.supplier_batch_no} onChange={e => setLine(idx, 'supplier_batch_no', e.target.value)} placeholder="Supplier batch number" />
+                <input type="date" value={l.expiry_date} onChange={e => setLine(idx, 'expiry_date', e.target.value)} placeholder="Expiry date" />
+              </div>
+            )}
+          </div>
+        ))}
+        {active.length > 0 && (
+          <div className="total-row"><strong>Value received now: {fmt(total)}</strong></div>
+        )}
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={receiveMut.pending || active.length === 0} onClick={submit}>
+          {receiveMut.pending ? 'Saving…' : 'Record Receipt'}
         </button>
       </div>
     </Modal>

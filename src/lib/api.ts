@@ -57,6 +57,7 @@ export interface SalesOrder {
   // invoiced; these two track what's been given back since.
   returned_total?: number; returned_profit?: number;
 }
+export type PurchaseOrderStatus = 'draft' | 'ordered' | 'partial' | 'received' | 'cancelled';
 export interface PurchaseOrder {
   id: string; purchase_date: string; supplier_id: string | null;
   total_amount: number; total_paid: number; balance: number;
@@ -65,6 +66,22 @@ export interface PurchaseOrder {
   // Balance can go negative once returned_total exceeds it: the supplier
   // owes YOU (migration 0023).
   returned_total?: number;
+  // Ordered before received (migration 0029). Optional so a screen still
+  // works against a database that hasn't run it — every purchase defaults
+  // to 'received' either way, matching the immediate-receipt "Quick
+  // purchase" path that's always existed.
+  doc_no?: string | null;
+  status?: PurchaseOrderStatus;
+  expected_date?: string | null;
+  ordered_at?: string | null;
+}
+export interface PurchaseOrderLine {
+  id: string; purchase_order_id: string; material_id: string;
+  qty_ordered: number; qty_received: number; unit_cost: number;
+}
+export interface GoodsReceipt {
+  id: string; branch_id: string; purchase_order_id: string; doc_no: string | null;
+  received_at: string; received_by: string | null; note: string | null;
 }
 export interface ProductionRun {
   id: string; production_date: string; finished_good_id: string;
@@ -342,6 +359,28 @@ export const purchases = {
       p_reference: reference ?? null, p_notes: notes ?? null,
     }),
   void: (purchaseId: string) => rpcVoid('void_purchase', { p_purchase: purchaseId }),
+
+  // Ordered before received (migration 0029). createOrder places the
+  // order (no stock, nothing owed yet); receive() can be called more than
+  // once for the same order as goods arrive in parts.
+  createOrder: (params: {
+    supplierId: string | null;
+    lines: { material_id: string; qty: number; unit_cost: number }[];
+    expectedDate?: string | null; branchId?: string | null;
+  }) =>
+    rpc<string>('create_purchase_order', {
+      p_supplier: params.supplierId, p_lines: params.lines,
+      p_expected: params.expectedDate ?? null,
+      ...(params.branchId ? { p_branch: params.branchId } : {}),
+    }),
+  receive: (purchaseId: string, lines: { line_id: string; qty: number; unit_cost?: number; supplier_batch_no?: string | null; expiry_date?: string | null }[], date?: string | null) =>
+    rpc<string>('receive_purchase_order', { p_po: purchaseId, p_lines: lines, p_date: date ?? null }),
+  cancelOrder: (purchaseId: string, reason?: string | null) =>
+    rpcVoid('cancel_purchase_order', { p_po: purchaseId, p_reason: reason ?? null }),
+  lines: (purchaseId: string) =>
+    run<PurchaseOrderLine[]>(supabase.from('purchase_order_lines').select('*').eq('purchase_order_id', purchaseId)),
+  receipts: (purchaseId: string) =>
+    run<GoodsReceipt[]>(supabase.from('goods_receipts').select('*').eq('purchase_order_id', purchaseId).order('received_at', { ascending: false })),
 };
 
 // ============================================================

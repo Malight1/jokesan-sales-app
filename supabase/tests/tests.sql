@@ -1601,6 +1601,132 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 33. purchase orders: ordered before received (0029) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_books   uuid := '00000000-0000-0000-0000-000000000004';
+  v_mat     uuid;
+  v_supplier uuid;
+  v_po      uuid;
+  v_line1   uuid;
+  v_gr1     uuid;
+  v_gr2     uuid;
+  v_row     record;
+begin
+  perform t_as(v_admin);
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level)
+  values (t_id('tenant'), 'PO Test Chemical', 'kg', 'raw', 5) returning id into v_mat;
+  insert into suppliers (tenant_id, company_store) values (t_id('tenant'), 'PO Test Supplier') returning id into v_supplier;
+  perform t_su();
+
+  -- ---- A: only admin/inventory may place an order ----
+  perform t_as(v_cashier);
+  perform t_err('sales cannot create a purchase order',
+    format('select public.create_purchase_order(%L::uuid, %L::jsonb)', v_supplier,
+      jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 100, 'unit_cost', 10))::text),
+    'not allowed');
+  perform t_su();
+
+  -- ---- B: placing an order moves no stock and owes nothing yet ----
+  perform t_as(v_store);
+  select public.create_purchase_order(v_supplier,
+    jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 100, 'unit_cost', 10)),
+    current_date + 7) into v_po;
+  perform t_su();
+  perform t_rec('an order gets a real PO- number, status ordered, and an expected date',
+    (select doc_no like 'PO-%' and status = 'ordered' and expected_date = current_date + 7 from purchase_orders where id = v_po));
+  perform t_rec('nothing is owed and no stock has moved yet',
+    (select total_amount = 0 and balance = 0 from purchase_orders where id = v_po)
+    and (select qty_balance from materials where id = v_mat) = 0);
+
+  select id into v_line1 from purchase_order_lines where purchase_order_id = v_po;
+
+  -- ---- C: an advance payment is allowed before anything is received ----
+  perform t_as(v_store);
+  declare v_cash uuid;
+  begin
+    select id into v_cash from payment_types where tenant_id = t_id('tenant') and name = 'Cash';
+    perform public.record_purchase_payment(v_po, 300, v_cash, 'advance');
+  end;
+  perform t_su();
+  perform t_rec('the advance shows as a negative balance — the supplier owes goods',
+    (select balance = -300 and payment_status = 'full' from purchase_orders where id = v_po));
+
+  -- ---- D: receiving part of the order ----
+  perform t_as(v_store);
+  select public.receive_purchase_order(v_po,
+    jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 60))) into v_gr1;
+  perform t_su();
+  perform t_rec('a partial receipt gets its own GRN- number', (select doc_no from goods_receipts where id = v_gr1) like 'GRN-%');
+  perform t_rec('the order moves to partial, and only the received value is now owed',
+    (select status = 'partial' and total_amount = 600 from purchase_orders where id = v_po));
+  perform t_rec('the advance now covers half the received value (balance -300 + 600 = 300 owed)',
+    (select balance = 300 from purchase_orders where id = v_po));
+  perform t_rec('stock actually moved for the 60 received, not the other 40',
+    (select qty_balance from materials where id = v_mat) = 60);
+  perform t_rec('the purchase_items layer traces back to this order and this receipt',
+    (select po_line_id = v_line1 and goods_receipt_id = v_gr1 and qty = 60 from purchase_items where po_line_id = v_line1));
+
+  perform t_as(v_store);
+  perform t_err('cannot receive more than what is still expected on the line',
+    format('select public.receive_purchase_order(%L::uuid, %L::jsonb)', v_po,
+      jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 41))::text),
+    'still expected');
+  perform t_su();
+
+  -- ---- E: receiving the remainder settles the order ----
+  perform t_as(v_store);
+  select public.receive_purchase_order(v_po,
+    jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 40))) into v_gr2;
+  perform t_su();
+  perform t_rec('the second receipt is a different GRN from the first', v_gr2 <> v_gr1);
+  perform t_rec('the order is now fully received, and owes the full ordered value',
+    (select status = 'received' and total_amount = 1000 from purchase_orders where id = v_po));
+  perform t_rec('all 100kg is now in stock', (select qty_balance from materials where id = v_mat) = 100);
+  perform t_rec('the supplier''s lead time is learned from ordered_at to the final receipt',
+    (select lead_time_days is not null from suppliers where id = v_supplier));
+
+  perform t_as(v_store);
+  perform t_err('a fully received order has nothing left to receive',
+    format('select public.receive_purchase_order(%L::uuid, %L::jsonb)', v_po,
+      jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 1))::text),
+    'nothing left to receive');
+  perform t_su();
+
+  -- ---- F: cancelling ----
+  perform t_as(v_store);
+  declare v_po2 uuid; v_line2 uuid;
+  begin
+    select public.create_purchase_order(v_supplier,
+      jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 50, 'unit_cost', 10))) into v_po2;
+    select id into v_line2 from purchase_order_lines where purchase_order_id = v_po2;
+    select public.receive_purchase_order(v_po2, jsonb_build_array(jsonb_build_object('line_id', v_line2, 'qty', 20))) into v_gr1;
+    perform t_su();
+
+    perform t_as(v_books);
+    perform t_err('accounts cannot cancel a purchase order',
+      format('select public.cancel_purchase_order(%L::uuid)', v_po2), 'not allowed');
+    perform t_su();
+
+    perform t_as(v_store);
+    perform public.cancel_purchase_order(v_po2, 'supplier ran out of stock');
+    perform t_su();
+    perform t_rec('cancelling stops further receiving but keeps what already arrived',
+      (select status = 'cancelled' and total_amount = 200 from purchase_orders where id = v_po2)
+      and (select qty_remaining = 20 from purchase_items where po_line_id = v_line2));
+
+    perform t_as(v_store);
+    perform t_err('a cancelled order can''t receive anything more',
+      format('select public.receive_purchase_order(%L::uuid, %L::jsonb)', v_po2,
+        jsonb_build_array(jsonb_build_object('line_id', v_line2, 'qty', 10))::text),
+      'nothing left to receive');
+    perform t_su();
+  end;
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

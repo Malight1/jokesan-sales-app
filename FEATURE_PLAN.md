@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0027, live in production. `0028` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0028, live in production. `0029` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -12,12 +12,12 @@
 | 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
-| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a) + more | 🟡 6a done, 6b next |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0029+ | not started |
+| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b) + more | 🟡 6a/6b done, 6c next |
+| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0030+ | not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–5a are live in production; Phase 6a's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6b onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–6a are live in production; Phase 6b's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6c onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -31,6 +31,12 @@ Phases 0–5a are live in production; Phase 6a's code is on `main` but its migra
 - Built: `create_quote`/`update_quote_status`/`convert_quote`, a `/quotes` page with a create modal, status actions, convert-to-sale, PDF, and WhatsApp send.
 - A quote's discount isn't checked against the creator's limit at creation the way this plan's schema sketch implies — only conversion (via the underlying `create_sale`) checks it, so "no second PIN" doesn't fully hold; `convert_quote` does accept an approval so the PIN can still be supplied without an admin taking over.
 - Not built: 6b (real purchase orders), 6c (units of measure), 6d (delivery notes), 6e (custom fields), 6f (audit log viewer), and the owner dashboard's "open quote value" card.
+
+**Phase 6b (real purchase orders), as actually shipped, differs from the plan below**:
+- What's owed to the supplier is **not stored as the ordered value** the way this plan's schema sketch implies — `purchase_orders.total_amount`/`balance` start at 0 when an order is placed and grow only as each `receive_purchase_order()` call records what actually arrived. The "value ordered" (for display) is computed on demand from `purchase_order_lines`, not stored as the accounting total.
+- The advance-payment cap removal in `record_purchase_payment()` applies to **every** purchase, not just the new ordered path (including the pre-existing "Quick purchase" flow) — a deliberate, low-risk relaxation rather than a status-gated special case.
+- `suppliers.lead_time_days` is the **most recently observed** lead time (days from `ordered_at` to the final receipt), not a rolling average — the plan doesn't specify how "learned" should work, and this is the simplest reading.
+- Not built: the "Orders"/"Receipts" tab split this plan's screens section describes (everything is one Purchases list with a status column), a PO PDF/WhatsApp send to the supplier, and the inventory dashboard's "open purchases" card.
 
 ---
 
