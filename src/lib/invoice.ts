@@ -258,3 +258,157 @@ export async function generateCreditNotePdf(d: CreditNoteData) {
 
   doc.save(`${d.creditNoteNo}.pdf`);
 }
+
+// ============================================================
+// QUOTE / PROFORMA INVOICE — a price estimate that hasn't touched stock
+// or money yet (migration 0028). Same document, two titles: 'proforma'
+// is what a buyer's finance team asks for before wiring money, so it
+// also prints the seller's bank details; a plain 'quote' doesn't.
+// ============================================================
+export interface QuoteData {
+  companyName: string;
+  kind: 'quote' | 'proforma';
+  docNo: string;
+  date: string;
+  validUntil?: string | null;
+  customerName: string;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  items: { name: string; qty: number; unitPrice: number; amount: number }[];
+  subtotal: number;
+  vatAmount: number;
+  vatRate: number;
+  total: number;
+  notes?: string | null;
+  terms?: string | null;
+  bankDetails?: { bank_name?: string; account_name?: string; account_number?: string } | null;
+  tin?: string | null;
+  logoDataUrl?: string | null;
+}
+
+export async function generateQuotePdf(d: QuoteData) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  void autoTable;
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  if (d.logoDataUrl) {
+    try {
+      const fmtType = d.logoDataUrl.includes('png') ? 'PNG' : 'JPEG';
+      doc.addImage(d.logoDataUrl, fmtType, 14, 12, 22, 22);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text(d.companyName, 40, 22);
+      if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 40, 28); }
+    } catch { /* ignore bad image */ }
+  } else {
+    doc.setFontSize(19);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(d.companyName, 14, 20);
+    if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 14, 26); }
+  }
+
+  doc.setFontSize(d.kind === 'proforma' ? 16 : 22);
+  doc.setTextColor(37, 99, 235);
+  doc.text(d.kind === 'proforma' ? 'PROFORMA INVOICE' : 'QUOTATION', pageW - 14, 20, { align: 'right' });
+
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(14, 31, pageW - 14, 31);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`No: ${d.docNo}`, pageW - 14, 38, { align: 'right' });
+  doc.text(`Date: ${d.date}`, pageW - 14, 44, { align: 'right' });
+  if (d.validUntil) doc.text(`Valid until: ${d.validUntil}`, pageW - 14, 50, { align: 'right' });
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(148, 163, 184);
+  doc.text('TO', 14, 40);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 41, 59);
+  doc.text(d.customerName, 14, 46);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  let y = 51;
+  if (d.customerPhone) { doc.text(d.customerPhone, 14, y); y += 5; }
+  if (d.customerAddress) { doc.text(d.customerAddress, 14, y); y += 5; }
+
+  autoTable(doc, {
+    startY: Math.max(y + 6, 56),
+    head: [['Item', 'Qty', 'Unit Price', 'Amount']],
+    body: d.items.map(i => [i.name, i.qty.toLocaleString(), money(i.unitPrice), money(i.amount)]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [37, 99, 235] },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+  });
+
+  const afterTable = (doc as any).lastAutoTable.finalY + 8;
+  const rows: [string, string, boolean][] = [];
+  if (d.vatAmount > 0) {
+    rows.push(['Subtotal', money(d.subtotal), false]);
+    rows.push([`VAT (${d.vatRate}%)`, money(d.vatAmount), false]);
+  }
+  rows.push(['Total', money(d.total), true]);
+  let ty = afterTable;
+  rows.forEach(([label, value, strong]) => {
+    doc.setFontSize(strong ? 12 : 10);
+    doc.setFont('helvetica', strong ? 'bold' : 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text(label, pageW - 70, ty);
+    doc.text(value, pageW - 14, ty, { align: 'right' });
+    ty += strong ? 8 : 6;
+  });
+  ty += 4;
+
+  if (d.terms) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Terms', 14, ty);
+    doc.setFont('helvetica', 'normal');
+    doc.text(doc.splitTextToSize(d.terms, pageW - 28), 14, ty + 5);
+    ty += 5 + doc.splitTextToSize(d.terms, pageW - 28).length * 4.5 + 4;
+  }
+  if (d.notes) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Notes', 14, ty);
+    doc.setFont('helvetica', 'normal');
+    doc.text(doc.splitTextToSize(d.notes, pageW - 28), 14, ty + 5);
+    ty += 5 + doc.splitTextToSize(d.notes, pageW - 28).length * 4.5 + 4;
+  }
+
+  // A proforma is what a buyer's finance team asks for before wiring
+  // money — a plain quote doesn't need this.
+  if (d.kind === 'proforma' && d.bankDetails && (d.bankDetails.account_number || d.bankDetails.bank_name)) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Payment Details', 14, ty);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    let by = ty + 5;
+    if (d.bankDetails.bank_name) { doc.text(`Bank: ${d.bankDetails.bank_name}`, 14, by); by += 4.5; }
+    if (d.bankDetails.account_name) { doc.text(`Account Name: ${d.bankDetails.account_name}`, 14, by); by += 4.5; }
+    if (d.bankDetails.account_number) { doc.text(`Account Number: ${d.bankDetails.account_number}`, 14, by); by += 4.5; }
+  }
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+
+  doc.save(`${d.docNo}.pdf`);
+}

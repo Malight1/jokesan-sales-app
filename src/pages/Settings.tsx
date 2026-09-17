@@ -460,6 +460,11 @@ function BusinessTab() {
   const [tillRequired, setTillRequired] = useState(!!tenant?.shift_rules?.required_for?.includes('sales'));
   const [varianceAlert, setVarianceAlert] = useState(tenant?.shift_rules?.variance_alert ?? 1000);
   const [payOutLimit, setPayOutLimit] = useState(tenant?.shift_rules?.pay_out_limit ?? 5000);
+  // Printed on a proforma invoice only (migration 0028, Phase 6a).
+  const hasBankDetails = tenant?.bank_details !== undefined;
+  const [bankName, setBankName] = useState(tenant?.bank_details?.bank_name ?? '');
+  const [bankAccountName, setBankAccountName] = useState(tenant?.bank_details?.account_name ?? '');
+  const [bankAccountNumber, setBankAccountNumber] = useState(tenant?.bank_details?.account_number ?? '');
   const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
   const [invPrefix, setInvPrefix] = useState<string | null>(null);
   const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
@@ -503,6 +508,9 @@ function BusinessTab() {
           variance_alert: Number(varianceAlert) || 0,
           pay_out_limit: Number(payOutLimit) || 0,
         },
+      } : {}),
+      ...(hasBankDetails ? {
+        bank_details: { bank_name: bankName.trim(), account_name: bankAccountName.trim(), account_number: bankAccountNumber.trim() },
       } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
@@ -662,6 +670,20 @@ function BusinessTab() {
                   </div>
                 </div>
               )}
+            </>
+          )}
+
+          {hasBankDetails && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label>Bank details (printed on a proforma invoice only)</label>
+                <div className="grid-2">
+                  <input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Bank name" />
+                  <input value={bankAccountName} onChange={e => setBankAccountName(e.target.value)} placeholder="Account name" />
+                </div>
+                <input value={bankAccountNumber} onChange={e => setBankAccountNumber(e.target.value)} placeholder="Account number" style={{ marginTop: '0.5rem' }} />
+              </div>
             </>
           )}
 

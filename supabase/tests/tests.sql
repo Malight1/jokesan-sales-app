@@ -1502,6 +1502,105 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 32. quotes and proforma invoices (0028) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_store   uuid := '00000000-0000-0000-0000-000000000003';
+  v_qsoap   uuid;
+  v_cust    uuid;
+  v_quote   uuid;
+  v_proforma uuid;
+  v_sale    uuid;
+  v_row     record;
+begin
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Quote Soap', 'pcs', 5, 100, 1.5) returning id into v_qsoap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_qsoap, 10, 40, 'Opening balance');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_qsoap, 10, 40, 'Opening balance');
+  perform t_su();
+  insert into customers (tenant_id, first_name) values (t_id('tenant'), 'Quote Customer') returning id into v_cust;
+
+  -- ---- A: only admin/sales may create a quote ----
+  perform t_as(v_store);
+  perform t_err('inventory cannot create a quote',
+    format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'quote', t_items(v_qsoap, 2, 90)),
+    'not allowed');
+  perform t_su();
+
+  -- ---- B: creating a quote computes totals against the list price ----
+  perform t_as(v_cashier);
+  execute format('select public.create_quote(%L::uuid, %L, %L::jsonb, %L::date, %L)',
+    v_cust, 'quote', t_items(v_qsoap, 2, 90), current_date + 14, 'first draft') into v_quote;
+  perform t_rec('a quote gets a real QT- number', (select doc_no from quotes where id = v_quote) like 'QT-%');
+  perform t_rec('the quote totals the line at the price given, with the discount vs list tracked',
+    (select subtotal = 180 and discount_total = 20 and status = 'draft' from quotes where id = v_quote),
+    (select format('subtotal=%s discount=%s status=%s', subtotal, discount_total, status) from quotes where id = v_quote));
+
+  perform t_err('a quote needs at least one item',
+    format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'quote', '[]'), 'at least one item');
+
+  -- ---- C: a proforma is the same engine, a different kind and number ---- (still as v_cashier)
+  execute format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'proforma', t_items(v_qsoap, 1, 100)) into v_proforma;
+  perform t_su();
+  perform t_rec('a proforma gets its own PF- number', (select doc_no from quotes where id = v_proforma) like 'PF-%');
+
+  -- ---- D: status moves forward, but never past converted ----
+  perform t_as(v_cashier);
+  perform public.update_quote_status(v_quote, 'sent');
+  perform public.update_quote_status(v_quote, 'accepted');
+  perform t_su();
+  perform t_rec('a quote''s status can move forward (draft -> sent -> accepted)',
+    (select status = 'accepted' from quotes where id = v_quote));
+
+  perform t_as(v_store);
+  perform t_err('inventory cannot change a quote''s status',
+    format('select public.update_quote_status(%L::uuid, %L)', v_quote, 'sent'), 'not allowed');
+  perform t_su();
+
+  -- ---- E: converting turns it into a real, priced sale ----
+  -- This quote's 10% discount (₦20 off ₦200 list) is above the cashier's
+  -- 5% limit, so converting it needs the same manager-PIN mechanism a
+  -- sale would — the plan's "no second PIN" note doesn't fully hold here
+  -- (see the migration's header comment); the admin's PIN ('1234') was
+  -- already set up in the pricing section.
+  perform t_as(v_cashier);
+  perform t_err('converting a quote whose discount is over the limit needs a manager''s PIN, same as a sale would',
+    format('select public.convert_quote(%L::uuid, 0, null)', v_quote), 'manager''s PIN');
+  execute format('select public.convert_quote(%L::uuid, 0, null, null, %L::jsonb)',
+    v_quote, jsonb_build_object('user_id', v_admin, 'pin', '1234')::text) into v_sale;
+  perform t_su();
+  perform t_rec('with the PIN, conversion succeeds and the quote is marked converted',
+    (select status = 'converted' and converted_sale_id = v_sale from quotes where id = v_quote));
+  select * into v_row from sale_items where sales_order_id = v_sale;
+  perform t_rec('the sale carries the quote''s exact price, not the list price (₦90, not ₦100)',
+    v_row.unit_price = 90 and v_row.quantity = 2, format('price=%s qty=%s', v_row.unit_price, v_row.quantity));
+
+  perform t_as(v_cashier);
+  perform t_err('a converted quote cannot be converted again',
+    format('select public.convert_quote(%L::uuid, 0, null)', v_quote), 'already been converted');
+  perform t_su();
+
+  -- ---- F: a declined or cancelled quote can't be converted either ----
+  perform t_as(v_cashier);
+  perform public.update_quote_status(v_proforma, 'declined');
+  perform t_err('a declined quote can''t be converted',
+    format('select public.convert_quote(%L::uuid, 0, null)', v_proforma), 'can''t be converted');
+  perform t_su();
+
+  -- ---- G: converting names exactly what's short, same as any sale ----
+  perform t_as(v_admin);
+  declare v_short uuid;
+  begin
+    execute format('select public.create_quote(null, %L, %L::jsonb)', 'quote', t_items(v_qsoap, 100, 90)) into v_short;
+    perform t_err('converting a quote for more than is now in stock fails the same way a sale would',
+      format('select public.convert_quote(%L::uuid, 0, null)', v_short), 'left at');
+  end;
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

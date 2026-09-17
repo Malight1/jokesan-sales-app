@@ -43,6 +43,8 @@ export interface Tenant {
     variance_alert: number;
     pay_out_limit: number;
   };
+  // Printed on a proforma invoice only (migration 0028).
+  bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
 }
 
 interface AuthState {

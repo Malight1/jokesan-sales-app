@@ -439,6 +439,52 @@ export const storeCredit = {
 };
 
 // ============================================================
+// QUOTES AND PROFORMA INVOICES (migration 0028, Phase 6a)
+//
+// A quote never touches stock or money — it becomes a real sale only via
+// convert(), which is just create_sale() under the hood. So a discount on
+// a quote can still need a manager's PIN at conversion time, same as any
+// sale would (see the migration's own header comment for why this isn't
+// fully seamless).
+// ============================================================
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'converted' | 'cancelled';
+export interface Quote {
+  id: string; tenant_id: string; branch_id: string; doc_no: string | null;
+  customer_id: string | null; kind: 'quote' | 'proforma';
+  issue_date: string; valid_until: string | null; status: QuoteStatus;
+  subtotal: number; list_value: number; discount_total: number;
+  vat_rate: number; vat_amount: number; total: number;
+  notes: string | null; terms: string | null; converted_sale_id: string | null;
+  created_by: string | null; created_at: string;
+}
+export interface QuoteItem {
+  id: string; quote_id: string; finished_good_id: string;
+  quantity: number; list_price: number; unit_price: number; discount_amount: number; amount: number;
+}
+
+export const quotes = {
+  list: () => runAll<Quote>((f, t) => supabase.from('quotes').select('*').order('created_at', { ascending: false }).range(f, t)),
+  detail: (id: string) => run<any>(supabase.from('quotes').select('*, quote_items(*)').eq('id', id).single()),
+  create: (params: {
+    customerId: string | null; kind: 'quote' | 'proforma';
+    items: { finished_good_id: string; quantity: number; unit_price: number }[];
+    validUntil?: string | null; notes?: string | null; terms?: string | null; branchId?: string | null;
+  }) =>
+    rpc<string>('create_quote', {
+      p_customer: params.customerId, p_kind: params.kind, p_items: params.items,
+      p_valid_until: params.validUntil ?? null, p_notes: params.notes ?? null, p_terms: params.terms ?? null,
+      ...(params.branchId ? { p_branch: params.branchId } : {}),
+    }),
+  setStatus: (id: string, status: Exclude<QuoteStatus, 'converted'>) =>
+    rpcVoid('update_quote_status', { p_quote: id, p_status: status }),
+  convert: (id: string, amountPaid: number, paymentTypeId: string | null, approval?: { userId: string; pin: string } | null) =>
+    rpc<string>('convert_quote', {
+      p_quote: id, p_amount_paid: amountPaid, p_payment_type: paymentTypeId,
+      ...(approval ? { p_approval: { user_id: approval.userId, pin: approval.pin } } : {}),
+    }),
+};
+
+// ============================================================
 // PRODUCTION  (writes go through the record_production RPC engine)
 // ============================================================
 export const production = {
@@ -699,6 +745,8 @@ export const tenantApi = {
     expiry_warning_days?: number; allow_expired_sale?: boolean;
     cashier_returns?: 'none' | 'same_day_own' | 'any';
     shift_rules?: Partial<ShiftRules>;
+    // Printed on a proforma invoice only (migration 0028) — a plain quote doesn't need it.
+    bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };
