@@ -2,7 +2,7 @@
 
 **Date:** 12 September 2026. **Status updated:** 17 September 2026 — see `HANDOVER.md` for the fuller picture.
 **Scope:** the seven items from the competitor review (see `COMPETE_ROADMAP.md` for the why).
-**Starts from:** migrations 0001–0028, live in production. `0029` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
+**Starts from:** migrations 0001–0029, live in production. `0030` (this session's work) is on `main` but **not yet run live** — see `HANDOVER.md`'s "Where things actually stand." Work commits directly to `main` (no feature branches — see `HANDOVER.md`'s hard constraints).
 
 | Phase | Feature | Migration(s) planned | Migration(s) actually used | Status |
 |---|---|---|---|---|
@@ -12,12 +12,12 @@
 | 3 | Discounts and price tiers | 0024 | **0025** | ✅ done |
 | 4 | Shifts and cash-up (X/Z reports) | 0025 | **0026** | ✅ done |
 | 5 | Automatic payment confirmation | 0026 + Edge Functions | **0027** + 3 Edge Functions | 🟡 5a done, 5b/5c not started |
-| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b) + more | 🟡 6a/6b done, 6c next |
-| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0030+ | not started |
+| 6 | Quotes, real purchase orders, units of measure, delivery notes, custom fields, audit viewer | 0027–0031 | **0028** (6a), **0029** (6b), **0030** (6c) + more | 🟡 6a/6b/6c done, 6d next |
+| 7 | Smart reorder, assistant, e-invoicing readiness | 0032–0033 | 0031+ | not started |
 
 **Migration numbers below this line are as originally planned and no longer match what shipped** — Phase 2 grew a second migration (returns needed a follow-up for voiding a return and a configurable policy, both closed gaps flagged after the first pass), which pushed every phase after it up by one. Trust `HANDOVER.md`'s migration table and the `supabase/migrations/` directory for the real numbering; treat every `0024`/`0025`/`0026`/etc. reference in the rest of this document as "whatever the next free number is," not literal.
 
-Phases 0–6a are live in production; Phase 6b's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6c onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
+Phases 0–6b are live in production; Phase 6c's code is on `main` but its migration hasn't run yet. The rest of this document is the original plan for Phase 6d onward through 7, unmodified since it was written; it's the working plan for what comes next, cross-check specifics (column names, function signatures) against what actually exists before assuming it's still accurate.
 
 **Phase 4, as actually shipped, differs from the plan below in a few deliberate ways** (see `HANDOVER.md`'s "Known gaps deferred so far" for the full list):
 - `shift_rules.required_for` **defaults to empty**, not `["sales"]` — the plan's default would have locked every existing tenant out of selling the moment `0026` runs, before any till was ever opened. An admin turns it on under Settings → Business once registers are set up.
@@ -37,6 +37,10 @@ Phases 0–6a are live in production; Phase 6b's code is on `main` but its migra
 - The advance-payment cap removal in `record_purchase_payment()` applies to **every** purchase, not just the new ordered path (including the pre-existing "Quick purchase" flow) — a deliberate, low-risk relaxation rather than a status-gated special case.
 - `suppliers.lead_time_days` is the **most recently observed** lead time (days from `ordered_at` to the final receipt), not a rolling average — the plan doesn't specify how "learned" should work, and this is the simplest reading.
 - Not built: the "Orders"/"Receipts" tab split this plan's screens section describes (everything is one Purchases list with a status column), a PO PDF/WhatsApp send to the supplier, and the inventory dashboard's "open purchases" card.
+
+**Phase 6c (units of measure), as actually shipped, is scoped down from the plan below**:
+- Built: `product_units`, and `create_sale`/`create_purchase`/`receive_purchase_order` each converting `{uom_id, uom_qty}` to a base-unit quantity in one place — everything below that point (FIFO, COGS, discounts) is completely unchanged, exactly as this plan's "no costing code changes" note intends. Unit management in the Finished Goods/Materials product modals, and POS barcode scanning matching a unit's barcode.
+- **Not built:** any per-line unit *selector* in POS, Sales, or Purchases — POS's cart stays one line per product, always in base units, so scanning a unit barcode is a quantity shortcut only and doesn't tag the resulting `sale_items` row with `uom_id`/`uom_qty` (only a direct RPC call with those fields does, which the engine fully supports). Also not built: `price_list_items` per-UOM pricing, and the stock-screen "12 ctn + 5 pcs" display toggle this plan's screens section describes.
 
 ---
 

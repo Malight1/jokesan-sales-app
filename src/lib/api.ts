@@ -260,6 +260,34 @@ export const finishedGoods = {
 };
 
 // ============================================================
+// UNITS OF MEASURE (migration 0030, Phase 6c)
+//
+// The engine always works in base units — a unit only ever affects how a
+// QUANTITY is entered ("2 Carton" -> 24 pieces); unit_price/cost_price
+// stay per base unit throughout the app, matching what create_sale/
+// create_purchase/receive_purchase_order actually do server-side.
+// ============================================================
+export interface ProductUnit {
+  id: string; product_kind: 'material' | 'finished_good'; product_id: string;
+  name: string; factor: number; barcode: string | null;
+  default_for_purchase: boolean; default_for_sale: boolean;
+}
+
+export const productUnits = {
+  list: () => run<ProductUnit[]>(supabase.from('product_units').select('*').order('factor')),
+  forProduct: (kind: 'material' | 'finished_good', productId: string) =>
+    run<ProductUnit[]>(supabase.from('product_units').select('*').eq('product_kind', kind).eq('product_id', productId).order('factor')),
+  create: (u: { product_kind: 'material' | 'finished_good'; product_id: string; name: string; factor: number; barcode?: string | null }) =>
+    run<ProductUnit>(supabase.from('product_units').insert(u).select().single()),
+  remove: (id: string) => del(supabase.from('product_units').delete().eq('id', id)),
+  findByBarcode: async (code: string): Promise<ProductUnit | null> => {
+    const r = await supabase.from('product_units').select('*').eq('barcode', code).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return r.data as ProductUnit | null;
+  },
+};
+
+// ============================================================
 // BOM (recipes)
 // ============================================================
 export const boms = {

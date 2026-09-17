@@ -1727,6 +1727,115 @@ begin
   end;
 end $$;
 
+-- ---------- 34. units of measure (0030) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_soap    uuid;
+  v_soap2   uuid;   -- a second product, so a unit that belongs to v_soap can be tried against it
+  v_mat     uuid;
+  v_carton  uuid;
+  v_bag     uuid;
+  v_sale    uuid;
+  v_po      uuid;
+  v_line1   uuid;
+  v_row     record;
+begin
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'UOM Soap', 'pcs', 5, 100, 1.5) returning id into v_soap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_soap, 100, 40, 'Opening balance');
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_soap, 100, 40, 'Opening balance');
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'UOM Soap 2', 'pcs', 5, 100, 1.5) returning id into v_soap2;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_soap2, 100, 40, 'Opening balance');
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level)
+  values (t_id('tenant'), 'UOM Chemical', 'kg', 'raw', 5) returning id into v_mat;
+
+  insert into product_units (tenant_id, product_kind, product_id, name, factor)
+  values (t_id('tenant'), 'finished_good', v_soap, 'Carton', 12) returning id into v_carton;
+  insert into product_units (tenant_id, product_kind, product_id, name, factor)
+  values (t_id('tenant'), 'material', v_mat, 'Bag', 25) returning id into v_bag;
+  perform t_su();
+
+  -- ---- A: only admin/inventory may define a unit ----
+  perform t_as(v_cashier);
+  perform t_err('sales cannot create a product unit',
+    format('insert into product_units (tenant_id, product_kind, product_id, name, factor) values (%L, %L, %L, %L, 6)',
+      t_id('tenant'), 'finished_good', v_soap, 'Half-dozen'),
+    'row-level security');
+  perform t_su();
+
+  -- ---- B: selling by the carton converts to base units, price stays per piece ----
+  perform t_as(v_cashier);
+  execute format(
+    'select public.create_sale(null, current_date, null, 0, %L::jsonb)',
+    jsonb_build_array(jsonb_build_object(
+      'finished_good_id', v_soap, 'quantity', 1, 'unit_price', 100,
+      'uom_id', v_carton, 'uom_qty', 2))::text
+  ) into v_sale;
+  perform t_su();
+  select * into v_row from sale_items where sales_order_id = v_sale;
+  perform t_rec('2 cartons of 12 converts to a 24-piece base quantity',
+    v_row.quantity = 24 and v_row.uom_qty = 2 and v_row.uom_factor = 12,
+    format('qty=%s uom_qty=%s uom_factor=%s', v_row.quantity, v_row.uom_qty, v_row.uom_factor));
+  perform t_rec('the price stays per piece, not per carton (24 x 100 = 2400)',
+    (select total_amount = 2400 from sales_orders where id = v_sale));
+  perform t_rec('stock dropped by the full 24 pieces, not by 2 (200 opening - 24 = 176)',
+    (select qty_balance from finished_goods where id = v_soap) = 176);
+
+  -- ---- C: a unit that belongs to a different product is refused ----
+  perform t_as(v_cashier);
+  perform t_err('a unit that belongs to a different product can''t be used against it',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb)',
+      jsonb_build_array(jsonb_build_object(
+        'finished_good_id', v_soap2, 'quantity', 1, 'unit_price', 100,
+        'uom_id', v_carton, 'uom_qty', 1))::text),
+    'doesn''t belong');
+  perform t_su();
+
+  -- ---- D: the unit quantity itself must be above zero ----
+  perform t_as(v_cashier);
+  perform t_err('a zero unit quantity is refused',
+    format('select public.create_sale(null, current_date, null, 0, %L::jsonb)',
+      jsonb_build_array(jsonb_build_object(
+        'finished_good_id', v_soap, 'quantity', 1, 'unit_price', 100,
+        'uom_id', v_carton, 'uom_qty', 0))::text),
+    'more than zero');
+  perform t_su();
+
+  -- ---- E: buying by the bag converts the same way on the purchase side ----
+  perform t_as(v_admin);
+  execute format(
+    'select public.create_purchase(null, current_date, null, 0, %L::jsonb)',
+    jsonb_build_array(jsonb_build_object(
+      'material_id', v_mat, 'qty', 1, 'cost_price', 200,
+      'uom_id', v_bag, 'uom_qty', 4))::text
+  ) into v_po;
+  perform t_su();
+  perform t_rec('4 bags of 25kg converts to a 100kg base quantity, priced per kg',
+    (select qty_balance = 100 from materials where id = v_mat)
+    and (select total_amount = 20000 from purchase_orders where id = v_po));
+
+  -- ---- F: the same conversion applies when receiving an ordered PO ----
+  perform t_as(v_admin);
+  execute format(
+    'select public.create_purchase_order(null, %L::jsonb)',
+    jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 50, 'unit_cost', 8))::text
+  ) into v_po;
+  select id into v_line1 from purchase_order_lines where purchase_order_id = v_po;
+  execute format(
+    'select public.receive_purchase_order(%L::uuid, %L::jsonb)',
+    v_po,
+    jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 1, 'uom_id', v_bag, 'uom_qty', 2))::text
+  );
+  perform t_su();
+  perform t_rec('receiving 2 bags of 25kg fills 50kg of the 50kg ordered — order now fully received',
+    (select status = 'received' from purchase_orders where id = v_po)
+    and (select qty_remaining = 50 from purchase_items where po_line_id = v_line1));
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

@@ -12,6 +12,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
+import ProductUnitsSection from '../components/ProductUnitsSection';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
@@ -290,6 +291,8 @@ export default function FinishedGoods() {
                     <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Printed on batch labels.</small>
                   </div>
                 </div>
+
+                {editRow && <ProductUnitsSection productKind="finished_good" productId={editRow.id} baseUnitLabel={form.unit} />}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

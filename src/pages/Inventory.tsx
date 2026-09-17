@@ -12,6 +12,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import AdjustStockModal from '../components/AdjustStockModal';
+import ProductUnitsSection from '../components/ProductUnitsSection';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import { hasFeature, planFor } from '../lib/features';
 import Modal from '../components/Modal';
@@ -277,6 +278,8 @@ export default function Inventory() {
                     </small>
                   </span>
                 </label>
+
+                {editRow && <ProductUnitsSection productKind="material" productId={editRow.id} baseUnitLabel={form.unit} />}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>

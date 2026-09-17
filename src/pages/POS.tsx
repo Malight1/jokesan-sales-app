@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine, Calculator, Delete, Undo2, Tag } from 'lucide-react';
 import {
-  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing,
-  FinishedGood, Customer, Lookup, StockLevel, SalesOrder, PriceList, PriceListItem, CustomerType,
+  sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
+  FinishedGood, Customer, Lookup, StockLevel, SalesOrder, PriceList, PriceListItem, CustomerType, ProductUnit,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -174,24 +174,38 @@ export default function POS() {
   const change = payMode === 'full' && tendered > total ? tendered - total : 0;
   const totalDiscount = cart.reduce((s, l) => s + Math.max((resolvedPrice(l.good, l.qty) - l.unitPrice) * l.qty, 0), 0) + orderDiscount;
 
-  const addToCart = (g: FinishedGood) => {
+  // qtyToAdd > 1 is a unit scan ("Carton" = 12) — the line still holds
+  // plain base-unit pieces, same as always; the unit only decided how
+  // many pieces landed in the cart in one tap.
+  const addToCart = (g: FinishedGood, qtyToAdd: number = 1) => {
     if (avail(g) <= 0) { toast.error(`${g.name} is out of stock${multi ? ` at ${myBranchName}` : ''}.`); return; }
     setCart(c => {
       const ex = c.find(l => l.good.id === g.id);
+      const base = ex ? ex.qty : 0;
+      const nextQty = Math.min(base + qtyToAdd, avail(g));
+      if (nextQty <= base) { toast.error(`Only ${avail(g)} of ${g.name} ${where}.`); return c; }
       if (ex) {
-        if (ex.qty >= avail(g)) { toast.error(`Only ${avail(g)} of ${g.name} ${where}.`); return c; }
-        const nextQty = ex.qty + 1;
         return c.map(l => l.good.id === g.id ? { ...l, qty: nextQty, unitPrice: l.manual ? l.unitPrice : resolvedPrice(g, nextQty) } : l);
       }
-      return [...c, { good: g, qty: 1, unitPrice: resolvedPrice(g, 1) }];
+      return [...c, { good: g, qty: nextQty, unitPrice: resolvedPrice(g, nextQty) }];
     });
   };
+
+  const { data: unitsData } = useQuery<ProductUnit[]>(() => productUnits.list(), [], { cacheKey: 'pos-units' });
 
   const handleScan = (code: string) => {
     setShowScanner(false);
     const match = goods.find(g => g.barcode === code);
-    if (match) { addToCart(match); toast.success(`${match.name} added.`); }
-    else toast.error(`No product matches barcode ${code}.`);
+    if (match) { addToCart(match); toast.success(`${match.name} added.`); return; }
+
+    const unit = unitsData?.find(u => u.barcode === code && u.product_kind === 'finished_good');
+    const unitProduct = unit && goods.find(g => g.id === unit.product_id);
+    if (unit && unitProduct) {
+      addToCart(unitProduct, unit.factor);
+      toast.success(`Added 1 ${unit.name} of ${unitProduct.name} (${unit.factor} ${unitProduct.unit ?? ''}).`);
+      return;
+    }
+    toast.error(`No product matches barcode ${code}.`);
   };
 
   const setQty = (id: string, qty: number) => {
