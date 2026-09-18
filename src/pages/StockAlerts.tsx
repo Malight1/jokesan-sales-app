@@ -205,7 +205,7 @@ export default function StockAlerts() {
         <Modal onClose={() => setEditItem(null)} maxWidth={360}>
             <div className="modal-header">
               <h2>Minimum level — {editItem.name}</h2>
-              <button className="close-btn" onClick={() => setEditItem(null)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setEditItem(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="modal-body">
               <div className="form-group">

@@ -57,7 +57,7 @@ export default function BarcodeScanner({ onScan, onClose }: { onScan: (code: str
     <Modal onClose={handleClose} maxWidth={420}>
         <div className="modal-header">
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Camera size={18} /> Scan Barcode</h2>
-          <button className="close-btn" onClick={handleClose}><X size={18} /></button>
+          <button className="close-btn" onClick={handleClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           {!cameraError && (

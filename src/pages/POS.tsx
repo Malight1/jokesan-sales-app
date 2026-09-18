@@ -412,7 +412,7 @@ export default function POS() {
       <div className="pos-cart">
         <div className="cart-head">
           <ShoppingCart size={18} /> <h2>Current Sale{multi ? ` · ${myBranchName}` : ''}</h2>
-          {cart.length > 0 && <button className="clear-btn" onClick={clearSale} title="Clear"><Trash2 size={15} /></button>}
+          {cart.length > 0 && <button className="clear-btn" onClick={clearSale} title="Clear sale" aria-label="Clear sale"><Trash2 size={15} /></button>}
         </div>
 
         <div className="cart-lines">
@@ -431,9 +431,9 @@ export default function POS() {
                   </div>
                 </div>
                 <div className="cl-qty">
-                  <button onClick={() => setQty(l.good.id, l.qty - 1)}><Minus size={13} /></button>
+                  <button onClick={() => setQty(l.good.id, l.qty - 1)} aria-label={`Decrease quantity of ${l.good.name}`}><Minus size={13} /></button>
                   <span>{l.qty}</span>
-                  <button onClick={() => setQty(l.good.id, l.qty + 1)}><Plus size={13} /></button>
+                  <button onClick={() => setQty(l.good.id, l.qty + 1)} aria-label={`Increase quantity of ${l.good.name}`}><Plus size={13} /></button>
                 </div>
                 <div className="cl-amount">{fmt(l.qty * l.unitPrice)}</div>
                 {tiersEnabled && (
@@ -442,7 +442,7 @@ export default function POS() {
                     <Tag size={13} />
                   </button>
                 )}
-                <button className="cl-remove" onClick={() => setQty(l.good.id, 0)}><X size={13} /></button>
+                <button className="cl-remove" onClick={() => setQty(l.good.id, 0)} title="Remove from sale" aria-label={`Remove ${l.good.name} from sale`}><X size={13} /></button>
               </div>
             );
           })}

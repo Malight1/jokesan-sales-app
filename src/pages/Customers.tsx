@@ -142,7 +142,7 @@ export default function Customers() {
         <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Customer' : 'Add Customer'}</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="modal-body">

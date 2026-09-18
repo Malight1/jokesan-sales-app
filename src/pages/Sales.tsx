@@ -355,7 +355,7 @@ export default function Sales() {
         <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Sale</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={e => { e.preventDefault(); submitSale(); }}>
               <div className="modal-body">
@@ -412,7 +412,7 @@ export default function Sales() {
                           <div className="amount-display">{fmt(item.quantity * item.unit_price)}</div>
                         </div>
                         {form.items.length > 1 && (
-                          <button type="button" className="remove-item" onClick={() => removeItem(idx)}><X size={14} /></button>
+                          <button type="button" className="remove-item" onClick={() => removeItem(idx)} title="Remove line" aria-label="Remove this line"><X size={14} /></button>
                         )}
                       </div>
                       {discounted && (
@@ -499,7 +499,7 @@ export default function Sales() {
         <Modal onClose={() => setPayFor(null)} maxWidth={380}>
             <div className="modal-header">
               <h2>Record Payment</h2>
-              <button className="close-btn" onClick={() => setPayFor(null)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setPayFor(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="modal-body">
               {(payMut.error || spendCreditMut.error) && <ErrorState message={payMut.error || spendCreditMut.error || ''} />}
@@ -895,7 +895,7 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
     <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Sale Detail</h2>
-          <button className="close-btn" onClick={onClose}><X size={18} /></button>
+          <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           {loading && <Loading />}

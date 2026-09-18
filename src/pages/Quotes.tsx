@@ -171,7 +171,7 @@ export default function Quotes() {
         <Modal onClose={() => setShowModal(false)}>
           <div className="modal-header">
             <h2>New {form.kind === 'proforma' ? 'Proforma Invoice' : 'Quote'}</h2>
-            <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+            <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
           </div>
           <form onSubmit={submitQuote}>
             <div className="modal-body">
@@ -217,7 +217,7 @@ export default function Quotes() {
                   </div>
                   <div style={{ minWidth: 90, textAlign: 'right', fontWeight: 600, paddingBottom: 8 }}>{fmt(item.quantity * item.unit_price)}</div>
                   {form.items.length > 1 && (
-                    <button type="button" className="remove-item" onClick={() => removeItem(idx)} style={{ marginBottom: 8 }}><X size={14} /></button>
+                    <button type="button" className="remove-item" onClick={() => removeItem(idx)} style={{ marginBottom: 8 }} title="Remove line" aria-label="Remove this line"><X size={14} /></button>
                   )}
                 </div>
               ))}

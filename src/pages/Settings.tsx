@@ -218,7 +218,7 @@ function BranchesTab() {
         <Modal onClose={() => setShowRegModal(false)} maxWidth={380}>
           <div className="modal-header">
             <h2>Add Register</h2>
-            <button className="close-btn" onClick={() => setShowRegModal(false)}><X size={18} /></button>
+            <button className="close-btn" onClick={() => setShowRegModal(false)} aria-label="Close"><X size={18} /></button>
           </div>
           <form onSubmit={submitRegister}>
             <div className="modal-body">
@@ -247,7 +247,7 @@ function BranchesTab() {
         <Modal onClose={() => setShowModal(false)} maxWidth={400}>
             <div className="modal-header">
               <h2>{editRow ? 'Edit Branch' : 'Add Branch'}</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={submit}>
               <div className="modal-body">
@@ -1010,7 +1010,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
         <Modal onClose={() => setShowInvite(false)} maxWidth={420}>
             <div className="modal-header">
               <h2>Invite a Team Member</h2>
-              <button className="close-btn" onClick={() => setShowInvite(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowInvite(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={sendInvite}>
               <div className="modal-body">
@@ -1321,7 +1321,7 @@ function RecipesTab() {
                 <input value={it.unit} onChange={e => setItems(arr => arr.map((x, i) => i === idx ? { ...x, unit: e.target.value } : x))} placeholder="kg, L…" />
               </div>
               <button type="button" onClick={() => setItems(arr => arr.filter((_, i) => i !== idx))}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem' }}><X size={14} /></button>
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem' }} title="Remove ingredient" aria-label="Remove this ingredient"><X size={14} /></button>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.75rem' }}>

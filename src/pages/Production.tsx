@@ -201,7 +201,7 @@ export default function Production() {
         <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Production Run</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="modal-body">
@@ -277,7 +277,7 @@ export default function Production() {
                       <label>Qty Used</label>
                       <NumberInput value={c.qty} onChange={v => updateConsumption(idx, 'qty', v)} />
                     </div>
-                    <button type="button" onClick={() => removeConsumption(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }}><X size={14} /></button>
+                    <button type="button" onClick={() => removeConsumption(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }} title="Remove material" aria-label="Remove this material"><X size={14} /></button>
                   </div>
                 ))}
                 <button type="button" className="btn-ghost btn-sm" onClick={addConsumption} style={{ marginBottom: '1rem' }}><Plus size={14} /> Add material</button>
@@ -400,7 +400,7 @@ function ProductionDetail({ id, onClose, productName, materialName }: {
     <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Production Detail</h2>
-          <button className="close-btn" onClick={onClose}><X size={18} /></button>
+          <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           {loading && <Loading />}

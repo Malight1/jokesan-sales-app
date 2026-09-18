@@ -231,7 +231,7 @@ export default function Purchases() {
         <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
               <h2>New Purchase Order</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="modal-body">
@@ -270,7 +270,7 @@ export default function Purchases() {
                         <NumberInput value={item.cost_price} onChange={v => updateItem(idx, 'cost_price', v)} />
                       </div>
                       {form.items.length > 1 && (
-                        <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }}><X size={14} /></button>
+                        <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }} title="Remove item" aria-label="Remove this item"><X size={14} /></button>
                       )}
                     </div>
                     {tracksBatches(item.material_id) && (
@@ -323,7 +323,7 @@ export default function Purchases() {
         <Modal onClose={() => setPayFor(null)} maxWidth={380}>
             <div className="modal-header">
               <h2>Record Payment</h2>
-              <button className="close-btn" onClick={() => setPayFor(null)}><X size={18} /></button>
+              <button className="close-btn" onClick={() => setPayFor(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="modal-body">
               {payMut.error && <ErrorState message={payMut.error} />}
@@ -590,7 +590,7 @@ function OrderMaterialsModal({ suppliers, materials, onClose, onDone }: {
               </div>
               <div style={{ minWidth: 90, textAlign: 'right', fontWeight: 600, paddingBottom: 8 }}>{fmt(line.qty * line.unit_cost)}</div>
               {lines.length > 1 && (
-                <button type="button" className="remove-item" onClick={() => removeLine(idx)} style={{ marginBottom: 8 }}><X size={14} /></button>
+                <button type="button" className="remove-item" onClick={() => removeLine(idx)} style={{ marginBottom: 8 }} title="Remove material" aria-label="Remove this material"><X size={14} /></button>
               )}
             </div>
           ))}
@@ -735,7 +735,7 @@ function PurchaseDetail({ id, onClose, supplierName, materialName, isAdmin }: {
     <Modal onClose={onClose}>
         <div className="modal-header">
           <h2>Purchase Detail</h2>
-          <button className="close-btn" onClick={onClose}><X size={18} /></button>
+          <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           {loading && <Loading />}

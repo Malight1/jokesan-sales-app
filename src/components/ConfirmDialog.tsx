@@ -22,7 +22,7 @@ export default function ConfirmDialog({
             {danger && <AlertTriangle size={18} color="#dc2626" />}
             {title}
           </h2>
-          <button className="close-btn" onClick={onCancel}><X size={18} /></button>
+          <button className="close-btn" onClick={onCancel} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           <div style={{ fontSize: '0.9rem', color: '#475569', lineHeight: 1.5 }}>{message}</div>

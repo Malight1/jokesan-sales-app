@@ -173,7 +173,7 @@ export default function DataTable<T>({
                       <td data-label="Actions" className="align-right dt-actions">
                         {rowActions.filter(a => !a.show || a.show(row)).map((a, i) => (
                           <button key={i} className={`dt-action ${a.variant === 'danger' ? 'danger' : ''}`}
-                            title={a.label} onClick={() => a.onClick(row)}>
+                            title={a.label} aria-label={a.label} onClick={() => a.onClick(row)}>
                             {a.icon}
                           </button>
                         ))}
@@ -192,8 +192,8 @@ export default function DataTable<T>({
             </span>
             {totalPages > 1 && (
               <div className="dt-pager">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={15} /></button>
-                <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={15} /></button>
+                <button disabled={page === 1} onClick={() => setPage(p => p - 1)} title="Previous page" aria-label="Previous page"><ChevronLeft size={15} /></button>
+                <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)} title="Next page" aria-label="Next page"><ChevronRight size={15} /></button>
               </div>
             )}
           </div>

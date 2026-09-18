@@ -31,7 +31,7 @@ export default function PendingSyncPanel({ queue, online, onClose }: { queue: Qu
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CloudOff size={18} color={online ? '#16a34a' : '#dc2626'} /> Pending Sync
           </h2>
-          <button className="close-btn" onClick={onClose}><X size={18} /></button>
+          <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
           {!online && (
