@@ -58,7 +58,7 @@ export default function Assistant() {
   const outOfQuestions = (quota?.remaining ?? 1) <= 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 130px)' }}>
+    <div>
       <div className="page-header">
         <div className="page-title">
           <h1>Ask StockFlow</h1>
@@ -66,46 +66,54 @@ export default function Assistant() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.25rem 0 0.75rem' }}>
-        {messages.length === 0 && (
-          <div className="card" style={{ color: '#64748b', fontSize: '0.85rem' }}>
-            Try asking things like "What's low on stock?", "How's my profit this month compared to last?",
-            "What discounts have I given this month?" or "What should I reorder?"
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} style={{
-            alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-            maxWidth: '80%', padding: '0.6rem 0.9rem', borderRadius: 12,
-            background: m.role === 'user' ? '#2563eb' : '#f1f5f9',
-            color: m.role === 'user' ? '#fff' : '#1e293b',
-            whiteSpace: 'pre-wrap', fontSize: '0.9rem', lineHeight: 1.45,
-          }}>
-            {m.text}
-          </div>
-        ))}
-        {asking && (
-          <div style={{ alignSelf: 'flex-start', color: '#94a3b8', fontSize: '0.85rem', padding: '0.6rem 0.9rem' }}>
-            Thinking…
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      <form onSubmit={ask} style={{ display: 'flex', gap: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
-        <div className="dt-search" style={{ flex: 1, minWidth: 0 }}>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={outOfQuestions ? 'No questions left this month' : 'Ask about your sales, stock or profit…'}
-            disabled={asking || outOfQuestions}
-            autoFocus
-          />
+      {/* A self-contained, height-capped card rather than sizing off the
+          viewport: this page is rendered inside Layout's normal document
+          flow (.page-content just flows, it doesn't fix a viewport height),
+          and other things can render above it (e.g. the read-only trial
+          banner) — a height guessed from 100vh would push the input below
+          the fold with no way to reach it whenever that guess is wrong. */}
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 'min(600px, 70vh)', padding: '1rem' }}>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.25rem 0.25rem 0.75rem' }}>
+          {messages.length === 0 && (
+            <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
+              Try asking things like "What's low on stock?", "How's my profit this month compared to last?",
+              "What discounts have I given this month?" or "What should I reorder?"
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} style={{
+              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '80%', padding: '0.6rem 0.9rem', borderRadius: 12,
+              background: m.role === 'user' ? '#2563eb' : '#f1f5f9',
+              color: m.role === 'user' ? '#fff' : '#1e293b',
+              whiteSpace: 'pre-wrap', fontSize: '0.9rem', lineHeight: 1.45,
+            }}>
+              {m.text}
+            </div>
+          ))}
+          {asking && (
+            <div style={{ alignSelf: 'flex-start', color: '#94a3b8', fontSize: '0.85rem', padding: '0.6rem 0.9rem' }}>
+              Thinking…
+            </div>
+          )}
+          <div ref={bottomRef} />
         </div>
-        <button className="btn-primary" type="submit" disabled={asking || outOfQuestions || !input.trim()}>
-          <Send size={15} />
-        </button>
-      </form>
+
+        <form onSubmit={ask} style={{ display: 'flex', gap: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0', flexShrink: 0 }}>
+          <div className="dt-search" style={{ flex: 1, minWidth: 0 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={outOfQuestions ? 'No questions left this month' : 'Ask about your sales, stock or profit…'}
+              disabled={asking || outOfQuestions}
+              autoFocus
+            />
+          </div>
+          <button className="btn-primary" type="submit" disabled={asking || outOfQuestions || !input.trim()}>
+            <Send size={15} />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
