@@ -157,7 +157,7 @@ function BranchesTab() {
     { key: 'actions', header: 'Actions', sortable: false, align: 'right', value: () => '',
       render: b => (
         <>
-          <button className="btn-ghost btn-sm" onClick={() => openEdit(b)}><Pencil size={13} /></button>
+          <button className="btn-ghost btn-sm" onClick={() => openEdit(b)} title="Edit" aria-label={`Edit ${b.name}`}><Pencil size={13} /></button>
           <button className="btn-ghost btn-sm" style={{ color: b.is_active ? '#dc2626' : '#16a34a' }} onClick={() => toggle(b)}>
             {b.is_active ? 'Deactivate' : 'Reactivate'}
           </button>
