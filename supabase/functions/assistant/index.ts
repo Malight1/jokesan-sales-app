@@ -7,8 +7,17 @@
 //   supabase functions deploy assistant
 //
 // Set the secret (Project Settings → Edge Functions → Secrets):
-//   ANTHROPIC_API_KEY = sk-ant-...   (StockFlow's own key — never a
-//   per-tenant one, and it never reaches the frontend)
+//   GROQ_API_KEY = gsk_...   (StockFlow's own key, from console.groq.com
+//   — never a per-tenant one, and it never reaches the frontend)
+//
+// Runs on Groq's free tier (OpenAI-compatible chat-completions API) —
+// picked over Anthropic/OpenAI specifically because it costs nothing to
+// try. Worth knowing: the free tier's rate limit is one shared bucket
+// across every StockFlow tenant, not per business, so it's realistic for
+// validating whether customers actually use this feature, not yet a
+// guarantee once usage is real. Moving to a paid Groq tier (or another
+// provider) later is a small, contained change — only this file and the
+// one MODEL constant below need to know which provider is in use.
 //
 // The model never touches the database directly and is never trusted
 // with a number of its own. Every fact it states comes from calling one
@@ -27,10 +36,10 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// One model for now — Haiku 4.5, cheap enough for everyday questions.
-// The plan's own note about escalating to a larger model for "analysis"
-// questions needs a real classifier to do well; not built this sitting.
-const MODEL = 'claude-haiku-4-5-20251001';
+// Check console.groq.com/docs/models for what's currently available on
+// the free tier if this model is ever retired — Groq's lineup changes
+// faster than a hosted-API provider's usually does.
+const MODEL = 'llama-3.3-70b-versatile';
 const MAX_TOOL_ROUNDS = 6;
 
 const SYSTEM_PROMPT = `You are "Ask StockFlow", built into a Nigerian inventory and manufacturing
@@ -49,80 +58,104 @@ Rules, no exceptions:
 - Money is Nigerian Naira (₦) unless the business's own data says otherwise.
 - Keep answers short and concrete — a shop owner reading this on a phone.`;
 
+// OpenAI-style function-calling shape (Groq's chat-completions API is
+// OpenAI-compatible) — a plain JSON Schema per tool, not Claude's
+// input_schema wrapper.
 const TOOLS = [
   {
-    name: 'dashboard_summary',
-    description: "This business's role-shaped dashboard summary for the asking user — sales, stock, profit and alerts, shaped for their own role (admin/sales/inventory/accounts).",
-    input_schema: { type: 'object', properties: {}, additionalProperties: false },
-  },
-  {
-    name: 'stock_levels',
-    description: 'Current stock on hand per material and finished good, optionally at one branch. Returns branch, product, unit, quantity, min stock level, and sellable quantity (excludes expired/recalled/on-hold stock).',
-    input_schema: {
-      type: 'object',
-      properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
-      additionalProperties: false,
+    type: 'function',
+    function: {
+      name: 'dashboard_summary',
+      description: "This business's role-shaped dashboard summary for the asking user — sales, stock, profit and alerts, shaped for their own role (admin/sales/inventory/accounts).",
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
   {
-    name: 'reorder_suggestions',
-    description: 'Smart reorder suggestions for raw materials only (not finished goods) — how much of each material to order and why, based on real usage history, its variability, and the learned supplier lead time. Admin/inventory only.',
-    input_schema: {
-      type: 'object',
-      properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'batch_trace',
-    description: 'Trace one finished-good production batch end to end: which raw material batches went into it (and their supplier), which sales it went out to, and how much is left. Needs the exact finished-good id and batch number — ask the user for the batch number if they only gave a product name.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        finished_good_id: { type: 'string', description: 'UUID of the finished good.' },
-        batch_no: { type: 'string', description: 'The batch number as printed on the label.' },
+    type: 'function',
+    function: {
+      name: 'stock_levels',
+      description: 'Current stock on hand per material and finished good, optionally at one branch. Returns branch, product, unit, quantity, min stock level, and sellable quantity (excludes expired/recalled/on-hold stock).',
+      parameters: {
+        type: 'object',
+        properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
+        additionalProperties: false,
       },
-      required: ['finished_good_id', 'batch_no'],
-      additionalProperties: false,
     },
   },
   {
-    name: 'report_product_profitability',
-    description: 'Quantity sold, revenue, cost and gross profit per finished good over a date range.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        from: { type: 'string', description: 'ISO date, inclusive. Omit for no lower bound.' },
-        to: { type: 'string', description: 'ISO date, inclusive. Omit for no upper bound.' },
-        branch_id: { type: 'string', description: 'Optional branch UUID. Omit for all branches the caller can see.' },
+    type: 'function',
+    function: {
+      name: 'reorder_suggestions',
+      description: 'Smart reorder suggestions for raw materials only (not finished goods) — how much of each material to order and why, based on real usage history, its variability, and the learned supplier lead time. Admin/inventory only.',
+      parameters: {
+        type: 'object',
+        properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
+        additionalProperties: false,
       },
-      additionalProperties: false,
     },
   },
   {
-    name: 'report_returns',
-    description: 'Customer returns and credit notes per finished good over a date range — quantity returned, reasons, and value.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        from: { type: 'string', description: 'ISO date, inclusive.' },
-        to: { type: 'string', description: 'ISO date, inclusive.' },
-        branch_id: { type: 'string' },
+    type: 'function',
+    function: {
+      name: 'batch_trace',
+      description: 'Trace one finished-good production batch end to end: which raw material batches went into it (and their supplier), which sales it went out to, and how much is left. Needs the exact finished-good id and batch number — ask the user for the batch number if they only gave a product name.',
+      parameters: {
+        type: 'object',
+        properties: {
+          finished_good_id: { type: 'string', description: 'UUID of the finished good.' },
+          batch_no: { type: 'string', description: 'The batch number as printed on the label.' },
+        },
+        required: ['finished_good_id', 'batch_no'],
+        additionalProperties: false,
       },
-      additionalProperties: false,
     },
   },
   {
-    name: 'report_discounts',
-    description: 'Discounts given on sales, grouped by the reason recorded, over a date range — how many lines, how much quantity, and the total value discounted.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        from: { type: 'string', description: 'ISO date, inclusive.' },
-        to: { type: 'string', description: 'ISO date, inclusive.' },
-        branch_id: { type: 'string' },
+    type: 'function',
+    function: {
+      name: 'report_product_profitability',
+      description: 'Quantity sold, revenue, cost and gross profit per finished good over a date range.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'ISO date, inclusive. Omit for no lower bound.' },
+          to: { type: 'string', description: 'ISO date, inclusive. Omit for no upper bound.' },
+          branch_id: { type: 'string', description: 'Optional branch UUID. Omit for all branches the caller can see.' },
+        },
+        additionalProperties: false,
       },
-      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'report_returns',
+      description: 'Customer returns and credit notes per finished good over a date range — quantity returned, reasons, and value.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'ISO date, inclusive.' },
+          to: { type: 'string', description: 'ISO date, inclusive.' },
+          branch_id: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'report_discounts',
+      description: 'Discounts given on sales, grouped by the reason recorded, over a date range — how many lines, how much quantity, and the total value discounted.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'ISO date, inclusive.' },
+          to: { type: 'string', description: 'ISO date, inclusive.' },
+          branch_id: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
     },
   },
 ];
@@ -170,52 +203,55 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) return json({ error: 'Not authenticated' });
 
     // Plan + monthly quota, checked and recorded BEFORE spending anything
-    // on Claude — a rejected question never reaches the API. Returned as
-    // a 200 with an `error` field, not a non-2xx status: supabase-js's
+    // on the model — a rejected question never reaches the API. Returned
+    // as a 200 with an `error` field, not a non-2xx status: supabase-js's
     // functions.invoke() surfaces a non-2xx as a generic "non-2xx status
     // code" error and drops the actual response body, which would bury
     // this exact, deliberately-worded message the user needs to see.
     const { data: quota, error: quotaErr } = await client.rpc('check_and_record_assistant_question');
     if (quotaErr) return json({ error: quotaErr.message });
 
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!anthropicKey) return json({ error: 'The AI assistant isn\'t set up for this account yet.' });
+    const groqKey = Deno.env.get('GROQ_API_KEY');
+    if (!groqKey) return json({ error: 'The AI assistant isn\'t set up for this account yet.' });
 
-    const messages: any[] = [...(Array.isArray(history) ? history : []), { role: 'user', content: question }];
+    // `conversation` is exactly what gets handed back as `history` next
+    // turn — the system prompt is prepended fresh into `apiMessages` each
+    // round instead, so it's never duplicated into stored history.
+    const conversation: any[] = [...(Array.isArray(history) ? history : []), { role: 'user', content: question }];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const apiMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation];
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
+          'authorization': `Bearer ${groqKey}`,
         },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM_PROMPT, tools: TOOLS, messages }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 1024, messages: apiMessages, tools: TOOLS, tool_choice: 'auto' }),
       });
       if (!res.ok) {
         return json({ error: `The assistant is temporarily unavailable (${res.status}). Try again shortly.` });
       }
       const data = await res.json();
-      const content = data.content ?? [];
-      messages.push({ role: 'assistant', content });
+      const msg = data.choices?.[0]?.message ?? {};
+      conversation.push(msg);
 
-      const toolUses = content.filter((b: any) => b.type === 'tool_use');
-      if (toolUses.length === 0) {
-        const answer = content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
-        return json({ answer: answer || "I couldn't find an answer to that.", quota, messages });
+      const toolCalls = msg.tool_calls ?? [];
+      if (toolCalls.length === 0) {
+        const answer = String(msg.content ?? '').trim();
+        return json({ answer: answer || "I couldn't find an answer to that.", quota, messages: conversation });
       }
 
-      const toolResults = [];
-      for (const use of toolUses) {
-        const { data: toolData, error: toolError } = await callTool(client, use.name, use.input ?? {});
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: use.id,
+      for (const call of toolCalls) {
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(call.function?.arguments || '{}'); } catch { /* leave input empty */ }
+        const { data: toolData, error: toolError } = await callTool(client, call.function?.name, input);
+        conversation.push({
+          role: 'tool',
+          tool_call_id: call.id,
           content: JSON.stringify(toolError ? { error: toolError.message } : (toolData ?? [])),
         });
       }
-      messages.push({ role: 'user', content: toolResults });
     }
 
     return json({ error: 'That question needed too many steps to answer — try asking something narrower.' });
