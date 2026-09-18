@@ -93,13 +93,15 @@ export default function Assistant() {
       </div>
 
       <form onSubmit={ask} style={{ display: 'flex', gap: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={outOfQuestions ? 'No questions left this month' : 'Ask about your sales, stock or profit…'}
-          disabled={asking || outOfQuestions}
-          style={{ flex: 1 }}
-        />
+        <div className="dt-search" style={{ flex: 1, minWidth: 0 }}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder={outOfQuestions ? 'No questions left this month' : 'Ask about your sales, stock or profit…'}
+            disabled={asking || outOfQuestions}
+            autoFocus
+          />
+        </div>
         <button className="btn-primary" type="submit" disabled={asking || outOfQuestions || !input.trim()}>
           <Send size={15} />
         </button>
