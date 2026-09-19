@@ -1,0 +1,368 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+// Shared across the four public pages. Reuses the app's own locked tokens
+// (accent, navy, Plus Jakarta Sans) so moving from here into the real
+// product never feels like two different companies.
+
+.btn-lg {
+  padding: 0.85rem 1.6rem;
+  font-size: $font-size-lg;
+  border-radius: $radius;
+}
+
+.mkt {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: $white;
+  color: $gray-800;
+}
+
+// ---------------------------------------------------------------- nav
+.mkt-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid $gray-200;
+
+  &__inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0.9rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+
+  &__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: $gray-900;
+    text-decoration: none;
+    margin-right: auto;
+  }
+
+  &__logo {
+    width: 28px;
+    height: 28px;
+    border-radius: $radius-sm;
+    background: $primary;
+    color: $white;
+    display: grid;
+    place-items: center;
+  }
+
+  &__links a {
+    color: $gray-600;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 0.4rem 0;
+    margin: 0 0.9rem;
+    border-bottom: 2px solid transparent;
+    &.active, &:hover { color: $primary; }
+  }
+
+  &__links--desktop { display: flex; }
+
+  &__actions { display: flex; align-items: center; gap: 1rem; }
+  &__actions--desktop { display: flex; }
+  &__login { color: $gray-700; text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+
+  &__burger { display: none; background: none; border: none; color: $gray-700; cursor: pointer; }
+
+  &__mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.5rem 1.5rem 1.2rem;
+    border-top: 1px solid $gray-100;
+
+    a { padding: 0.6rem 0; color: $gray-700; text-decoration: none; font-weight: 600; }
+    a.active { color: $primary; }
+    .btn-primary { margin-top: 0.5rem; justify-content: center; }
+  }
+
+  @media (max-width: 760px) {
+    &__links--desktop, &__actions--desktop { display: none; }
+    &__burger { display: block; }
+  }
+}
+
+// ---------------------------------------------------------------- shell
+.mkt-main { flex: 1; }
+
+.mkt-eyebrow {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: $primary;
+  margin-bottom: 0.6rem;
+}
+
+.mkt-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem;
+
+  &--alt { background: $gray-50; max-width: none; padding-left: 0; padding-right: 0;
+    > * { max-width: 1180px; margin-left: auto; margin-right: auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+  }
+
+  &--intro {
+    text-align: center;
+    padding-bottom: 2rem;
+    h1 { font-size: clamp(2rem, 4vw, 2.75rem); max-width: 46rem; margin: 0 auto 1rem; }
+    p { color: $gray-600; max-width: 42rem; margin: 0 auto; font-size: 1.05rem; }
+  }
+
+  &__head {
+    text-align: center;
+    max-width: 42rem;
+    margin: 0 auto 2.5rem;
+    h2 { font-size: clamp(1.5rem, 3vw, 2rem); margin: 0 0 0.5rem; }
+    p { color: $gray-600; }
+    a { color: $primary; font-weight: 600; text-decoration: none; }
+  }
+}
+
+// ---------------------------------------------------------------- hero
+.mkt-hero {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 3rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+
+  &__copy h1 {
+    font-size: clamp(2.1rem, 4.2vw, 3rem);
+    line-height: 1.12;
+    margin: 0 0 1.1rem;
+  }
+  &__copy p { color: $gray-600; font-size: 1.1rem; line-height: 1.6; margin: 0 0 1.6rem; max-width: 34rem; }
+  &__cta { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  &__cta .btn-primary, &__cta .btn-secondary { display: inline-flex; align-items: center; gap: 0.4rem; }
+  &__trust { font-size: 0.82rem; color: $gray-400; }
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    padding-top: 2.5rem;
+  }
+}
+
+// ---------------------------------------------------------------- screenshot frame
+.shot-frame {
+  border-radius: $radius-lg;
+  border: 1px solid $gray-200;
+  box-shadow: $shadow-lg;
+  overflow: hidden;
+  background: $white;
+
+  &__bar {
+    display: flex;
+    gap: 6px;
+    padding: 0.6rem 0.75rem;
+    background: $gray-100;
+    border-bottom: 1px solid $gray-200;
+    span { width: 9px; height: 9px; border-radius: 50%; background: $gray-300; }
+  }
+
+  img { display: block; width: 100%; height: auto; }
+}
+
+// ---------------------------------------------------------------- problem/solution
+.mkt-pstable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mkt-prow {
+  display: grid;
+  grid-template-columns: 1fr 28px 1fr;
+  align-items: center;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  box-shadow: $shadow-xs;
+
+  &__problem {
+    padding: 1rem 1.2rem;
+    background: $danger-light;
+    color: darken($danger, 5%);
+    font-style: italic;
+    font-size: 0.92rem;
+  }
+  &__arrow { display: flex; align-items: center; justify-content: center; color: $gray-400; }
+  &__solution { padding: 1rem 1.2rem; color: $gray-700; font-size: 0.92rem; b { color: $success; } }
+
+  @media (max-width: 720px) {
+    grid-template-columns: 1fr;
+    &__arrow { display: none; }
+  }
+}
+
+// ---------------------------------------------------------------- capabilities
+.mkt-capabilities {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+
+  @media (max-width: 900px) { grid-template-columns: 1fr; }
+}
+
+.mkt-capability {
+  h3 { margin: 1.1rem 0 0.5rem; font-size: 1.1rem; }
+  p { color: $gray-600; font-size: 0.92rem; line-height: 1.55; margin: 0; }
+}
+
+// ---------------------------------------------------------------- pricing
+.mkt-pricing {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+
+  @media (max-width: 900px) { grid-template-columns: 1fr; }
+}
+
+.mkt-plan {
+  position: relative;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  padding: 1.8rem 1.6rem;
+  background: $white;
+  box-shadow: $shadow-sm;
+  display: flex;
+  flex-direction: column;
+
+  &--popular { border-color: $primary; box-shadow: 0 0 0 1px $primary, $shadow-md; }
+
+  &__badge {
+    position: absolute;
+    top: -11px;
+    right: 20px;
+    background: $primary;
+    color: $white;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.25rem 0.7rem;
+    border-radius: $radius-full;
+  }
+
+  h3 { margin: 0 0 0.4rem; font-size: 1.1rem; }
+  &__price { font-size: 2rem; font-weight: 800; color: $gray-900; small { font-size: 0.9rem; font-weight: 500; color: $gray-400; } }
+  &__blurb { color: $gray-500; font-size: 0.85rem; margin: 0.3rem 0 1.2rem; }
+  &__trial { font-size: 0.78rem; color: $gray-400; text-align: center; margin: 0.7rem 0 0; }
+
+  ul { list-style: none; padding: 0; margin: 0 0 1.4rem; display: flex; flex-direction: column; gap: 0.55rem; flex: 1; }
+  li { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.87rem; color: $gray-700; svg { color: $success; margin-top: 0.15rem; flex-shrink: 0; } }
+
+  .btn-primary { justify-content: center; }
+}
+
+.mkt-pricing__note { text-align: center; color: $gray-500; font-size: 0.88rem; margin-top: 2rem; a { color: $primary; font-weight: 600; text-decoration: none; } }
+
+// ---------------------------------------------------------------- faq teaser / faq page
+.mkt-faq-teaser {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+
+  h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+  p { color: $gray-600; font-size: 0.87rem; margin: 0; line-height: 1.5; }
+
+  @media (max-width: 900px) { grid-template-columns: 1fr; }
+}
+
+.mkt-faq-list { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: 0.7rem; }
+
+.mkt-faq-item {
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  padding: 1rem 1.3rem;
+  background: $white;
+
+  summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: $gray-900;
+    list-style: none;
+    &::-webkit-details-marker { display: none; }
+    &::after { content: '+'; float: right; color: $primary; font-weight: 700; }
+  }
+  &[open] summary::after { content: '\2212'; }
+  p { color: $gray-600; margin: 0.8rem 0 0; line-height: 1.6; font-size: 0.92rem; }
+}
+
+// ---------------------------------------------------------------- product page rows
+.mkt-product-row {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+
+  &--reverse { direction: rtl; > * { direction: ltr; } }
+  &--spotlight { background: $primary-light; border-radius: $radius-lg; max-width: 1130px; }
+
+  &__copy {
+    h2 { font-size: 1.6rem; margin: 0.3rem 0 1rem; }
+    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+    li { position: relative; padding-left: 1.2rem; color: $gray-700; font-size: 0.92rem; line-height: 1.5;
+      &::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 6px; height: 6px; border-radius: 50%; background: $primary; }
+    }
+  }
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    &--reverse { direction: ltr; }
+  }
+}
+
+// ---------------------------------------------------------------- final CTA
+.mkt-final-cta {
+  text-align: center;
+  padding: 5rem 1.5rem;
+  background: $sidebar-bg;
+  color: $white;
+
+  h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin: 0 0 0.6rem; }
+  p { color: rgba(255,255,255,0.7); margin: 0 0 1.6rem; }
+  .btn-primary { display: inline-flex; align-items: center; gap: 0.4rem; }
+}
+
+// ---------------------------------------------------------------- footer
+.mkt-footer {
+  border-top: 1px solid $gray-200;
+  background: $gray-50;
+
+  &__inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2rem;
+    justify-content: space-between;
+  }
+
+  &__brand { strong { color: $gray-900; } p { color: $gray-500; font-size: 0.85rem; margin: 0.3rem 0 0; } }
+
+  &__links { display: flex; flex-direction: column; gap: 0.6rem; a { color: $gray-600; text-decoration: none; font-size: 0.87rem; &:hover { color: $primary; } } }
+  &__whatsapp { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+  &__bottom { text-align: center; padding: 1rem 1.5rem 1.6rem; color: $gray-400; font-size: 0.78rem; }
+}

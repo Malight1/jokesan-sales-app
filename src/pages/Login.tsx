@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { Building2, Loader2 } from 'lucide-react';
 import './Login.scss';
@@ -9,12 +9,15 @@ type Mode = 'login' | 'signup';
 export default function Login() {
   const { signIn, signUp, session } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Once authenticated, leave the login screen for the dashboard.
   useEffect(() => {
-    if (session) navigate('/', { replace: true });
+    if (session) navigate('/dashboard', { replace: true });
   }, [session, navigate]);
-  const [mode, setMode] = useState<Mode>('login');
+  // A marketing-page "Start free trial" button links here with ?signup=1 so
+  // it lands straight in sign-up mode instead of sign-in.
+  const [mode, setMode] = useState<Mode>(searchParams.get('signup') ? 'signup' : 'login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

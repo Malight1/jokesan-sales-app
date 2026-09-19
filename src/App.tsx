@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './lib/AuthContext';
 import { ToastProvider } from './lib/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import PublicGate from './components/PublicGate';
 import Layout from './components/Layout';
 import { Loading } from './components/DataStates';
 import './styles/global.scss';
@@ -12,6 +13,15 @@ import './styles/global.scss';
 // shouldn't have to download Recharts, the CSV importer and the OCR engine
 // before the till will open.
 import Login from './pages/Login';
+
+// The public marketing site. Each page is its own lazy chunk, same as every
+// authenticated route below — a logged-out visitor's first paint shouldn't
+// pull in the app bundle, and a logged-in dashboard load shouldn't pull in
+// marketing copy either.
+const Home = lazy(() => import('./marketing/pages/Home'));
+const Product = lazy(() => import('./marketing/pages/Product'));
+const Pricing = lazy(() => import('./marketing/pages/Pricing'));
+const Faq = lazy(() => import('./marketing/pages/Faq'));
 
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -53,6 +63,12 @@ export default function App() {
       <BrowserRouter>
         <Suspense fallback={<Loading label="Loading…" />}>
           <Routes>
+            <Route element={<PublicGate />}>
+              <Route path="/" element={<Home />} />
+              <Route path="/product" element={<Product />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/faq" element={<Faq />} />
+            </Route>
             <Route path="/login" element={<Login />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
             {DashboardPreview && <Route path="/__dev/dashboards" element={<DashboardPreview />} />}
@@ -65,7 +81,7 @@ export default function App() {
                         while the next page's chunk downloads. */}
                     <Suspense fallback={<Loading label="Loading…" />}>
                       <Routes>
-                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/dashboard" element={<Dashboard />} />
                         <Route path="/sales" element={<Sales />} />
                         <Route path="/quotes" element={<Quotes />} />
                         <Route path="/deliveries" element={<Deliveries />} />

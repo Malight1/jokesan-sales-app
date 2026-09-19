@@ -21,7 +21,7 @@ const navItems = [
   {
     section: 'Overview',
     items: [
-      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/assistant', label: 'Ask StockFlow', icon: Sparkles },
     ],
   },
@@ -82,7 +82,7 @@ const navItems = [
 const MULTI_BRANCH_ONLY = new Set(['/transfers']);
 
 const pageTitles: Record<string, string> = {
-  '/': 'Dashboard',
+  '/dashboard': 'Dashboard',
   '/pos': 'Point of Sale',
   '/match-payment': 'Match Bank Payment',
   '/import': 'Import Data',

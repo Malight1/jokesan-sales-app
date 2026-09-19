@@ -17,7 +17,7 @@ export default function SuperAdmin() {
   const adminQ = useQuery<boolean>(() => platform.isAdmin(), []);
 
   if (adminQ.loading) return <Loading label="Checking access…" />;
-  if (!adminQ.data) return <Navigate to="/" replace />;
+  if (!adminQ.data) return <Navigate to="/dashboard" replace />;
 
   return <SuperAdminPanel toast={toast} />;
 }

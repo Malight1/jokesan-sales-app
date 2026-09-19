@@ -32,7 +32,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
 
   // Logged in but no role access to this path → bounce to dashboard
   if (profile && !canAccess(profile.role, location.pathname)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
