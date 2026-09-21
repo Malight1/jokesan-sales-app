@@ -17,6 +17,7 @@ import { whatsappLink } from '../lib/whatsapp';
 import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';
+import { RetailDashboard } from '../retail';
 import './Dashboard.scss';
 
 // ------------------------------------------------------------------
@@ -42,11 +43,11 @@ export const nairaShort = (n: unknown) => {
   if (a >= 1_000) return `₦${Math.round(v / 1_000)}k`;
   return `₦${Math.round(v)}`;
 };
-const count = (n: unknown) => num(n).toLocaleString('en-NG');
-const plural = (n: number, one: string, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many}`;
-const shortDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+export const count = (n: unknown) => num(n).toLocaleString('en-NG');
+export const plural = (n: number, one: string, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many}`;
+export const shortDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
-function greeting(): string {
+export function greeting(): string {
   const h = new Date().getHours();
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 }
@@ -56,7 +57,7 @@ const dayKey = (dt: Date) =>
 
 // The server only returns days that had sales; a till chart needs the quiet
 // days too, or a closed Sunday silently disappears from the week.
-function lastSevenDays(trend: { day: string; total: number }[]) {
+export function lastSevenDays(trend: { day: string; total: number }[]) {
   const byDay = new Map(trend.map(t => [String(t.day).slice(0, 10), num(t.total)]));
   const out: { key: string; label: string; long: string; total: number; today: boolean }[] = [];
   for (let i = 6; i >= 0; i--) {
@@ -690,6 +691,11 @@ export function DashboardView({ d, onRefresh, expiry }: {
 }) {
   if (d.role === 'sales') return <CashierDashboard d={d} />;
   if (d.role === 'inventory') return <InventoryDashboard d={d} expiry={expiry} />;
+  // A retail owner/accounts view gets its own dashboard entirely (src/retail)
+  // rather than a rearranged OwnerDashboard — see plan §1.2. Sales and
+  // inventory keep their existing screens either way: a cashier's till and
+  // a storekeeper's stock board don't change shape by business type.
+  if (d.business_type === 'retail') return <RetailDashboard d={d} onReminded={onRefresh} />;
   return <OwnerDashboard d={d} onReminded={onRefresh} expiry={expiry} />;
 }
 

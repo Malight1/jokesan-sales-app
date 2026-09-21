@@ -11,6 +11,7 @@ import { useBranches } from '../lib/useBranches';
 import { canAccess } from '../lib/permissions';
 import { Loading, ErrorState } from '../components/DataStates';
 import NumberInput from '../components/NumberInput';
+import { isRetail, label } from '../retail';
 import './StockAlerts.scss';
 import Modal from '../components/Modal';
 
@@ -25,7 +26,8 @@ const pct = (qty: number, min: number) => Math.min(100, Math.round((qty / (min |
 export default function StockAlerts() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
+  const retail = isRetail(tenant);
   const role = profile?.role;
   // Everyone can see what's short; only admin/inventory may change a
   // reorder level, matching the stock-table write policy.
@@ -55,8 +57,8 @@ export default function StockAlerts() {
   const isOut = (l: StockLevel) => sellable(l) <= 0;
   const isLow = (l: StockLevel) => sellable(l) > 0 && sellable(l) <= Number(l.min_level);
   const groups = [
-    { key: 'out-fg', tone: 'danger',  title: 'Out of Stock — Finished Goods', items: rows.filter(l => l.product_kind === 'finished_good' && isOut(l)) },
-    { key: 'low-fg', tone: 'warning', title: 'Low Stock — Finished Goods',    items: rows.filter(l => l.product_kind === 'finished_good' && isLow(l)) },
+    { key: 'out-fg', tone: 'danger',  title: `Out of Stock — ${label(retail, 'Finished Goods', 'Products')}`, items: rows.filter(l => l.product_kind === 'finished_good' && isOut(l)) },
+    { key: 'low-fg', tone: 'warning', title: `Low Stock — ${label(retail, 'Finished Goods', 'Products')}`,    items: rows.filter(l => l.product_kind === 'finished_good' && isLow(l)) },
     { key: 'out-m',  tone: 'danger',  title: 'Out of Stock — Raw Materials',  items: rows.filter(l => l.product_kind === 'material' && isOut(l)) },
     { key: 'low-m',  tone: 'warning', title: 'Low Stock — Raw Materials',     items: rows.filter(l => l.product_kind === 'material' && isLow(l)) },
   ];
@@ -105,7 +107,7 @@ export default function StockAlerts() {
           </div>
         )}
         <div className="alert-actions">
-          {l.product_kind === 'finished_good'
+          {l.product_kind === 'finished_good' && !retail
             ? canAccess(role, '/production') && (
                 <button className="btn-primary btn-sm" onClick={() => navigate('/production')}><FlaskConical size={13} /> Start Production</button>)
             : canAccess(role, '/purchases') && (

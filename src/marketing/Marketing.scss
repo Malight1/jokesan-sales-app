@@ -29,9 +29,9 @@
   border-bottom: 1px solid $gray-200;
 
   &__inner {
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 0.9rem 1.5rem;
+    padding: 0.9rem 1rem;
     display: flex;
     align-items: center;
     gap: 2rem;
@@ -81,7 +81,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    padding: 0.5rem 1.5rem 1.2rem;
+    padding: 0.5rem 1rem 1.2rem;
     border-top: 1px solid $gray-100;
 
     a { padding: 0.6rem 0; color: $gray-700; text-decoration: none; font-weight: 600; }
@@ -109,12 +109,12 @@
 }
 
 .mkt-section {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 4.5rem 1.5rem;
+  padding: 4.5rem 1rem;
 
   &--alt { background: $gray-50; max-width: none; padding-left: 0; padding-right: 0;
-    > * { max-width: 1180px; margin-left: auto; margin-right: auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+    > * { max-width: 1280px; margin-left: auto; margin-right: auto; padding-left: 1rem; padding-right: 1rem; }
   }
 
   &--intro {
@@ -136,9 +136,9 @@
 
 // ---------------------------------------------------------------- hero
 .mkt-hero {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 4rem 1.5rem 3rem;
+  padding: 4rem 1rem 3rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3rem;
@@ -213,17 +213,43 @@
 }
 
 // ---------------------------------------------------------------- capabilities
+// Deliberately asymmetric (one featured capability, two smaller ones
+// stacked beside it) rather than three equal cards in a row.
 .mkt-capabilities {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1.3fr 1fr;
+  grid-template-areas: "lead lead" "main side";
   gap: 2rem;
 
-  @media (max-width: 900px) { grid-template-columns: 1fr; }
-}
+  &__lead {
+    grid-area: lead;
+    h2 { font-size: clamp(1.5rem, 3vw, 2rem); margin: 0 0 0.5rem; max-width: 42rem; }
+    p { color: $gray-600; margin: 0; }
+    a { color: $primary; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem; }
+  }
 
-.mkt-capability {
-  h3 { margin: 1.1rem 0 0.5rem; font-size: 1.1rem; }
-  p { color: $gray-600; font-size: 0.92rem; line-height: 1.55; margin: 0; }
+  &__main {
+    grid-area: main;
+    h3 { margin: 1.2rem 0 0.5rem; font-size: 1.3rem; }
+    p { color: $gray-600; font-size: 0.98rem; line-height: 1.6; margin: 0; max-width: 34rem; }
+  }
+
+  &__side {
+    grid-area: side;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  &__item {
+    h3 { margin: 0.8rem 0 0.35rem; font-size: 1rem; }
+    p { color: $gray-600; font-size: 0.87rem; line-height: 1.5; margin: 0; }
+  }
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+    grid-template-areas: "lead" "main" "side";
+  }
 }
 
 // ---------------------------------------------------------------- pricing
@@ -307,9 +333,9 @@
 
 // ---------------------------------------------------------------- product page rows
 .mkt-product-row {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 3.5rem 1.5rem;
+  padding: 3.5rem 1rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3rem;
@@ -332,10 +358,45 @@
   }
 }
 
+// Compact card group for the categories that don't get a full zigzag row.
+.mkt-cardgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+
+  @media (max-width: 900px) { grid-template-columns: 1fr; }
+}
+
+.mkt-productcard {
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  padding: 1.6rem 1.5rem;
+  box-shadow: $shadow-sm;
+
+  &__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: $radius;
+    background: $primary-light;
+    color: $primary;
+    display: grid;
+    place-items: center;
+    margin-bottom: 1rem;
+  }
+
+  h3 { font-size: 1.05rem; margin: 0 0 0.8rem; }
+
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  li { position: relative; padding-left: 1.1rem; color: $gray-600; font-size: 0.85rem; line-height: 1.5;
+    &::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 5px; height: 5px; border-radius: 50%; background: $primary; }
+  }
+}
+
 // ---------------------------------------------------------------- final CTA
 .mkt-final-cta {
   text-align: center;
-  padding: 5rem 1.5rem;
+  padding: 5rem 1rem;
   background: $sidebar-bg;
   color: $white;
 
@@ -344,15 +405,36 @@
   .btn-primary { display: inline-flex; align-items: center; gap: 0.4rem; }
 }
 
+// ---------------------------------------------------------------- legal pages
+.mkt-legal__body {
+  max-width: 42rem;
+  padding-top: 0;
+
+  h2 { font-size: 1.05rem; margin: 1.8rem 0 0.6rem; }
+  p, li { color: $gray-600; line-height: 1.65; font-size: 0.92rem; }
+  ul { padding-left: 1.2rem; }
+}
+
+.mkt-legal__notice {
+  background: $warning-light;
+  border: 1px solid $warning;
+  color: darken($warning, 12%);
+  border-radius: $radius;
+  padding: 0.9rem 1.1rem;
+  font-size: 0.87rem;
+  margin-bottom: 1.5rem;
+  strong { color: inherit; }
+}
+
 // ---------------------------------------------------------------- footer
 .mkt-footer {
   border-top: 1px solid $gray-200;
   background: $gray-50;
 
   &__inner {
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 2.5rem 1.5rem 1.5rem;
+    padding: 2.5rem 1rem 1.5rem;
     display: flex;
     flex-wrap: wrap;
     gap: 2rem;
@@ -364,5 +446,5 @@
   &__links { display: flex; flex-direction: column; gap: 0.6rem; a { color: $gray-600; text-decoration: none; font-size: 0.87rem; &:hover { color: $primary; } } }
   &__whatsapp { display: inline-flex; align-items: center; gap: 0.35rem; }
 
-  &__bottom { text-align: center; padding: 1rem 1.5rem 1.6rem; color: $gray-400; font-size: 0.78rem; }
+  &__bottom { text-align: center; padding: 1rem 1rem 1.6rem; color: $gray-400; font-size: 0.78rem; }
 }

@@ -1,0 +1,299 @@
+@use '../styles/variables' as v;
+
+// ============================================================
+// Retail Mode — a dark, till-first dashboard, deliberately different
+// from the light, month-first manufacturing one (Dashboard.scss). The
+// brand's locked blue and light surfaces are lifted here by explicit
+// decision (see plan §2); Plus Jakarta Sans and tabular figures for
+// money/quantity columns are the only things carried over unchanged.
+//
+// Fully self-contained: its own tokens, its own "rt-" namespace, no
+// reuse of .db-* components. Only v.$font-family, v.$radius* and the
+// neutral spacing scale are borrowed from the shared tokens file.
+// ============================================================
+
+$rt-bg:             v.$sidebar-bg;   // the same dark surface .db-till already uses
+$rt-surface:         #101c33;        // panels: one step up from the page ground
+$rt-surface-raised:  #182642;        // hovered / nested surfaces
+$rt-border:          rgba(255, 255, 255, 0.08);
+$rt-border-strong:   rgba(255, 255, 255, 0.16);
+
+$rt-text:            #eef2fa;
+$rt-text-dim:        #92a1c2;
+$rt-text-faint:      #5c6a8a;
+
+// The retail accent: cyan, not blue — a different product mode should
+// read differently at a glance, not just swap a label.
+$rt-accent:          #22d3ee;
+$rt-accent-dark:     #0e94ac;
+$rt-accent-wash:     rgba(34, 211, 238, 0.14);
+
+$rt-ok:              #4ade80;
+$rt-warn:            #fbbf24;
+$rt-bad:             #f87171;
+$rt-ok-wash:         rgba(74, 222, 128, 0.14);
+$rt-warn-wash:       rgba(251, 191, 36, 0.14);
+$rt-bad-wash:        rgba(248, 113, 113, 0.14);
+
+@mixin rt-card {
+  border: 1px solid $rt-border;
+  border-radius: v.$radius-lg;
+  background: $rt-surface;
+}
+
+.rt {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border-radius: v.$radius-lg;
+  background: $rt-bg;
+  color: $rt-text;
+  font-family: v.$font-family;
+
+  @media (max-width: 640px) { padding: 1rem; }
+}
+
+.rt-num,
+.rt-hero-value,
+.rt-table td { font-variant-numeric: tabular-nums; }
+
+.rt-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+// ---------- buttons and links ----------
+.rt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: v.$radius;
+  font-family: inherit;
+  font-size: v.$font-size-sm;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: v.$transition-fast;
+
+  &.rt-btn-accent {
+    background: $rt-accent;
+    color: #04222b;
+    &:hover:not(:disabled) { background: #4de0f5; }
+  }
+  &.rt-btn-ghost {
+    background: transparent;
+    color: $rt-text;
+    border-color: $rt-border-strong;
+    &:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+  }
+  &.rt-btn-sm { min-height: 32px; padding: 0 0.7rem; font-size: v.$font-size-xs; }
+  &:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  @media (prefers-reduced-motion: reduce) { transition: none; }
+}
+
+.rt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: v.$font-size-sm;
+  font-weight: 600;
+  color: $rt-accent;
+  text-decoration: none;
+  &:hover { text-decoration: underline; }
+  &:focus-visible { outline: 2px solid $rt-accent; outline-offset: 2px; border-radius: v.$radius-sm; }
+}
+
+// ---------- hero: today's takings ----------
+.rt-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 2rem;
+  align-items: center;
+  padding: 0.25rem 0 0.5rem;
+  border-bottom: 1px solid $rt-border;
+  padding-bottom: 1.5rem;
+
+  @media (max-width: 860px) { grid-template-columns: 1fr; gap: 1.25rem; }
+}
+.rt-hero-greet { margin: 0 0 0.25rem; font-size: v.$font-size-sm; color: $rt-text-dim; }
+.rt-hero-label { margin: 0; font-size: v.$font-size-sm; font-weight: 600; color: $rt-text-dim; }
+.rt-hero-value {
+  margin: 0.3rem 0 0.4rem;
+  font-size: clamp(2.5rem, 5.5vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  color: $rt-text;
+}
+.rt-hero-sub { margin: 0; font-size: v.$font-size-sm; color: $rt-text-dim; }
+.rt-hero-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.1rem; }
+
+.rt-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-weight: 600;
+  &.up { color: $rt-ok; }
+  &.down { color: $rt-bad; }
+  &.flat { color: $rt-text-dim; font-weight: 500; }
+}
+
+.rt-hero-chart { min-width: 0; }
+.rt-hero-chart-label { margin: 0 0 0.5rem; font-size: v.$font-size-xs; font-weight: 600; color: $rt-text-dim; text-transform: uppercase; letter-spacing: 0.04em; }
+
+// ---------- figure strip ----------
+.rt-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: v.$radius-lg;
+  background: $rt-border;
+}
+.rt-fig {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 1.1rem 1.25rem;
+  background: $rt-surface;
+}
+.rt-fig-label { display: flex; align-items: center; gap: 0.4rem; font-size: v.$font-size-sm; font-weight: 500; color: $rt-text-dim; }
+.rt-fig-value { font-size: v.$font-size-2xl; font-weight: 700; letter-spacing: -0.02em; color: $rt-text; }
+.rt-fig-note { font-size: v.$font-size-xs; color: $rt-text-dim; }
+
+// ---------- panels ----------
+.rt-panel {
+  @include rt-card;
+  min-width: 0;
+  padding: 1.15rem 1.25rem 1.3rem;
+}
+.rt-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+
+  h3 { margin: 0; font-size: 0.95rem; font-weight: 700; color: $rt-text; }
+}
+.rt-panel-sub { margin: 0.15rem 0 0; font-size: v.$font-size-xs; color: $rt-text-dim; }
+
+.rt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+
+  @media (max-width: 860px) { grid-template-columns: 1fr; }
+}
+
+// ---------- lists ----------
+.rt-list { margin: 0; padding: 0; list-style: none; }
+.rt-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+}
+.rt-list li + li { border-top: 1px solid $rt-border; }
+.rt-list-main { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.rt-list-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: v.$font-size-sm;
+  font-weight: 600;
+  color: $rt-text;
+  overflow-wrap: anywhere;
+}
+.rt-list-meta { font-size: v.$font-size-xs; color: $rt-text-dim; }
+.rt-list-end { display: flex; flex-shrink: 0; align-items: center; gap: 0.6rem; }
+.rt-num { font-size: v.$font-size-sm; font-weight: 600; color: $rt-text; }
+.rt-flag { display: inline-flex; &.out { color: $rt-bad; } &.low { color: $rt-warn; } }
+
+// An empty state carries onboarding weight (plan §3.5) — an icon first,
+// so a brand-new shop's dashboard reads as "not filled in yet" rather
+// than "broken," then the message, then the action if there is one.
+.rt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0;
+  padding: 1.75rem 1rem;
+  text-align: center;
+  font-size: v.$font-size-sm;
+  color: $rt-text-dim;
+
+  svg { color: $rt-accent; opacity: 0.55; }
+  p { margin: 0; }
+
+  &.is-good svg { color: $rt-ok; opacity: 0.7; }
+}
+.rt-empty-action { display: inline-block; margin-top: 0.1rem; }
+
+// ---------- chips (status pills, dark-safe) ----------
+.rt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: v.$radius-full;
+  font-size: v.$font-size-xs;
+  font-weight: 600;
+  white-space: nowrap;
+
+  &.ok   { background: $rt-ok-wash;   color: $rt-ok; }
+  &.warn { background: $rt-warn-wash; color: $rt-warn; }
+  &.bad  { background: $rt-bad-wash;  color: $rt-bad; }
+}
+
+// ---------- stat blocks (StockValueCard and similar single-figure panels) ----------
+.rt-stat-value { margin: 0.25rem 0 0.75rem; font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; color: $rt-text; }
+.rt-stat-row { display: flex; gap: 1.75rem; flex-wrap: wrap; }
+.rt-stat { display: flex; flex-direction: column; gap: 0.2rem; }
+.rt-stat-label { font-size: v.$font-size-xs; color: $rt-text-dim; }
+.rt-stat-num { font-size: v.$font-size-lg; font-weight: 700; color: $rt-text; }
+
+// ---------- chart ----------
+.rt-chart { margin-top: 0.25rem; }
+
+// ---------- grid / stack helpers ----------
+.rt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+.rt-stack { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+
+// ---------- skeleton ----------
+.rt-skel { display: flex; flex-direction: column; gap: 1.25rem; }
+.rt-skel-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: v.$radius-lg;
+  background: $rt-surface;
+
+  @media (prefers-reduced-motion: no-preference) {
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+      animation: rt-shimmer 1.4s ease-in-out infinite;
+    }
+  }
+}
+@keyframes rt-shimmer { to { transform: translateX(100%); } }
+.rt-skel-hero { height: 190px; }
+.rt-skel-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; }
+.rt-skel-fig { height: 90px; }
+.rt-skel-panel { height: 220px; }

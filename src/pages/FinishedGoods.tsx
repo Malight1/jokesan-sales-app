@@ -16,6 +16,7 @@ import ProductUnitsSection from '../components/ProductUnitsSection';
 import CustomFieldsSection from '../components/CustomFieldsSection';
 import { printBarcodeLabels, generateBarcode } from '../lib/barcodeLabels';
 import { hasFeature, planFor } from '../lib/features';
+import { isRetail, label } from '../retail';
 import Modal from '../components/Modal';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
@@ -38,6 +39,7 @@ export default function FinishedGoods() {
   // materials/finished_goods writes are admin+inventory in the database
   // (migration 0017). Hide the controls rather than fail on save.
   const { profile, tenant } = useAuth();
+  const retail = isRetail(tenant);
   const isAdmin = profile?.role === 'admin';
   const canEditStock = isAdmin || profile?.role === 'inventory';
   const tracking = hasFeature(tenant?.plan, 'batch_tracking');
@@ -174,7 +176,7 @@ export default function FinishedGoods() {
     const withCodes = (rows ?? []).filter(g => g.barcode);
     if (withCodes.length === 0) { toast.error('No products have a barcode yet. Add one via Edit first.'); return; }
     try {
-      await printBarcodeLabels(withCodes.map(g => ({ name: g.name, barcode: g.barcode!, priceLabel: fmt(g.selling_price) })), 'Finished Goods Labels');
+      await printBarcodeLabels(withCodes.map(g => ({ name: g.name, barcode: g.barcode!, priceLabel: fmt(g.selling_price) })), label(retail, 'Finished Goods Labels', 'Product Labels'));
     } catch {
       toast.error('Could not build the label sheet. Please try again.');
     }
@@ -184,7 +186,7 @@ export default function FinishedGoods() {
     <div>
       <div className="page-header">
         <div className="page-title">
-          <h1>Finished Goods</h1>
+          <h1>{label(retail, 'Finished Goods', 'Products')}</h1>
           <p>{rows ? `${rows.length} products${multi ? ` · showing ${myBranchName}` : ''}` : ' '}</p>
         </div>
         {canEditStock && <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Product</button>}
@@ -200,7 +202,7 @@ export default function FinishedGoods() {
         searchKeys={[g => g.name]}
         searchPlaceholder="Search products…"
         exportName="finished-goods"
-        exportTitle="Finished Goods"
+        exportTitle={label(retail, 'Finished Goods', 'Products')}
         rowActions={canEditStock ? rowActions : undefined}
         toolbarExtra={<button className="btn-secondary btn-sm" onClick={printLabels}><Printer size={14} /> Print Labels</button>}
         emptyMessage="No products yet — add your first one, or bring them in from a spreadsheet on Import Data."
@@ -209,7 +211,7 @@ export default function FinishedGoods() {
       {showModal && (
         <Modal onClose={() => setShowModal(false)}>
             <div className="modal-header">
-              <h2>{editRow ? 'Edit Product' : 'Add Finished Good'}</h2>
+              <h2>{editRow ? 'Edit Product' : label(retail, 'Add Finished Good', 'Add Product')}</h2>
               <button className="close-btn" onClick={() => setShowModal(false)} aria-label="Close"><X size={18} /></button>
             </div>
             <form onSubmit={handleSubmit}>

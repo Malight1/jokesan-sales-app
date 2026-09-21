@@ -156,3 +156,86 @@ export const ownerFixture: DashboardSummary = {
     { id: 'b3', name: 'Lagos (Ikeja)', today: 241900, month: 2026200, month_profit: 660120, outstanding: 537750, low_stock: 6 },
   ],
 };
+
+// A retail owner: today first, week second, stock valued at cost, best and
+// dead sellers — a genuinely different dashboard (src/retail), not a
+// rearranged OwnerDashboard. See plan §1.1.
+export const retailOwnerFixture: DashboardSummary = {
+  role: 'admin',
+  business_type: 'retail',
+  account_live: true,
+  multi_branch: true,
+  branch_id: 'branch-ikeja',
+  branch_name: 'Lagos (Ikeja)',
+  low_goods_count: 3,
+  low_materials_count: 0,
+  low_stock: [
+    { kind: 'finished_good', name: 'Coca-Cola 50cl (crate)', qty: 2, unit: 'crate', min: 10, branch: 'Lagos (Ikeja)' },
+    { kind: 'finished_good', name: 'Indomie Chicken (carton)', qty: 0, unit: 'carton', min: 8, branch: 'Lagos (Ikeja)' },
+    { kind: 'finished_good', name: 'Peak Milk 400g (carton)', qty: 5, unit: 'carton', min: 12, branch: 'Lagos (Ikeja)' },
+  ],
+  today_total: 284600,
+  yesterday_total: 231900,
+  today_unpaid: 12500,
+  week_trend: [
+    { day: iso(6), total: 198400 },
+    { day: iso(5), total: 172300 },
+    { day: iso(4), total: 246800 },
+    // a closed day: the server simply returns nothing for it
+    { day: iso(2), total: 209750 },
+    { day: iso(1), total: 231900 },
+    { day: iso(0), total: 284600 },
+  ],
+  outstanding: 96500,
+  creditors: 412300,
+  reminders: [
+    { id: 'c1', name: 'Blessing Catering Services', phone: '08033445566', balance: 54000, days: 19 },
+    { id: 'c2', name: 'Uncle Femi', phone: '08099887766', balance: 42500, days: 9 },
+  ],
+  by_branch: [
+    { id: 'b1', name: 'Lagos (Ikeja)', today: 284600, month: 4812300, month_profit: 962400, outstanding: 96500, low_stock: 3 },
+    { id: 'b2', name: 'Lagos (Yaba)', today: 156200, month: 2904100, month_profit: 561200, outstanding: 61200, low_stock: 1 },
+  ],
+  stock_value: {
+    value_at_cost: 3184500,
+    units_on_hand: 1842,
+    product_count: 56,
+  },
+  movers: {
+    period_days: 30,
+    fast_movers: [
+      { product_id: 'p1', name: 'Coca-Cola 50cl (crate)', unit: 'crate', qty_sold: 214, on_hand: 12, days_of_cover: 1.7 },
+      { product_id: 'p2', name: 'Indomie Chicken (carton)', unit: 'carton', qty_sold: 168, on_hand: 6, days_of_cover: 1.1 },
+      { product_id: 'p3', name: 'Peak Milk 400g (carton)', unit: 'carton', qty_sold: 142, on_hand: 20, days_of_cover: 4.2 },
+      { product_id: 'p4', name: 'Golden Morn 500g', unit: 'pcs', qty_sold: 96, on_hand: 34, days_of_cover: 10.6 },
+      { product_id: 'p5', name: 'Dettol Soap 100g', unit: 'pcs', qty_sold: 88, on_hand: 60, days_of_cover: 20.5 },
+    ],
+    dead_stock: [
+      { product_id: 'p9', name: 'Imported Sparkling Wine', unit: 'pcs', on_hand: 14, days_since_sale: 46 },
+      { product_id: 'p10', name: 'Luxury Gift Basket', unit: 'pcs', on_hand: 6, days_since_sale: null },
+    ],
+  },
+};
+
+// A brand-new retail shop, day one: no products, no sales, nothing owed.
+// Onboarding is out of scope (plan context), so every panel's empty state
+// has to carry that weight on its own — this fixture is what exercises them.
+export const retailEmptyFixture: DashboardSummary = {
+  role: 'admin',
+  business_type: 'retail',
+  account_live: true,
+  multi_branch: false,
+  low_goods_count: 0,
+  low_materials_count: 0,
+  low_stock: [],
+  today_total: 0,
+  yesterday_total: 0,
+  today_unpaid: 0,
+  week_trend: [],
+  outstanding: 0,
+  creditors: 0,
+  reminders: [],
+  by_branch: [],
+  stock_value: { value_at_cost: 0, units_on_hand: 0, product_count: 0 },
+  movers: { period_days: 30, fast_movers: [], dead_stock: [] },
+};

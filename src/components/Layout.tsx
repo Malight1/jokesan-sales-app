@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2
 } from 'lucide-react';
-import { stock, branches as branchesApi, platform, StockLevel } from '../lib/api';
+import { stock, branches as branchesApi, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { accountState } from '../lib/accountState';
 import { useAuth } from '../lib/AuthContext';
@@ -15,6 +15,7 @@ import { lowStockRows } from '../lib/branchStock';
 import { useOnlineSync } from '../lib/useOnlineSync';
 import PendingSyncPanel from './PendingSyncPanel';
 import ConfirmDialog from './ConfirmDialog';
+import { isRetail, label } from '../retail';
 import '../styles/layout.scss';
 
 const navItems = [
@@ -76,10 +77,21 @@ const navItems = [
       { to: '/settings', label: 'Settings', icon: SettingsIcon },
     ],
   },
+  {
+    section: 'Help',
+    items: [
+      { to: '/support', label: 'Contact Support', icon: LifeBuoy },
+    ],
+  },
 ];
 
 // Only meaningful when there's somewhere to send stock.
 const MULTI_BRANCH_ONLY = new Set(['/transfers']);
+
+// A retail tenant buys sellable stock directly (migration 0045) rather
+// than manufacturing it from raw materials, so these two screens have
+// nothing for it to do — see plan §1.3 / §3.6.
+const MANUFACTURING_ONLY = new Set(['/production', '/inventory']);
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -106,7 +118,11 @@ const pageTitles: Record<string, string> = {
   '/settings': 'Settings',
   '/audit': 'Audit Log',
   '/assistant': 'Ask StockFlow',
-  '/platform': 'Platform Admin',
+  '/support': 'Support',
+  '/platform': 'Platform Overview',
+  '/platform/tenants': 'Tenants',
+  '/platform/payments': 'Payments',
+  '/platform/support': 'Support Tickets',
 };
 
 const roleLabels: Record<string, string> = {
@@ -120,16 +136,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const toast = useToast();
-  const { profile, tenant, signOut } = useAuth();
+  const { profile, tenant, isPlatformAdmin, signOut } = useAuth();
   const role = profile?.role;
   const { multi, active, myBranchId, myBranchName } = useBranches();
 
   // Staff are alerted about their own branch's shelves; admin and accounts
   // about every branch. Quantities only — stock_levels() carries no costs.
+  // A tenant-less platform admin (profile is null) has no branch to ask
+  // about at all — stock.levels() is simply skipped for that account.
   const seeAll = role === 'admin' || role === 'accounts';
   const { data: levels } = useQuery<StockLevel[]>(
-    () => stock.levels(seeAll ? null : myBranchId), [seeAll, myBranchId]);
-  const { data: isPlatformAdmin } = useQuery(() => platform.isAdmin().catch(() => false), []);
+    () => (profile ? stock.levels(seeAll ? null : myBranchId) : Promise.resolve([])), [profile, seeAll, myBranchId]);
   const { online, pendingCount, failedCount, queue } = useOnlineSync();
   const [showSync, setShowSync] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -179,26 +196,61 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, []);
   useEffect(() => { setNotifOpen(false); setDrawerOpen(false); }, [location.pathname]);
 
-  const title = pageTitles[location.pathname] ?? 'StockFlow';
+  const retail = isRetail(tenant);
+  const title = (retail && location.pathname === '/finished-goods') ? 'Products' : pageTitles[location.pathname] ?? 'StockFlow';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
   const acct = accountState(tenant);
-  const tenantName = tenant?.name ?? 'StockFlow';
+  // A platform admin's own account still has a tenant (every signup gets
+  // one, even one created purely to be an admin) — but while they're
+  // actually inside /platform/*, that tenant's own nav (POS, Production,
+  // Raw Materials...) is irrelevant clutter, not a lighter version of the
+  // app. Admin mode replaces the sidebar with just the platform tools
+  // instead of appending them to an unrelated tenant's full nav.
+  const inAdminMode = isPlatformAdmin && location.pathname.startsWith('/platform');
+  const tenantName = inAdminMode ? 'StockFlow' : (tenant?.name ?? 'StockFlow');
   const initial = (tenantName[0] ?? 'S').toUpperCase();
   const userName = profile?.full_name ?? 'User';
   const userInitial = (userName[0] ?? 'U').toUpperCase();
 
-  // Only show sections/items this role may access.
-  const visibleSections = navItems
+  // Only show sections/items this role may access. A retail tenant also
+  // loses Production and Raw Materials entirely (plan §1.3/§3.6) and gets
+  // "Finished Goods" relabelled to "Products" via src/retail/labels.
+  const visibleSections = inAdminMode ? [] : navItems
     .map(sec => ({
       ...sec,
-      items: sec.items.filter(it => canAccess(role, it.to) && (multi || !MULTI_BRANCH_ONLY.has(it.to))),
+      section: retail && sec.section === 'Production' ? 'Stock' : sec.section,
+      items: sec.items
+        .filter(it => canAccess(role, it.to) && (multi || !MULTI_BRANCH_ONLY.has(it.to)) && !(retail && MANUFACTURING_ONLY.has(it.to)))
+        .map(it => it.to === '/finished-goods' ? { ...it, label: label(retail, it.label, 'Products') } : it),
     }))
     .filter(sec => sec.items.length > 0);
 
-  // Platform owner gets an extra section (not part of the tenant role system).
+  // A shop's most-used screen is the till: Sales (Point of Sale first
+  // within it) leads the whole sidebar in retail mode, ahead of Overview.
+  if (retail) {
+    const salesIdx = visibleSections.findIndex(s => s.section === 'Sales');
+    if (salesIdx > 0) visibleSections.unshift(...visibleSections.splice(salesIdx, 1));
+  }
+
+  // Platform owner gets an extra section (not part of the tenant role
+  // system) — the ONLY section at all once in admin mode.
   if (isPlatformAdmin) {
-    visibleSections.push({ section: 'Platform', items: [{ to: '/platform', label: 'Platform Admin', icon: ShieldCheck }] });
+    visibleSections.push({
+      section: 'Platform',
+      items: [
+        { to: '/platform', label: 'Overview', icon: ShieldCheck },
+        { to: '/platform/tenants', label: 'Tenants', icon: Building2 },
+        { to: '/platform/payments', label: 'Payments', icon: Receipt },
+        { to: '/platform/support', label: 'Support Tickets', icon: LifeBuoy },
+      ],
+    });
+    // Only shown for an admin who ALSO runs a real tenant of their own —
+    // a pure platform-admin account (no profile/tenant at all) has
+    // nowhere to "go back" to.
+    if (inAdminMode && tenant) {
+      visibleSections.push({ section: 'My Business', items: [{ to: '/dashboard', label: 'Back to my dashboard', icon: LayoutDashboard }] });
+    }
   }
 
   return (
@@ -209,7 +261,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="logo-icon">{initial}</div>
           <div className="logo-text">
             <div className="name">{tenantName}</div>
-            <div className="tagline">{multi ? myBranchName : 'Powered by StockFlow'}</div>
+            <div className="tagline">{inAdminMode ? 'Platform Admin' : (multi ? myBranchName : 'Powered by StockFlow')}</div>
           </div>
         </div>
 
@@ -221,7 +273,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <NavLink
                   key={to}
                   to={to}
-                  end={to === '/'}
+                  end={to === '/' || to === '/platform'}
                   className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
                 >
                   <Icon size={16} />
@@ -240,7 +292,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="avatar">{userInitial}</div>
             <div className="user-meta">
               <div className="user-name">{userName}</div>
-              <div className="user-role">{role ? roleLabels[role] : ''}</div>
+              <div className="user-role">{inAdminMode ? 'Platform Admin' : (role ? roleLabels[role] : '')}</div>
             </div>
             <button className="signout-btn" onClick={handleSignOutClick} title="Sign out">
               <LogOut size={16} />

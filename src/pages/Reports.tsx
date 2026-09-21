@@ -12,6 +12,7 @@ import { whatsappLink } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column } from '../components/DataTable';
 import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
+import { isRetail, label } from '../retail';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
@@ -31,6 +32,7 @@ const ALL_TABS: { id: Tab; label: string }[] = [
 
 export default function Reports() {
   const { tenant } = useAuth();
+  const retail = isRetail(tenant);
   const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
   const TABS = ALL_TABS.filter(t => t.id !== 'discounts' || tiersEnabled);
   const [tab, setTab] = useState<Tab>('pnl');
@@ -38,6 +40,9 @@ export default function Reports() {
   const [to, setTo] = useState('');
   // '' = every branch. Only offered to multi-branch companies.
   const [branch, setBranch] = useState('');
+  // How the Sales tab's trend chart buckets rows — From/To only narrows
+  // which rows are included, this decides how they're grouped.
+  const [period, setPeriod] = useState<'day' | 'month' | 'year'>('month');
   const { multi, active, nameOf } = useBranches();
 
   const salesQ = useQuery(() => salesApi.list(), []);
@@ -83,21 +88,38 @@ export default function Reports() {
   const netProfit = grossProfit - totalExpenses;
   const stockValue = goods.reduce((s, g) => s + g.selling_price * g.qty_balance, 0);
 
-  // Monthly sales vs expenses
-  const monthMap: Record<string, { sales: number; expenses: number }> = {};
+  // Sales vs expenses, bucketed by day, month or year — sorted on a
+  // zero-padded ISO-shaped key so it's chronological regardless of how the
+  // label itself is localized (a plain localized string like "22 Sep"
+  // doesn't sort correctly, especially once a range crosses a year).
+  const periodBucket = (dateStr: string): { key: string; label: string } => {
+    const d = new Date(dateStr);
+    if (period === 'day') {
+      return { key: dateStr, label: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) };
+    }
+    if (period === 'year') {
+      const y = String(d.getFullYear());
+      return { key: y, label: y };
+    }
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return { key, label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) };
+  };
+  const periodMap: Record<string, { label: string; sales: number; expenses: number }> = {};
   sales.forEach(s => {
     if (!s.transaction_date) return;
-    const k = new Date(s.transaction_date).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-    monthMap[k] = monthMap[k] || { sales: 0, expenses: 0 };
-    monthMap[k].sales += s.total_amount || 0;
+    const { key, label } = periodBucket(s.transaction_date);
+    periodMap[key] = periodMap[key] || { label, sales: 0, expenses: 0 };
+    periodMap[key].sales += s.total_amount || 0;
   });
   expenses.forEach(e => {
     if (!e.expense_date) return;
-    const k = new Date(e.expense_date).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-    monthMap[k] = monthMap[k] || { sales: 0, expenses: 0 };
-    monthMap[k].expenses += e.amount || 0;
+    const { key, label } = periodBucket(e.expense_date);
+    periodMap[key] = periodMap[key] || { label, sales: 0, expenses: 0 };
+    periodMap[key].expenses += e.amount || 0;
   });
-  const monthlySales = Object.entries(monthMap).map(([month, v]) => ({ month, ...v }));
+  const monthlySales = Object.entries(periodMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, v]) => ({ month: v.label, sales: v.sales, expenses: v.expenses }));
 
   // Expense by type
   const typeName = (id: string | null) => expTypesQ.data?.find(t => t.id === id)?.name ?? 'Other';
@@ -429,7 +451,18 @@ export default function Reports() {
 
       {tab === 'sales' && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Monthly Sales vs Expenses</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>Sales vs Expenses, by {period}</h3>
+            <div style={{ display: 'flex', gap: '0.35rem' }}>
+              {(['day', 'month', 'year'] as const).map(p => (
+                <button key={p} type="button"
+                  className={period === p ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}
+                  onClick={() => setPeriod(p)}>
+                  {p === 'day' ? 'Daily' : p === 'month' ? 'Monthly' : 'Yearly'}
+                </button>
+              ))}
+            </div>
+          </div>
           {monthlySales.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>No data in this range.</p> : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={monthlySales}>
@@ -503,14 +536,14 @@ export default function Reports() {
 
       {tab === 'stock' && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Finished Goods Stock Value — total {fmt(stockValue)}</h3>
+          <h3 style={{ marginBottom: '1rem' }}>{label(retail, 'Finished Goods', 'Products')} Stock Value — total {fmt(stockValue)}</h3>
           <DataTable
             columns={stockCols}
             rows={goods}
             getRowKey={g => g.id}
             searchKeys={[g => g.name]}
             searchPlaceholder="Search products…"
-            emptyMessage="No finished goods yet."
+            emptyMessage={label(retail, 'No finished goods yet.', 'No products yet.')}
           />
         </div>
       )}

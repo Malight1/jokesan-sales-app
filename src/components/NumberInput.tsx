@@ -4,6 +4,8 @@ interface Props extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value
   value: number;
   onChange: (n: number) => void;
   allowDecimal?: boolean;
+  min?: number;
+  max?: number;
 }
 
 // Controlled numeric input that:
@@ -11,7 +13,12 @@ interface Props extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value
 //  • shows live thousands separators (1,003,993)
 //  • preserves decimals while typing ("1.5", "1.")
 //  • shows empty (placeholder) when the value is 0
-export default function NumberInput({ value, onChange, allowDecimal = true, ...rest }: Props) {
+//  • clamps to min/max the moment it's typed, not on a later re-render —
+//    letting a caller clamp only via its own onChange handler is racy:
+//    this component's own displayed text already updated to the raw typed
+//    value before that round-trip lands, so the field can flash (or even
+//    submit) a number past the limit it was supposed to enforce.
+export default function NumberInput({ value, onChange, allowDecimal = true, min, max, ...rest }: Props) {
   const format = (n: number) => (n === 0 ? '' : n.toLocaleString('en-US', { maximumFractionDigits: 6 }));
   const [text, setText] = useState(format(value));
 
@@ -33,14 +40,23 @@ export default function NumberInput({ value, onChange, allowDecimal = true, ...r
 
     if (raw === '' || raw === '.') { setText(raw); onChange(0); return; }
 
+    const parsed = parseFloat(raw);
+    const num = isNaN(parsed) ? 0 : parsed;
+    const clamped = max !== undefined && num > max ? max : min !== undefined && num < min ? min : null;
+
+    if (clamped !== null) {
+      setText(format(clamped));
+      onChange(clamped);
+      return;
+    }
+
     const [intPart, decPart] = raw.split('.');
     const intNum = parseInt(intPart || '0', 10);
     const formattedInt = (isNaN(intNum) ? 0 : intNum).toLocaleString('en-US');
     const display = decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
 
     setText(display);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? 0 : num);
+    onChange(num);
   };
 
   return <input type="text" inputMode={allowDecimal ? 'decimal' : 'numeric'} value={text} onChange={handle} {...rest} />;

@@ -752,10 +752,10 @@ function CreateDeliveryModal({ sale, productName, customerAddress, onClose, onDo
   // to stop someone claiming more than the LINE ever sold in total.
   useEffect(() => {
     if (data && lines === null) {
-      setLines((data.sale_items ?? []).map((i: any) => ({
-        sale_item_id: i.id, label: productName(i.finished_good_id),
-        max: Number(i.quantity) - Number(i.qty_returned ?? 0), qty: 0,
-      })).filter((l: DeliveryLine) => l.max > 0));
+      setLines((data.sale_items ?? []).map((i: any) => {
+        const max = Number(i.quantity) - Number(i.qty_returned ?? 0);
+        return { sale_item_id: i.id, label: productName(i.finished_good_id), max, qty: max };
+      }).filter((l: DeliveryLine) => l.max > 0));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
@@ -798,7 +798,7 @@ function CreateDeliveryModal({ sale, productName, customerAddress, onClose, onDo
                 </div>
                 <div className="form-group">
                   <label>Qty to deliver</label>
-                  <NumberInput value={l.qty} onChange={v => setLine(idx, Math.max(0, Math.min(v, l.max)))} />
+                  <NumberInput value={l.qty} onChange={v => setLine(idx, v)} min={0} max={l.max} />
                 </div>
               </div>
             ))}

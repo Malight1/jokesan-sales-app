@@ -2289,6 +2289,664 @@ begin
   end;
 end $$;
 
+-- ---------- 41. real plan enforcement (0037) ----------
+do $$
+declare
+  v_admin   uuid := '00000000-0000-0000-0000-000000000001';
+  v_lsoap   uuid;
+  v_mat     uuid;
+  v_supplier uuid;
+  v_cust    uuid;
+  v_sale    uuid;
+  v_item1   uuid;
+begin
+  perform t_as(v_admin);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (t_id('tenant'), 'Limits Soap', 'pcs', 5, 100, 1.5) returning id into v_lsoap;
+  perform public.adjust_stock(t_id('lagos'), 'finished_good', v_lsoap, 20, 40, 'Opening balance');
+  insert into materials (tenant_id, name, unit, type_of_material, min_stock_level)
+  values (t_id('tenant'), 'Limits Chemical', 'kg', 'raw', 5) returning id into v_mat;
+  insert into suppliers (tenant_id, company_store) values (t_id('tenant'), 'Limits Supplier') returning id into v_supplier;
+  -- A required custom field ("CAC Number") was defined on customers back
+  -- in section 36 and applies to every insert from here on.
+  insert into customers (tenant_id, first_name, custom_fields)
+  values (t_id('tenant'), 'Limits Customer', '{"cac_number":"RC000002"}'::jsonb) returning id into v_cust;
+  execute format('select public.create_sale(null, current_date, null, 1000, %L::jsonb)', t_items(v_lsoap, 10, 100)) into v_sale;
+  select id into v_item1 from sale_items where sales_order_id = v_sale;
+  perform t_su();
+
+  -- ---- A: at Starter, none of the four Growth+ features work ----
+  perform t_as(v_admin);
+  update tenants set plan = 'starter' where id = t_id('tenant');
+  perform t_su();
+
+  perform t_as(v_admin);
+  perform t_err('Starter cannot create a quote',
+    format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'quote', t_items(v_lsoap, 2, 90)),
+    'Growth plan and above');
+  perform t_err('Starter cannot place a purchase order',
+    format('select public.create_purchase_order(%L::uuid, %L::jsonb)', v_supplier,
+      jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 10, 'unit_cost', 5))::text),
+    'Growth plan and above');
+  perform t_err('Starter cannot create a delivery note',
+    format('select public.create_delivery_note(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2))::text),
+    'Growth plan and above');
+  perform t_err('Starter cannot view reorder suggestions',
+    'select public.reorder_suggestions()',
+    'Growth plan and above');
+  perform t_su();
+
+  -- ---- B: at Growth, all four work ----
+  perform t_as(v_admin);
+  update tenants set plan = 'growth' where id = t_id('tenant');
+  perform t_su();
+
+  perform t_as(v_admin);
+  perform t_ok('Growth can create a quote',
+    format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'quote', t_items(v_lsoap, 2, 90)));
+  perform t_ok('Growth can place a purchase order',
+    format('select public.create_purchase_order(%L::uuid, %L::jsonb)', v_supplier,
+      jsonb_build_array(jsonb_build_object('material_id', v_mat, 'qty', 10, 'unit_cost', 5))::text));
+  perform t_ok('Growth can create a delivery note',
+    format('select public.create_delivery_note(%L::uuid, %L::jsonb)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 2))::text));
+  perform t_ok('Growth can view reorder suggestions', 'select public.reorder_suggestions()');
+  perform t_su();
+
+  -- ---- C: seat limit — Starter's 1 seat is already spent on the admin,
+  -- so any invite at all is refused; Growth's 5 has to be actually filled
+  -- to find the edge, computed from whatever this shared tenant already
+  -- has rather than an assumed headcount. ----
+  declare
+    v_limit int; v_used int; v_headroom int; i int;
+  begin
+    perform t_as(v_admin);
+    update tenants set plan = 'starter' where id = t_id('tenant');
+    perform t_su();
+
+    perform t_as(v_admin);
+    perform t_err('Starter''s 1 seat is already the admin — no one else can be invited',
+      format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)',
+        t_id('tenant'), 'seat-starter-test@example.com', 'sales'),
+      'team member');
+    perform t_su();
+
+    perform t_as(v_admin);
+    update tenants set plan = 'growth' where id = t_id('tenant');
+    perform t_su();
+
+    select public.plan_user_limit('growth') into v_limit;
+    select count(*) into v_used from (
+      select id from profiles      where tenant_id = t_id('tenant') and is_active
+      union all
+      select id from staff_invites where tenant_id = t_id('tenant') and status = 'pending'
+    ) s;
+    v_headroom := greatest(v_limit - v_used, 0);
+
+    perform t_as(v_admin);
+    for i in 1..v_headroom loop
+      perform t_ok(format('Growth seat %s of %s is still free', v_used + i, v_limit),
+        format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)',
+          t_id('tenant'), 'seat-growth-fill-' || i || '@example.com', 'sales'));
+    end loop;
+    perform t_err('Growth''s seats are now all spent — one more invite is refused',
+      format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)',
+        t_id('tenant'), 'seat-growth-over@example.com', 'sales'),
+      'team member');
+    perform t_su();
+  end;
+
+  -- ---- D: branch limit — same shape as the seat test above ----
+  declare
+    v_limit int; v_used int; v_headroom int; i int;
+  begin
+    perform t_as(v_admin);
+    update tenants set plan = 'starter' where id = t_id('tenant');
+    perform t_su();
+
+    perform t_as(v_admin);
+    perform t_err('Starter allows 1 branch — Lagos and Abuja already exceed that, so no more can be added',
+      format('insert into branches (tenant_id, name) values (%L::uuid, %L)', t_id('tenant'), 'One Too Many'),
+      'branch');
+    perform t_su();
+
+    perform t_as(v_admin);
+    update tenants set plan = 'growth' where id = t_id('tenant');
+    perform t_su();
+
+    select public.plan_branch_limit('growth') into v_limit;
+    select count(*) into v_used from branches where tenant_id = t_id('tenant') and is_active;
+    v_headroom := greatest(v_limit - v_used, 0);
+
+    perform t_as(v_admin);
+    for i in 1..v_headroom loop
+      perform t_ok(format('Growth branch %s of %s is still free', v_used + i, v_limit),
+        format('insert into branches (tenant_id, name) values (%L::uuid, %L)', t_id('tenant'), 'Growth Branch ' || i));
+    end loop;
+    perform t_err('Growth''s branches are now all spent — one more is refused',
+      format('insert into branches (tenant_id, name) values (%L::uuid, %L)', t_id('tenant'), 'One Branch Too Many'),
+      'branch');
+    perform t_su();
+  end;
+
+  -- Leave the shared tenant the way section 40 left it, for whatever
+  -- (plan-agnostic) checks run after this.
+  update tenants set plan = 'business' where id = t_id('tenant');
+end $$;
+
+-- ---------- 42. platform admin: analytics, payments and support tickets (0038) ----------
+do $$
+declare
+  v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad';
+  v_ticket uuid;
+  v_plan_dist_sum bigint;
+  v_tenant_count bigint;
+begin
+  -- A fresh auth.users row always gets its own tenant via handle_new_user(),
+  -- even for the platform owner — that tenant doubles as "a different
+  -- tenant" for the isolation checks below.
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_platform_admin, 'platform-admin@stockflow.test', '{"company_name":"Admin Own Co","full_name":"Platform Admin"}');
+  insert into platform_admins (user_id) values (v_platform_admin);
+
+  -- A non-admin (an ordinary staff member of the main test tenant) is
+  -- refused on every platform_* RPC.
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a non-admin cannot list tenants', 'select public.platform_tenants()', 'Not authorised');
+  perform t_err('a non-admin cannot see overview stats', 'select public.platform_overview_stats()', 'Not authorised');
+  perform t_err('a non-admin cannot list payments', 'select public.platform_payments(null)', 'Not authorised');
+  perform t_err('a non-admin cannot extend a trial',
+    format('select public.platform_extend_trial(%L::uuid, 7)', t_id('tenant')), 'Not authorised');
+  perform t_su();
+
+  -- The platform admin succeeds on the same calls.
+  perform t_as(v_platform_admin);
+  perform t_ok('the platform admin can list tenants', 'select public.platform_tenants()');
+  perform t_ok('the platform admin can see overview stats', 'select public.platform_overview_stats()');
+  perform t_ok('the platform admin can list payments', 'select public.platform_payments(null)');
+  perform t_su();
+
+  -- Ticket isolation: the main tenant's admin files a ticket.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute 'insert into support_tickets (subject) values (''Cannot print receipt'') returning id' into v_ticket;
+  perform t_su();
+
+  -- A different tenant (the platform admin's own, separate tenant) cannot
+  -- see it through plain RLS.
+  perform t_as(v_platform_admin);
+  perform t_rec('a different tenant cannot see another tenant''s ticket',
+    not exists (select 1 from support_tickets where id = v_ticket));
+  perform t_su();
+
+  -- ...but the platform admin sees it across tenants through the guarded
+  -- RPC, can reply, and can resolve it. Every status check below runs as
+  -- superuser (t_su): the admin's own RLS view can't see a row that
+  -- belongs to a different tenant, even though the guarded RPC can — only
+  -- the mutating RPC calls themselves need to run "as" the admin, since
+  -- is_platform_admin() checks auth.uid().
+  perform t_as(v_platform_admin);
+  perform t_rec('the platform admin sees the ticket across tenants',
+    exists (select 1 from public.platform_tickets(null) where id = v_ticket));
+  perform public.platform_reply_ticket(v_ticket, 'Please try again, we shipped a fix.');
+  perform t_su();
+  perform t_rec('replying moves an open ticket to in_progress',
+    (select status = 'in_progress' from support_tickets where id = v_ticket));
+
+  perform t_as(v_platform_admin);
+  perform public.platform_update_ticket_status(v_ticket, 'resolved');
+  perform t_su();
+  perform t_rec('the admin can resolve a ticket', (select status = 'resolved' from support_tickets where id = v_ticket));
+
+  -- The original tenant sees the admin's reply in their own thread.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_rec('the tenant sees the admin''s reply in their own thread',
+    exists (select 1 from support_ticket_messages where ticket_id = v_ticket and sender_type = 'admin'));
+  perform t_su();
+
+  -- Manual support actions are logged against the TARGET tenant, never the
+  -- admin's own (log_audit() can't be used here for exactly that reason).
+  -- Again checked as superuser since audit_logs/tenants are RLS-scoped.
+  perform t_as(v_platform_admin);
+  perform public.platform_extend_trial(t_id('tenant'), 5);
+  perform t_su();
+  perform t_rec('extending a trial logs against the target tenant, not the admin''s own',
+    exists (select 1 from audit_logs where tenant_id = t_id('tenant') and action = 'platform.extend_trial'));
+
+  perform t_as(v_platform_admin);
+  perform public.platform_change_plan(t_id('tenant'), 'growth'::plan_tier, null);
+  perform t_su();
+  perform t_rec('changing plan manually updates the tenant''s plan',
+    (select plan::text = 'growth' from tenants where id = t_id('tenant')));
+  perform t_rec('a manual plan change does not fabricate a payment record',
+    not exists (select 1 from subscriptions where tenant_id = t_id('tenant') and plan::text = 'growth'));
+
+  -- Plan distribution accounts for every tenant that exists at this point.
+  -- The two sides are read under different roles on purpose: the RPC
+  -- needs is_platform_admin() (so "as" the admin), while a plain count of
+  -- every tenant needs RLS bypassed (so as superuser) — otherwise the
+  -- right-hand side would itself be filtered down to just one tenant.
+  perform t_as(v_platform_admin);
+  select sum(tenant_count) into v_plan_dist_sum from public.platform_plan_distribution();
+  perform t_su();
+  select count(*) into v_tenant_count from tenants;
+  perform t_rec('plan distribution accounts for every tenant', v_plan_dist_sum = v_tenant_count);
+
+  -- Leave the shared tenant the way section 41 left it.
+  update tenants set plan = 'business' where id = t_id('tenant');
+end $$;
+
+-- ---------- 43. support ticket categories and attachments (0039) ----------
+do $$
+declare
+  v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad'; -- registered as a platform admin in section 42
+  v_ticket uuid;
+  v_message uuid;
+  v_attachment_count int;
+begin
+  -- Category defaults to 'other' and is constrained to the known list.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute 'insert into support_tickets (subject) values (''No category given'') returning id' into v_ticket;
+  perform t_rec('a ticket with no category given defaults to other',
+    (select category = 'other' from support_tickets where id = v_ticket));
+  perform t_err('an unknown category is rejected',
+    $q$insert into support_tickets (subject, category) values ('Bad category', 'nonsense')$q$,
+    'support_tickets_category_check');
+
+  -- File a second ticket with a real attachment on its first message.
+  execute format('insert into support_tickets (subject, category) values (%L, %L) returning id',
+    'Second ticket for attachment test', 'bug') into v_ticket;
+  execute format('insert into support_ticket_messages (ticket_id, sender_type, body) values (%L::uuid, %L, %L) returning id',
+    v_ticket, 'tenant', 'Here is a screenshot') into v_message;
+  insert into support_ticket_attachments (message_id, file_name, storage_path, content_type, size_bytes)
+    values (v_message, 'screenshot.png', t_id('tenant') || '/' || v_ticket || '/screenshot.png', 'image/png', 12345);
+  perform t_rec('the attachment is stamped with the message''s own tenant, not left null',
+    (select tenant_id = t_id('tenant') from support_ticket_attachments where message_id = v_message));
+  perform t_su();
+
+  -- A different tenant cannot see the attachment through plain RLS.
+  perform t_as(v_platform_admin);
+  perform t_rec('a different tenant cannot see another tenant''s attachment',
+    not exists (select 1 from support_ticket_attachments where message_id = v_message));
+
+  -- ...but the platform admin sees the ticket's category and the
+  -- attachment, both through the guarded RPCs.
+  perform t_rec('the platform admin sees the ticket''s category',
+    exists (select 1 from public.platform_tickets(null) where id = v_ticket and category = 'bug'));
+  select jsonb_array_length(attachments) into v_attachment_count
+    from public.platform_ticket_messages(v_ticket) where id = v_message;
+  perform t_rec('the platform admin sees the attachment through platform_ticket_messages',
+    v_attachment_count = 1);
+  perform t_su();
+end $$;
+
+-- ---------- 44. platform tenant detail only surfaces admin actions (0040) ----------
+do $$
+declare v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad'; -- registered in section 42
+begin
+  perform t_as(v_platform_admin);
+  perform t_rec('recent_activity only contains platform.* actions, not the tenant''s own setup history',
+    not exists (
+      select 1 from jsonb_array_elements(public.platform_tenant_detail(t_id('tenant')) -> 'recent_activity') a
+      where a ->> 'action' not like 'platform.%'
+    ));
+  perform t_rec('recent_activity still contains the platform actions taken earlier in this run',
+    exists (
+      select 1 from jsonb_array_elements(public.platform_tenant_detail(t_id('tenant')) -> 'recent_activity') a
+      where a ->> 'action' = 'platform.extend_trial'
+    ));
+  perform t_su();
+end $$;
+
+-- ---------- 45. platform tenant actions: team, notes, invites (0041) ----------
+do $$
+declare
+  v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad'; -- registered in section 42
+  v_cashier uuid := '00000000-0000-0000-0000-000000000002';
+  v_invite uuid;
+begin
+  -- Deactivate/reactivate one team member.
+  perform t_as(v_platform_admin);
+  perform public.platform_set_profile_active(v_cashier, false);
+  perform t_su();
+  perform t_rec('the cashier is now inactive',
+    (select is_active = false from profiles where id = v_cashier));
+  perform t_rec('deactivating one profile does not touch the tenant''s own is_active flag',
+    (select is_active from tenants where id = t_id('tenant')));
+
+  perform t_as(v_platform_admin);
+  perform public.platform_set_profile_active(v_cashier, true);
+  perform t_su();
+  perform t_rec('the platform admin can reactivate the same team member',
+    (select is_active = true from profiles where id = v_cashier));
+
+  -- A non-admin cannot touch another tenant's profile.
+  perform t_as(v_cashier);
+  perform t_err('a non-admin cannot call platform_set_profile_active',
+    format('select public.platform_set_profile_active(%L::uuid, false)', v_cashier), 'Not authorised');
+  perform t_su();
+
+  -- Internal admin notes: platform-admin only, invisible to the tenant.
+  perform t_as(v_platform_admin);
+  perform public.platform_add_tenant_note(t_id('tenant'), 'Promised a refund, follow up next week.');
+  perform t_rec('the note was saved and is visible to the platform admin',
+    exists (select 1 from public.platform_tenant_notes(t_id('tenant')) where body like 'Promised a refund%'));
+  perform t_su();
+
+  -- RLS-enabled-with-zero-policies doesn't error on a direct select (base
+  -- table privileges are still granted, Supabase-style, via schema-level
+  -- default privileges) — it just returns nothing, which is just as
+  -- strong a guarantee: the tenant sees zero rows either way.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_rec('a tenant cannot see admin notes directly (RLS with no policy hides every row)',
+    not exists (select 1 from platform_tenant_notes where tenant_id = t_id('tenant')));
+  perform t_su();
+
+  -- Pending invites: list and cancel.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  insert into staff_invites (tenant_id, email, role) values (t_id('tenant'), 'newhire@jokesan.ng', 'sales') returning id into v_invite;
+  perform t_su();
+
+  perform t_as(v_platform_admin);
+  perform t_rec('the platform admin sees the pending invite',
+    exists (select 1 from public.platform_tenant_invites(t_id('tenant')) where id = v_invite));
+  perform public.platform_cancel_invite(v_invite);
+  perform t_su();
+  perform t_rec('cancelling an invite removes it',
+    not exists (select 1 from staff_invites where id = v_invite));
+end $$;
+
+-- ---------- 46. platform_needs_attention doesn't error (0038, fixed in 0042) ----------
+do $$
+declare v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad'; -- registered in section 42
+begin
+  perform t_as(v_platform_admin);
+  perform t_ok('platform_needs_attention runs without the UNION/ORDER BY error', 'select public.platform_needs_attention()');
+  perform t_su();
+end $$;
+
+-- ---------- 47. a platform-admin-flagged signup gets no tenant at all (0043) ----------
+do $$
+declare
+  v_pure_admin uuid := '00000000-0000-0000-0000-0000000000ae';
+  v_tenants_before int;
+  v_tenants_after int;
+begin
+  select count(*) into v_tenants_before from tenants;
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_pure_admin, 'pure-admin@stockflow.test', '{"platform_admin": true}');
+  select count(*) into v_tenants_after from tenants;
+
+  perform t_rec('a platform_admin signup creates no new tenant', v_tenants_after = v_tenants_before);
+  perform t_rec('a platform_admin signup gets no profile row', not exists (select 1 from profiles where id = v_pure_admin));
+  perform t_rec('a platform_admin signup is registered directly in platform_admins',
+    exists (select 1 from platform_admins where user_id = v_pure_admin));
+
+  perform t_as(v_pure_admin);
+  perform t_ok('the new platform admin can call a guarded platform_* RPC', 'select public.platform_tenants()');
+  perform t_su();
+
+  -- The ordinary signup path is completely unaffected by this branch.
+  perform t_rec('an ordinary signup (no platform_admin flag) still gets a real tenant',
+    (select tenant_id is not null from profiles where id = '00000000-0000-0000-0000-000000000001'));
+end $$;
+
+-- ---------- 48. a tenant can actually be deleted (0044) ----------
+-- Uses a throwaway tenant of its own — never t_id('tenant') — so this
+-- doesn't disturb any of the shared state the rest of the suite depends on.
+do $$
+declare v_disposable uuid := '00000000-0000-0000-0000-0000000000df';
+begin
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_disposable, 'disposable@stockflow.test', '{"company_name":"Disposable Co","full_name":"Throwaway Owner"}');
+  perform t_rec('the disposable tenant was created with a profile and a branch',
+    exists (select 1 from profiles where id = v_disposable and tenant_id is not null));
+
+  perform t_ok('deleting a tenant no longer fails on its own audit log entry',
+    format('delete from tenants where id = (select tenant_id from profiles where id = %L::uuid)', v_disposable));
+
+  perform t_rec('the tenant is actually gone', not exists (select 1 from profiles where id = v_disposable));
+end $$;
+
+-- ---------- 49. retail mode: business_type and buying finished goods directly (0045) ----------
+do $$
+declare
+  v_platform_admin uuid := '00000000-0000-0000-0000-0000000000ad'; -- registered in section 42
+  v_retail_owner uuid := '00000000-0000-0000-0000-0000000000b1';
+  v_retail_tenant uuid;
+  v_supplier uuid;
+  v_product uuid;
+  v_po uuid;
+  v_po2 uuid;
+  v_item_id uuid;
+  v_batch_id uuid;
+  v_before numeric;
+begin
+  -- Buying a finished good directly, on the existing (manufacturing)
+  -- shared tenant — the FG purchase path is not gated by business_type,
+  -- any tenant can use it (a manufacturer might also trade a bought-in
+  -- item alongside what it produces).
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  insert into suppliers (tenant_id, company_store) values (t_id('tenant'), 'Retail Test Supplier') returning id into v_supplier;
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (t_id('tenant'), 'Bought-In Soda', 'crate', 5, 2000, 1.4) returning id into v_product;
+
+  select public.create_purchase(v_supplier, current_date, null, 30000,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_product, 'qty', 20, 'cost_price', 1500)))
+  into v_po;
+
+  perform t_rec('buying a finished good creates a costed fg_batches layer',
+    exists (select 1 from fg_batches where finished_good_id = v_product and origin = 'purchase' and qty_remaining = 20 and unit_cost = 1500));
+  perform t_rec('the purchase_items row for that line has qty_remaining = 0 (it is the document, not the FIFO layer)',
+    (select qty_remaining = 0 and qty = 20 from purchase_items where purchase_order_id = v_po and finished_good_id = v_product));
+  perform t_rec('a PURCHASE movement was recorded against the finished good, not a material',
+    exists (select 1 from stock_movements where reference_id = v_po and product_kind = 'finished_good' and product_id = v_product and movement_type = 'PURCHASE' and quantity = 20));
+  perform t_rec('finished_goods.qty_balance rose by the purchased quantity',
+    (select qty_balance = 20 from finished_goods where id = v_product));
+  perform t_rec('a real supplier payable was created (30,000 total, all paid)',
+    (select total_amount = 30000 and balance = 0 and payment_status = 'full' from purchase_orders where id = v_po));
+  perform t_rec('stock_levels does not double-count the finished-goods purchase as a material',
+    (select coalesce(sum(qty), 0) = 0 from stock_levels() where product_kind = 'material' and name = 'Bought-In Soda'));
+
+  -- That purchased stock sells like any other, FIFO cost and all.
+  select public.create_sale(null, current_date, null, 2500,
+    t_items(v_product, 5, 2000)::jsonb) into v_po2; -- reusing v_po2 as a scratch uuid for the sale id
+  perform t_rec('purchased finished-goods stock actually sells',
+    (select qty_balance = 15 from finished_goods where id = v_product));
+  perform t_rec('the sale costed against the purchase price, via sales_consumption',
+    exists (select 1 from sales_consumption sc join sale_items si on si.id = sc.sale_item_id
+             where si.sales_order_id = v_po2 and sc.unit_cost = 1500 and sc.qty = 5));
+  perform t_su();
+
+  -- A purchase return works against a purchased (not produced) batch.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select id into v_item_id from purchase_items where purchase_order_id = v_po and finished_good_id = v_product;
+  select public.create_purchase_return(v_po,
+    jsonb_build_array(jsonb_build_object('purchase_item_id', v_item_id, 'qty', 3)), 'damaged in transit')
+  into v_batch_id; -- scratch: the return id
+  perform t_rec('returning purchased finished goods reduces the linked batch, not a material',
+    (select qty_remaining = 12 from fg_batches where finished_good_id = v_product and origin = 'purchase')); -- 20 - 5 sold - 3 returned
+  perform t_rec('the return dropped the supplier balance (a credit, since this purchase was already fully paid)',
+    (select balance < 0 from purchase_orders where id = v_po));
+  perform t_su();
+
+  -- Voiding works against a SEPARATE, untouched purchased batch.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select public.create_purchase(v_supplier, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_product, 'qty', 4, 'cost_price', 1500)))
+  into v_po2;
+  select qty_balance into v_before from finished_goods where id = v_product;
+  perform public.void_purchase(v_po2);
+  perform t_rec('voiding a finished-goods purchase reverses the stock it added',
+    (select qty_balance = v_before - 4 from finished_goods where id = v_product));
+  perform t_rec('voiding zeroes the linked batch too',
+    (select qty_remaining = 0 from fg_batches where id in (select fg_batch_id from purchase_items where purchase_order_id = v_po2)));
+  perform t_su();
+
+  -- The one-product-per-line constraint.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('a purchase line naming both a material and a finished good is rejected',
+    format('select public.create_purchase(%L::uuid, current_date, null, 0, %L::jsonb)', v_supplier,
+      jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'finished_good_id', v_product, 'qty', 1, 'cost_price', 1))::text),
+    'exactly one');
+  perform t_err('a purchase line naming neither is rejected',
+    format('select public.create_purchase(%L::uuid, current_date, null, 0, %L::jsonb)', v_supplier,
+      jsonb_build_array(jsonb_build_object('qty', 1, 'cost_price', 1))::text),
+    'exactly one');
+  perform t_su();
+
+  -- Signup: business_type.
+  perform t_rec('an ordinary signup defaults to manufacturing',
+    (select business_type = 'manufacturing' from tenants where id = t_id('tenant')));
+
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_retail_owner, 'retail-owner@stockflow.test',
+     '{"company_name":"Retail Test Shop","business_type":"retail","full_name":"Shop Owner"}');
+  -- Captured here, as superuser, once — not re-queried later while "as"
+  -- some other user, whose RLS view of a stranger's profiles row is
+  -- empty and would silently resolve the subquery to null.
+  select tenant_id into v_retail_tenant from profiles where id = v_retail_owner;
+  perform t_rec('a signup with business_type retail in metadata gets a retail tenant',
+    (select business_type = 'retail' from tenants where id = v_retail_tenant));
+
+  -- Only the platform admin can change it afterwards.
+  perform t_as(v_retail_owner);
+  perform t_err('a non-admin cannot call platform_set_business_type',
+    format('select public.platform_set_business_type(%L::uuid, %L)', v_retail_tenant, 'manufacturing'),
+    'Not authorised');
+  perform t_su();
+
+  perform t_as(v_platform_admin);
+  perform public.platform_set_business_type(v_retail_tenant, 'manufacturing');
+  perform t_su();
+  perform t_rec('the platform admin can change a tenant''s business_type',
+    (select business_type = 'manufacturing' from tenants where id = v_retail_tenant));
+  perform t_rec('the change is logged against the target tenant, not the admin''s own',
+    exists (select 1 from audit_logs where tenant_id = v_retail_tenant
+              and action = 'platform.change_business_type'));
+
+  -- A manufacturing tenant's existing (materials-only) purchase flow is untouched.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('the ordinary materials purchase path still works exactly as before',
+    format('select public.create_purchase(null, current_date, null, 0, %L::jsonb)',
+      jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 1, 'cost_price', 50))::text));
+  perform t_su();
+end $$;
+
+-- ---------- 50. retail dashboard metrics: stock value and movers (0046) ----------
+-- Uses its own fresh tenant rather than the heavily-shared one: both
+-- retail_stock_value() and retail_movers() aggregate across everything
+-- that tenant has (retail_stock_value tenant-wide when called by an
+-- admin/accounts role with no branch given; retail_movers per-branch,
+-- top 10 by rank) — the shared tenant has 49 sections of unrelated
+-- purchase/production/sale history, which would make an exact total
+-- unassertable and could push a small test fixture out of a top-10 list.
+-- A dedicated tenant makes both of those exact and deterministic.
+do $$
+declare
+  v_owner uuid := '00000000-0000-0000-0000-0000000000c1';
+  v_supplier uuid;
+  v_product uuid;
+  v_unsold uuid;
+  v_result jsonb;
+begin
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_owner, 'metrics-owner@stockflow.test', '{"company_name":"Metrics Test Shop","business_type":"retail"}');
+
+  perform t_as(v_owner);
+  insert into suppliers (tenant_id, company_store) values (public.current_tenant_id(), 'Metrics Supplier') returning id into v_supplier;
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (public.current_tenant_id(), 'Metrics Soda', 'crate', 5, 2000, 1.4) returning id into v_product;
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (public.current_tenant_id(), 'Metrics Widget', 'pcs', 5, 500, 1.4) returning id into v_unsold;
+
+  perform public.create_purchase(v_supplier, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_product, 'qty', 20, 'cost_price', 1500)));
+  perform public.create_purchase(v_supplier, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_unsold, 'qty', 10, 'cost_price', 300)));
+  perform public.create_sale(null, current_date, null, 10000, t_items(v_product, 5, 2000)::jsonb);
+
+  select public.retail_stock_value() into v_result;
+  perform t_rec('retail_stock_value values the remaining stock at cost (15 soda x 1500 + 10 widget x 300)',
+    (v_result->>'value_at_cost')::numeric = 25500);
+  perform t_rec('retail_stock_value counts the units actually on hand (15 + 10)',
+    (v_result->>'units_on_hand')::numeric = 25);
+  perform t_su();
+
+  -- Money gating: a role that is neither accounts nor admin sees no cost
+  -- figure — the account's own owner profile is 'admin', so use the
+  -- storekeeper from the main shared tenant purely as "a non-admin,
+  -- non-accounts identity"; RLS still scopes them to their OWN tenant's
+  -- data, so this call correctly returns THEIR tenant's (zero) stock,
+  -- only the null-vs-zero shape is what's under test here.
+  perform t_as('00000000-0000-0000-0000-000000000003'); -- storekeeper, role = inventory
+  select public.retail_stock_value() into v_result;
+  perform t_rec('a non-accounts, non-admin role gets no value_at_cost (null, not zero, so the UI can tell "hidden" from "empty")',
+    v_result->'value_at_cost' = 'null'::jsonb);
+  perform t_rec('...but still sees a unit count, which carries no money',
+    v_result ? 'units_on_hand');
+  perform t_su();
+
+  -- Movers: the sold product is a fast mover with the right qty_sold and
+  -- on-hand; the never-sold one is dead stock. Only two products exist
+  -- on this tenant, so the top-10 ranking in each list is moot.
+  perform t_as(v_owner);
+  select public.retail_movers(30) into v_result;
+  perform t_rec('the product that sold appears in fast_movers with the right qty_sold and remaining stock',
+    exists (select 1 from jsonb_array_elements(v_result->'fast_movers') m
+             where (m->>'product_id')::uuid = v_product and (m->>'qty_sold')::numeric = 5 and (m->>'on_hand')::numeric = 15));
+  perform t_rec('the never-sold product appears in dead_stock with its full on-hand quantity',
+    exists (select 1 from jsonb_array_elements(v_result->'dead_stock') m
+             where (m->>'product_id')::uuid = v_unsold and (m->>'on_hand')::numeric = 10));
+  perform t_rec('the never-sold product does not also show up as a fast mover',
+    not exists (select 1 from jsonb_array_elements(v_result->'fast_movers') m where (m->>'product_id')::uuid = v_unsold));
+  perform t_su();
+end $$;
+
+-- ---------- 51. dashboard_summary() retail branch (0047) ----------
+-- Reuses the dedicated retail tenant from section 50 (owner
+-- 00000000-0000-0000-0000-0000000000c1): 20 sodas bought @1500, 5 sold
+-- @2000 today, 10 widgets bought @300, never sold. Purely additive
+-- fields on top of the existing admin/accounts branch, so this checks
+-- the new keys are present and correct, the old keys are untouched, and
+-- a manufacturing tenant gets none of the new keys at all.
+do $$
+declare
+  v_owner uuid := '00000000-0000-0000-0000-0000000000c1';
+  v_result jsonb;
+begin
+  perform t_as(v_owner);
+  select public.dashboard_summary() into v_result;
+
+  perform t_rec('retail owner dashboard reports its own business_type so the frontend knows which view to render',
+    v_result->>'business_type' = 'retail');
+  perform t_rec('retail owner dashboard reports today''s takings (the 5 x 2000 sale)',
+    (v_result->>'today_total')::numeric = 10000);
+  perform t_rec('retail owner dashboard has no takings recorded for yesterday',
+    (v_result->>'yesterday_total')::numeric = 0);
+  perform t_rec('retail owner dashboard carries the stock-at-cost figure from retail_stock_value()',
+    (v_result->'stock_value'->>'value_at_cost')::numeric = 25500);
+  perform t_rec('retail owner dashboard carries movers from retail_movers(), same shape as calling it directly',
+    (v_result->'movers'->'fast_movers') = (public.retail_movers(30)->'fast_movers'));
+  perform t_rec('retail owner dashboard still has the pre-existing universal fields (outstanding, creditors, low_stock, by_branch)',
+    v_result ? 'outstanding' and v_result ? 'creditors' and v_result ? 'low_stock' and v_result ? 'by_branch');
+  perform t_rec('retail owner dashboard has a 7-day trend series',
+    jsonb_typeof(v_result->'week_trend') = 'array');
+  perform t_su();
+
+  -- A manufacturing tenant's owner dashboard is completely untouched: no
+  -- retail keys leak in for a business_type it doesn't apply to.
+  perform t_as('00000000-0000-0000-0000-000000000001'); -- admin, shared manufacturing tenant
+  select public.dashboard_summary() into v_result;
+  perform t_rec('a manufacturing tenant''s dashboard reports its own business_type too',
+    v_result->>'business_type' = 'manufacturing');
+  perform t_rec('a manufacturing tenant''s dashboard gets none of the new retail keys',
+    not (v_result ? 'stock_value') and not (v_result ? 'movers') and not (v_result ? 'today_total'));
+  perform t_rec('...and keeps its own manufacturing-only fields untouched',
+    v_result ? 'total_purchases' and v_result ? 'month_trend');
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

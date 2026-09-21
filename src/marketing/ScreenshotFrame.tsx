@@ -1,6 +1,6 @@
 import React from 'react';
 
-// A plain browser-chrome frame around a real screenshot — real software,
+// A plain browser-chrome frame around a real screenshot: real software,
 // not marketing art. No device mockup asset, just three dots and a bar.
 export default function ScreenshotFrame({ src, alt, className = '' }: { src: string; alt: string; className?: string }) {
   return (

@@ -5,7 +5,7 @@ import { canAccess } from '../lib/permissions';
 import { Loader2 } from 'lucide-react';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, isPlatformAdmin, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -17,6 +17,13 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }
 
   if (!session) return <Navigate to="/login" replace />;
+
+  // A platform-admin-only account (no tenant of its own, see migration
+  // 0043) has nothing to do outside /platform — send it there instead of
+  // letting it wander into tenant pages with no data behind them.
+  if (!profile && isPlatformAdmin && !location.pathname.startsWith('/platform')) {
+    return <Navigate to="/platform" replace />;
+  }
 
   // Deactivated by an admin → block the whole app
   if (profile && profile.is_active === false) {

@@ -68,6 +68,8 @@
       &.danger:hover { background: $danger-light; color: $danger; }
       & + .dt-action { margin-left: 0.15rem; }
     }
+
+    .dt-actions-trigger.active { background: $gray-100; color: $gray-700; }
   }
 
   .dt-footer {
@@ -106,5 +108,47 @@
       .dt-count { text-align: center; }
       .dt-pager { justify-content: center; }
     }
+  }
+}
+
+// The row-actions dropdown renders in a React portal at document.body (so it
+// can float freely above the page instead of being confined by the table's
+// own box — a short table would otherwise clip or visually overlap it), so
+// these rules live at the top level rather than nested under .data-table.
+.dt-actions-portal-menu {
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $border-radius;
+  box-shadow: $shadow-lg;
+  z-index: 200;
+  padding: 0.3rem;
+  text-align: left;
+
+  &.open-up { transform: translateY(-100%); }
+
+  button {
+    @include flex(center, flex-start, 0.65rem);
+    width: 100%;
+    padding: 0.55rem 0.65rem;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: $font-size-sm;
+    color: $gray-700;
+    border-radius: 6px;
+    white-space: nowrap;
+
+    svg { flex-shrink: 0; color: $gray-500; }
+    &:hover { background: $gray-100; }
+
+    &.danger { color: $danger; }
+    &.danger svg { color: $danger; }
+    &.danger:hover { background: $danger-light; }
+  }
+
+  .dt-actions-menu-divider {
+    height: 1px;
+    background: $gray-200;
+    margin: 0.3rem 0.2rem;
   }
 }

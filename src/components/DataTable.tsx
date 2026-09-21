@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { Search, Download, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, FileDown } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Search, Download, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, FileDown, MoreVertical } from 'lucide-react';
 import { Loading, ErrorState, Empty } from './DataStates';
 import { exportExcel, exportCSV, exportPDF, ExportColumn } from '../lib/exporters';
 import './DataTable.scss';
@@ -51,14 +52,48 @@ export default function DataTable<T>({
   const [page, setPage] = useState(1);
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  // The row-actions dropdown renders in a portal at document.body, positioned
+  // by fixed coordinates computed from the trigger button's own rect — this
+  // is what lets it float freely above the page instead of being confined
+  // (and clipped, or overlapping the footer) by the table's own box, which
+  // is especially cramped on a short table with only one or two rows.
+  const [activeMenu, setActiveMenu] = useState<{ key: string | number; top: number; left: number; openUp: boolean } | null>(null);
+  const MENU_WIDTH = 210;
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false);
+      if (!(e.target as HTMLElement).closest('.dt-actions-trigger, .dt-actions-portal-menu')) setActiveMenu(null);
     };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setExportOpen(false); setActiveMenu(null); } };
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, []);
+
+  // A fixed-position menu tracks the trigger's rect at the moment it opened;
+  // if the page scrolls or resizes while it's open, just close it rather
+  // than let it drift away from its button.
+  useEffect(() => {
+    if (!activeMenu) return;
+    const close = () => setActiveMenu(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); };
+  }, [activeMenu]);
+
+  const toggleRowMenu = (key: string | number, btn: HTMLButtonElement) => {
+    if (activeMenu?.key === key) { setActiveMenu(null); return; }
+    const rect = btn.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < 260 && rect.top > 260;
+    setActiveMenu({
+      key,
+      left: Math.min(Math.max(8, rect.right - MENU_WIDTH), window.innerWidth - MENU_WIDTH - 8),
+      top: openUp ? rect.top - 4 : rect.bottom + 4,
+      openUp,
+    });
+  };
 
   useEffect(() => { setPage(1); }, [search]);
 
@@ -171,12 +206,19 @@ export default function DataTable<T>({
                     ))}
                     {rowActions?.length ? (
                       <td data-label="Actions" className="align-right dt-actions">
-                        {rowActions.filter(a => !a.show || a.show(row)).map((a, i) => (
-                          <button key={i} className={`dt-action ${a.variant === 'danger' ? 'danger' : ''}`}
-                            title={a.label} aria-label={a.label} onClick={() => a.onClick(row)}>
-                            {a.icon}
-                          </button>
-                        ))}
+                        {(() => {
+                          const visible = rowActions.filter(a => !a.show || a.show(row));
+                          if (visible.length === 0) return null;
+                          const rowKey = getRowKey(row);
+                          const isOpen = activeMenu?.key === rowKey;
+                          return (
+                            <button type="button" className={`dt-action dt-actions-trigger ${isOpen ? 'active' : ''}`}
+                              data-tooltip="Actions" aria-label="Actions" aria-haspopup="menu" aria-expanded={isOpen}
+                              onClick={e => toggleRowMenu(rowKey, e.currentTarget)}>
+                              <MoreVertical size={16} />
+                            </button>
+                          );
+                        })()}
                       </td>
                     ) : null}
                   </tr>
@@ -185,6 +227,29 @@ export default function DataTable<T>({
             </table>
           </div>
 
+          {activeMenu && rowActions && (() => {
+            const row = pageRows.find(r => getRowKey(r) === activeMenu.key);
+            if (!row) return null;
+            const visible = rowActions.filter(a => !a.show || a.show(row));
+            const firstDangerIdx = visible.findIndex(a => a.variant === 'danger');
+            return createPortal(
+              <div className={`dt-actions-portal-menu ${activeMenu.openUp ? 'open-up' : ''}`}
+                style={{ position: 'fixed', top: activeMenu.top, left: activeMenu.left, width: MENU_WIDTH }}
+                role="menu">
+                {visible.map((a, i) => (
+                  <React.Fragment key={i}>
+                    {i === firstDangerIdx && firstDangerIdx > 0 && <div className="dt-actions-menu-divider" />}
+                    <button role="menuitem" className={a.variant === 'danger' ? 'danger' : ''}
+                      onClick={() => { setActiveMenu(null); a.onClick(row); }}>
+                      {a.icon}<span>{a.label}</span>
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>,
+              document.body
+            );
+          })()}
+
           <div className="dt-footer">
             <span className="dt-count">
               {filtered.length} record{filtered.length !== 1 ? 's' : ''}
@@ -192,8 +257,8 @@ export default function DataTable<T>({
             </span>
             {totalPages > 1 && (
               <div className="dt-pager">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)} title="Previous page" aria-label="Previous page"><ChevronLeft size={15} /></button>
-                <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)} title="Next page" aria-label="Next page"><ChevronRight size={15} /></button>
+                <button disabled={page === 1} onClick={() => setPage(p => p - 1)} data-tooltip="Previous page" aria-label="Previous page"><ChevronLeft size={15} /></button>
+                <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)} data-tooltip="Next page" aria-label="Next page"><ChevronRight size={15} /></button>
               </div>
             )}
           </div>

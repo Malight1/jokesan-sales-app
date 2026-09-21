@@ -4,6 +4,7 @@ import { useToast } from '../lib/ToastContext';
 import { ENTITIES, EntityDef, parseSpreadsheet, autoGuess, downloadTemplate } from '../lib/importer';
 import { useAuth } from '../lib/AuthContext';
 import { useBranches } from '../lib/useBranches';
+import { isRetail } from '../retail';
 import './ImportData.scss';
 import DataTable, { Column } from '../components/DataTable';
 
@@ -17,7 +18,8 @@ export default function ImportData() {
   // may create suppliers, materials and products but not customers. Offer
   // only the sheets they can actually import, rather than letting them map
   // a whole file and fail on the last step.
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
+  const retail = isRetail(tenant);
   // Imported opening stock lands at the importer's own branch.
   const { myBranchId } = useBranches();
   const allowed = React.useMemo(() => {
@@ -28,8 +30,13 @@ export default function ImportData() {
       accounts: [],
     };
     const ids = byRole[profile?.role ?? 'admin'] ?? [];
-    return ENTITIES.filter(e => ids.includes(e.id));
-  }, [profile?.role]);
+    return ENTITIES
+      // Retail buys sellable stock directly (migration 0045) — there's no
+      // raw-materials sheet to import, and "Finished Goods" reads as
+      // "Products" here too (src/retail/labels).
+      .filter(e => ids.includes(e.id) && !(retail && e.id === 'materials'))
+      .map(e => retail && e.id === 'finished_goods' ? { ...e, label: 'Products' } : e);
+  }, [profile?.role, retail]);
 
   const [entity, setEntity] = useState<EntityDef>(allowed[0] ?? ENTITIES[0]);
   const [rows, setRows] = useState<Record<string, any>[]>([]);

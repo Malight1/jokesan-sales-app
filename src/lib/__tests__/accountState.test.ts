@@ -2,7 +2,7 @@ import { accountState } from '../accountState';
 import { Tenant } from '../AuthContext';
 
 const base: Tenant = {
-  id: 't1', name: 'Acme', type: 'single', plan: 'growth', currency: 'NGN',
+  id: 't1', name: 'Acme', type: 'single', business_type: 'manufacturing', plan: 'growth', currency: 'NGN',
   logo_url: null, vat_enabled: false, vat_rate: 0, tin: null,
   trial_ends_at: null, plan_expires_at: null, is_active: true,
 };

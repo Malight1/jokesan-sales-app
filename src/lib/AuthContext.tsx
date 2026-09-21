@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { platform } from './api';
 import { clearAllCache } from './offlineCache';
 import { clearQueue } from './offlineQueue';
 
@@ -20,6 +21,10 @@ export interface Tenant {
   id: string;
   name: string;
   type: 'single' | 'multi_branch';
+  // Set at signup, changeable only by the platform admin afterwards
+  // (migration 0045). Defaults to 'manufacturing' for every tenant that
+  // existed before this flag did. Drives src/retail's isRetail() check.
+  business_type: 'retail' | 'manufacturing';
   plan: string;
   currency: string;
   logo_url: string | null;
@@ -58,6 +63,11 @@ interface AuthState {
   session: Session | null;
   profile: Profile | null;
   tenant: Tenant | null;
+  // True for an account created purely to administer the platform (no
+  // tenant of its own — see handle_new_user(), migration 0043). Loaded
+  // once alongside the profile so ProtectedRoute/Layout can read it
+  // synchronously instead of each firing their own RPC call.
+  isPlatformAdmin: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (params: SignUpParams) => Promise<{ error: string | null }>;
@@ -71,6 +81,7 @@ interface SignUpParams {
   fullName: string;
   companyName: string;
   tenantType: 'single' | 'multi_branch';
+  businessType: 'retail' | 'manufacturing';
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -79,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadProfile = useCallback(async (userId: string) => {
@@ -102,6 +114,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       setTenant(null);
     }
+
+    try { setIsPlatformAdmin(await platform.isAdmin()); }
+    catch { setIsPlatformAdmin(false); }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -127,6 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setProfile(null);
         setTenant(null);
+        setIsPlatformAdmin(false);
       }
     });
 
@@ -138,12 +154,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error?.message ?? null };
   };
 
-  const signUp: AuthState['signUp'] = async ({ email, password, fullName, companyName, tenantType }) => {
+  const signUp: AuthState['signUp'] = async ({ email, password, fullName, companyName, tenantType, businessType }) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName, company_name: companyName, tenant_type: tenantType },
+        data: { full_name: fullName, company_name: companyName, tenant_type: tenantType, business_type: businessType },
       },
     });
     return { error: error?.message ?? null };
@@ -153,6 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setProfile(null);
     setTenant(null);
+    setIsPlatformAdmin(false);
     clearAllCache();
     // A still-pending offline sale must never replay under a different
     // tenant's session if someone else signs into this device next.
@@ -160,7 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, profile, tenant, loading, signIn, signUp, signOut, refresh }}>
+    <AuthContext.Provider value={{ session, profile, tenant, isPlatformAdmin, loading, signIn, signUp, signOut, refresh }}>
       {children}
     </AuthContext.Provider>
   );

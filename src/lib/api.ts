@@ -476,7 +476,10 @@ export const purchases = {
   create: (params: {
     supplierId: string | null; date: string; paymentTypeId: string | null;
     amountPaid: number;
-    items: { material_id: string; qty: number; cost_price: number; supplier_batch_no?: string | null; expiry_date?: string | null }[];
+    // Exactly one of material_id/finished_good_id per line (migration 0045's
+    // purchase_items_one_product constraint) — a retail tenant buys
+    // sellable stock directly instead of raw materials.
+    items: { material_id?: string; finished_good_id?: string; qty: number; cost_price: number; supplier_batch_no?: string | null; expiry_date?: string | null }[];
   }) =>
     rpc<string>('create_purchase', {
       p_supplier: params.supplierId, p_date: params.date,
@@ -838,6 +841,7 @@ export interface BranchSnapshot {
 }
 export interface DashboardSummary {
   role: 'admin' | 'sales' | 'inventory' | 'accounts';
+  business_type?: 'retail' | 'manufacturing';
   account_live: boolean;
   multi_branch?: boolean;
   branch_id?: string | null;
@@ -871,6 +875,20 @@ export interface DashboardSummary {
   month_trend?: { month: string; label: string; total: number }[];
   recent_sales?: { id: string; date: string; total: number; status: string; customer: string; branch?: string }[];
   reminders?: { id: string; name: string; phone: string | null; balance: number; days: number }[];
+
+  // retail owner (business_type = 'retail'): the daily-cadence fields above
+  // (today_total, yesterday_total, today_unpaid, week_trend) apply here too,
+  // at tenant scope, plus:
+  stock_value?: {
+    value_at_cost: number | null; // null (not 0) when the caller isn't accounts/admin
+    units_on_hand: number;
+    product_count: number;
+  };
+  movers?: {
+    period_days: number;
+    fast_movers: { product_id: string; name: string; unit: string; qty_sold: number; on_hand: number; days_of_cover: number | null }[];
+    dead_stock: { product_id: string; name: string; unit: string; on_hand: number; days_since_sale: number | null }[];
+  };
 }
 
 export const dashboard = {
@@ -1156,20 +1174,142 @@ export interface PlatformTenant {
   id: string; name: string; plan: string; is_active: boolean;
   created_at: string; users: number; sales_count: number; revenue: number;
 }
+export interface PlatformOverviewStats {
+  total_tenants: number; active_tenants: number; trial_tenants: number; suspended_tenants: number;
+  signups_this_month: number; revenue_this_month: number; open_tickets: number; churned_this_month: number;
+}
+export interface PlatformSignupPoint { month: string; signups: number; }
+export interface PlatformRevenuePoint { month: string; revenue: number; }
+export interface PlatformPlanCount { plan: string; tenant_count: number; }
+export interface PlatformPayment {
+  id: string; tenant_id: string; tenant_name: string; plan: string; amount: number;
+  provider: string; status: string; reference: string | null; created_at: string; current_period_end: string | null;
+}
+export interface PlatformAttentionItem {
+  tenant_id: string; tenant_name: string; kind: 'trial_expiring' | 'renewal_due' | 'past_due'; detail: string; at: string;
+}
+export interface PlatformTenantDetail {
+  tenant: Record<string, any>; profiles: Record<string, any>[]; branches: Record<string, any>[];
+  payments: Record<string, any>[]; recent_activity: Record<string, any>[];
+}
+export interface PlatformTenantNote { id: string; body: string; created_at: string; }
+export interface PlatformTenantInvite { id: string; email: string; role: string; status: string; created_at: string; }
+export type SupportCategory = 'billing' | 'bug' | 'feature_request' | 'account' | 'stock_data' | 'other';
+export const SUPPORT_CATEGORIES: { id: SupportCategory; label: string }[] = [
+  { id: 'billing', label: 'Billing and payments' },
+  { id: 'bug', label: "Something's not working" },
+  { id: 'stock_data', label: 'Stock or sales figures look wrong' },
+  { id: 'account', label: 'Account and access' },
+  { id: 'feature_request', label: 'Feature request' },
+  { id: 'other', label: 'Something else' },
+];
+export interface SupportTicket {
+  id: string; tenant_id: string; tenant_name?: string; subject: string; category: SupportCategory;
+  status: 'open' | 'in_progress' | 'resolved' | 'closed'; priority: string;
+  created_at: string; updated_at: string; message_count?: number; last_message_at?: string | null;
+}
+export interface SupportAttachment {
+  id: string; file_name: string; storage_path: string; content_type: string | null;
+}
+export interface SupportTicketMessage {
+  id: string; sender_type: 'tenant' | 'admin'; sender_name?: string; body: string; created_at: string;
+  attachments?: SupportAttachment[];
+}
+
 export const platform = {
   isAdmin: () => rpc<boolean>('is_platform_admin'),
   tenants: () => rpc<PlatformTenant[]>('platform_tenants'),
   setActive: (tenantId: string, active: boolean) => rpcVoid('platform_set_active', { p_tenant: tenantId, p_active: active }),
+  overviewStats: () => rpc<PlatformOverviewStats>('platform_overview_stats'),
+  signupsSeries: (months = 12) => rpc<PlatformSignupPoint[]>('platform_signups_series', { p_months: months }),
+  revenueSeries: (months = 12) => rpc<PlatformRevenuePoint[]>('platform_revenue_series', { p_months: months }),
+  planDistribution: () => rpc<PlatformPlanCount[]>('platform_plan_distribution'),
+  payments: (tenantId?: string) => rpc<PlatformPayment[]>('platform_payments', { p_tenant_id: tenantId ?? null }),
+  needsAttention: () => rpc<PlatformAttentionItem[]>('platform_needs_attention'),
+  tenantDetail: (id: string) => rpc<PlatformTenantDetail>('platform_tenant_detail', { p_tenant_id: id }),
+  extendTrial: (id: string, days = 7) => rpcVoid('platform_extend_trial', { p_tenant_id: id, p_days: days }),
+  changePlan: (id: string, plan: string, expiresAt?: string) =>
+    rpcVoid('platform_change_plan', { p_tenant_id: id, p_plan: plan, p_expires_at: expiresAt ?? null }),
+  // Set at signup; only the platform admin can change it afterwards (0045).
+  changeBusinessType: (id: string, businessType: 'retail' | 'manufacturing') =>
+    rpcVoid('platform_set_business_type', { p_tenant_id: id, p_business_type: businessType }),
+  setProfileActive: (profileId: string, active: boolean) =>
+    rpcVoid('platform_set_profile_active', { p_profile_id: profileId, p_active: active }),
+  tenantNotes: (tenantId: string) => rpc<PlatformTenantNote[]>('platform_tenant_notes', { p_tenant_id: tenantId }),
+  addTenantNote: (tenantId: string, body: string) =>
+    rpcVoid('platform_add_tenant_note', { p_tenant_id: tenantId, p_body: body }),
+  tenantInvites: (tenantId: string) => rpc<PlatformTenantInvite[]>('platform_tenant_invites', { p_tenant_id: tenantId }),
+  cancelInvite: (inviteId: string) => rpcVoid('platform_cancel_invite', { p_invite_id: inviteId }),
+  resendConfirmation: async (email: string): Promise<void> => {
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    if (error) throw new Error(error.message);
+  },
+  tickets: (status?: string) => rpc<SupportTicket[]>('platform_tickets', { p_status: status ?? null }),
+  ticketMessages: (id: string) => rpc<SupportTicketMessage[]>('platform_ticket_messages', { p_ticket_id: id }),
+  replyTicket: (id: string, body: string) => rpcVoid('platform_reply_ticket', { p_ticket_id: id, p_body: body }),
+  updateTicketStatus: (id: string, status: string) => rpcVoid('platform_update_ticket_status', { p_ticket_id: id, p_status: status }),
+};
+
+// ============================================================
+// SUPPORT (tenant-facing — file and follow up on a ticket)
+// ============================================================
+export const support = {
+  myTickets: () => runAll<SupportTicket>((f, t) =>
+    supabase.from('support_tickets').select('*').order('created_at', { ascending: false }).range(f, t)),
+  ticket: (ticketId: string) => run<SupportTicket>(supabase.from('support_tickets').select('*').eq('id', ticketId).single()),
+  myThread: (ticketId: string) => runAll<SupportTicketMessage & { ticket_id: string }>((f, t) =>
+    supabase.from('support_ticket_messages').select('*, support_ticket_attachments(*)').eq('ticket_id', ticketId).order('created_at').range(f, t))
+    .then(rows => rows.map(r => ({ ...r, attachments: (r as any).support_ticket_attachments ?? [] }))),
+  create: async (subject: string, category: SupportCategory, body: string): Promise<{ ticket: SupportTicket; messageId: string }> => {
+    const ticket = await run<SupportTicket>(supabase.from('support_tickets').insert({ subject, category }).select().single());
+    const message = await run<{ id: string }>(supabase.from('support_ticket_messages').insert({ ticket_id: ticket.id, sender_type: 'tenant', body }).select().single());
+    return { ticket, messageId: message.id };
+  },
+  reply: async (ticketId: string, body: string): Promise<string> => {
+    const message = await run<{ id: string }>(
+      supabase.from('support_ticket_messages').insert({ ticket_id: ticketId, sender_type: 'tenant', body }).select().single());
+    return message.id;
+  },
+  // Attachments live in a private bucket, one folder per tenant (same
+  // pattern as delivery-proofs), so viewing one always needs a signed URL.
+  uploadAttachment: async (tenantId: string, ticketId: string, messageId: string, file: File): Promise<void> => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${tenantId}/${ticketId}/${Date.now()}-${safeName}`;
+    const up = await supabase.storage.from('ticket-attachments').upload(path, file, { contentType: file.type });
+    if (up.error) throw new Error(up.error.message);
+    await run(supabase.from('support_ticket_attachments').insert({
+      message_id: messageId, file_name: file.name, storage_path: path, content_type: file.type, size_bytes: file.size,
+    }).select().single());
+  },
+  attachmentUrl: async (path: string): Promise<string> => {
+    const signed = await supabase.storage.from('ticket-attachments').createSignedUrl(path, 60 * 60);
+    if (signed.error) throw new Error(signed.error.message);
+    return signed.data.signedUrl;
+  },
 };
 
 // ============================================================
 // BILLING (Paystack) — public key in the browser, secret key in the
 // Edge Function. After Popup success we verify server-side.
 // ============================================================
+// Priced to sit close to the two direct local competitors (Bumpa: ₦5,000 /
+// ₦10,000 / ₦25,000; Moniepoint Moniebook: ₦6,000 / ₦8,500) rather than
+// above them — Starter now matches Moniebook's entry tier exactly. See
+// LANDING_PAGE_PLAN.md's pricing note for the full comparison this was
+// benchmarked against.
+//
+// The feature split below is real, not just marketing copy — matches
+// FEATURE_LEVEL in features.ts and feature_level() in migration 0037,
+// which is what actually enforces it (plan_user_limit()/plan_branch_limit()
+// enforce the seat/branch counts the same way). Every bullet here is
+// checked against the database, not invented — Smart Insights, debtor
+// reminders and bank-alert matching were dropped from Growth/Business
+// because they were never actually restricted (same mistake "POS mode"
+// and "Bank reconciliation" were before this pass, now fixed).
 export const PLANS = [
-  { id: 'starter',  name: 'Starter',  price: 7500,  users: 1,  blurb: 'Solo owner', features: ['Full ERP + invoices', 'WhatsApp receipts', 'CSV import', 'VAT', '1 user'] },
-  { id: 'growth',   name: 'Growth',   price: 20000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'POS mode', 'Smart Insights', 'Debtor reminders', '5 users'] },
-  { id: 'business', name: 'Business',  price: 45000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Branches', 'Bank reconciliation', 'Priority support', '15 users'] },
+  { id: 'starter',  name: 'Starter',  price: 6000,  users: 1,  blurb: 'Solo owner', features: ['Full ERP + invoices', 'Point of sale', 'WhatsApp receipts & reminders', 'CSV import', 'VAT', '1 user, 1 branch'] },
+  { id: 'growth',   name: 'Growth',   price: 15000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', '5 users, up to 3 branches'] },
+  { id: 'business', name: 'Business',  price: 30000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Automatic payment confirmation', 'Ask StockFlow (AI assistant)', 'Custom fields & e-invoicing readiness', 'Unlimited branches', '15 users, priority support'] },
 ] as const;
 
 export const billing = {

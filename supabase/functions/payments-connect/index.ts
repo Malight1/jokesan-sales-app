@@ -53,6 +53,15 @@ Deno.serve(async (req) => {
       return json({ error: 'Only an admin can connect a payment account' }, 403);
     }
 
+    // 1b) Business plan and above only (0037) — checked via the same
+    //     require_feature() every other plan gate uses, not duplicated
+    //     threshold logic here. Only gates CONNECTING a new account; an
+    //     already-connected one that later downgrades keeps working.
+    const { error: featErr } = await callerClient.rpc('require_feature', {
+      p_feature: 'auto_payments', p_label: 'Automatic payment confirmation',
+    });
+    if (featErr) return json({ error: featErr.message }, 403);
+
     // 2) Check the secret key actually works. Listing transactions is a
     //    harmless, always-available endpoint that any valid secret key can
     //    call — a bad key comes back 401 here before we ever store it.

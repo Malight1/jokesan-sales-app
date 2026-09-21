@@ -38,8 +38,10 @@ const cors = {
 
 // Check console.groq.com/docs/models for what's currently available on
 // the free tier if this model is ever retired — Groq's lineup changes
-// faster than a hosted-API provider's usually does.
-const MODEL = 'llama-3.3-70b-versatile';
+// faster than a hosted-API provider's usually does. llama-3.3-70b-versatile
+// moved to Enterprise-only access (19 Sep 2026), which 404s on a free-tier
+// key — switched to gpt-oss-120b, still free-tier and tool-calling capable.
+const MODEL = 'openai/gpt-oss-120b';
 const MAX_TOOL_ROUNDS = 6;
 
 const SYSTEM_PROMPT = `You are "Ask StockFlow", built into a Nigerian inventory and manufacturing
@@ -77,7 +79,7 @@ const TOOLS = [
       description: 'Current stock on hand per material and finished good, optionally at one branch. Returns branch, product, unit, quantity, min stock level, and sellable quantity (excludes expired/recalled/on-hold stock).',
       parameters: {
         type: 'object',
-        properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
+        properties: { branch_id: { type: ['string', 'null'], description: 'Optional branch UUID, or null. Omit or pass null to use the caller\'s own branch.' } },
         additionalProperties: false,
       },
     },
@@ -89,7 +91,7 @@ const TOOLS = [
       description: 'Smart reorder suggestions for raw materials only (not finished goods) — how much of each material to order and why, based on real usage history, its variability, and the learned supplier lead time. Admin/inventory only.',
       parameters: {
         type: 'object',
-        properties: { branch_id: { type: 'string', description: 'Optional branch UUID. Omit to use the caller\'s own branch.' } },
+        properties: { branch_id: { type: ['string', 'null'], description: 'Optional branch UUID, or null. Omit or pass null to use the caller\'s own branch.' } },
         additionalProperties: false,
       },
     },
@@ -118,9 +120,9 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          from: { type: 'string', description: 'ISO date, inclusive. Omit for no lower bound.' },
-          to: { type: 'string', description: 'ISO date, inclusive. Omit for no upper bound.' },
-          branch_id: { type: 'string', description: 'Optional branch UUID. Omit for all branches the caller can see.' },
+          from: { type: ['string', 'null'], description: 'ISO date, inclusive, or null. Omit or pass null for no lower bound.' },
+          to: { type: ['string', 'null'], description: 'ISO date, inclusive, or null. Omit or pass null for no upper bound.' },
+          branch_id: { type: ['string', 'null'], description: 'Optional branch UUID, or null. Omit or pass null for all branches the caller can see.' },
         },
         additionalProperties: false,
       },
@@ -134,9 +136,9 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          from: { type: 'string', description: 'ISO date, inclusive.' },
-          to: { type: 'string', description: 'ISO date, inclusive.' },
-          branch_id: { type: 'string' },
+          from: { type: ['string', 'null'], description: 'ISO date, inclusive, or null.' },
+          to: { type: ['string', 'null'], description: 'ISO date, inclusive, or null.' },
+          branch_id: { type: ['string', 'null'] },
         },
         additionalProperties: false,
       },
@@ -150,9 +152,9 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          from: { type: 'string', description: 'ISO date, inclusive.' },
-          to: { type: 'string', description: 'ISO date, inclusive.' },
-          branch_id: { type: 'string' },
+          from: { type: ['string', 'null'], description: 'ISO date, inclusive, or null.' },
+          to: { type: ['string', 'null'], description: 'ISO date, inclusive, or null.' },
+          branch_id: { type: ['string', 'null'] },
         },
         additionalProperties: false,
       },

@@ -4,6 +4,7 @@ import { AuthProvider } from './lib/AuthContext';
 import { ToastProvider } from './lib/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import PublicGate from './components/PublicGate';
+import ScrollToTop from './components/ScrollToTop';
 import Layout from './components/Layout';
 import { Loading } from './components/DataStates';
 import './styles/global.scss';
@@ -22,6 +23,8 @@ const Home = lazy(() => import('./marketing/pages/Home'));
 const Product = lazy(() => import('./marketing/pages/Product'));
 const Pricing = lazy(() => import('./marketing/pages/Pricing'));
 const Faq = lazy(() => import('./marketing/pages/Faq'));
+const Terms = lazy(() => import('./marketing/pages/Terms'));
+const Privacy = lazy(() => import('./marketing/pages/Privacy'));
 
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -42,7 +45,14 @@ const Insights = lazy(() => import('./pages/Insights'));
 const Settings = lazy(() => import('./pages/Settings'));
 const POS = lazy(() => import('./pages/POS'));
 const ImportData = lazy(() => import('./pages/ImportData'));
-const SuperAdmin = lazy(() => import('./pages/SuperAdmin'));
+const PlatformOverview = lazy(() => import('./pages/admin/PlatformOverview'));
+const PlatformTenants = lazy(() => import('./pages/admin/PlatformTenants'));
+const PlatformTenantDetail = lazy(() => import('./pages/admin/PlatformTenantDetail'));
+const PlatformPayments = lazy(() => import('./pages/admin/PlatformPayments'));
+const PlatformSupport = lazy(() => import('./pages/admin/PlatformSupport'));
+const PlatformTicketThread = lazy(() => import('./pages/admin/PlatformTicketThread'));
+const Support = lazy(() => import('./pages/Support'));
+const SupportThread = lazy(() => import('./pages/SupportThread'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
@@ -61,6 +71,7 @@ export default function App() {
     <ToastProvider>
     <AuthProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <Suspense fallback={<Loading label="Loading…" />}>
           <Routes>
             <Route element={<PublicGate />}>
@@ -68,6 +79,8 @@ export default function App() {
               <Route path="/product" element={<Product />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/faq" element={<Faq />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
             </Route>
             <Route path="/login" element={<Login />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
@@ -98,7 +111,14 @@ export default function App() {
                         <Route path="/insights" element={<Insights />} />
                         <Route path="/pos" element={<POS />} />
                         <Route path="/import" element={<ImportData />} />
-                        <Route path="/platform" element={<SuperAdmin />} />
+                        <Route path="/platform" element={<PlatformOverview />} />
+                        <Route path="/platform/tenants" element={<PlatformTenants />} />
+                        <Route path="/platform/tenants/:id" element={<PlatformTenantDetail />} />
+                        <Route path="/platform/payments" element={<PlatformPayments />} />
+                        <Route path="/platform/support" element={<PlatformSupport />} />
+                        <Route path="/platform/support/:id" element={<PlatformTicketThread />} />
+                        <Route path="/support" element={<Support />} />
+                        <Route path="/support/:id" element={<SupportThread />} />
                         <Route path="/match-payment" element={<MatchPayment />} />
                         <Route path="/transfers" element={<Transfers />} />
                         <Route path="/batches" element={<Batches />} />

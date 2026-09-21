@@ -16,6 +16,7 @@ import NumberInput from '../components/NumberInput';
 import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
+import { isRetail, label as bizLabel } from '../retail';
 
 type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes' | 'custom_fields' | 'einvoicing';
 
@@ -51,7 +52,10 @@ const SERVICE_LEVELS = [
 export default function Settings() {
   const { tenant } = useAuth();
   const isMultiBranch = tenant?.type === 'multi_branch';
-  const TABS = ALL_TABS.filter(t => t.id !== 'branches' || isMultiBranch);
+  // Recipes (BOM) turns raw materials into finished goods — retail buys
+  // sellable stock directly (migration 0045) and has no BOM to build.
+  const retail = isRetail(tenant);
+  const TABS = ALL_TABS.filter(t => (t.id !== 'branches' || isMultiBranch) && (t.id !== 'recipes' || !retail));
   const [tab, setTab] = useState<Tab>('business');
 
   return (
@@ -1611,6 +1615,12 @@ const ENTITY_ORDER: CustomFieldEntity[] = ['customer', 'supplier', 'finished_goo
 function CustomFieldsTab() {
   const toast = useToast();
   const { tenant } = useAuth();
+  const retail = isRetail(tenant);
+  // Retail has no materials, and "Finished Goods" reads as "Products" here
+  // too (src/retail/labels) — computed locally since ENTITY_LABEL/ORDER
+  // are module-level constants with no tenant to ask.
+  const entityOrder = retail ? ENTITY_ORDER.filter(e => e !== 'material') : ENTITY_ORDER;
+  const entityLabel = (e: CustomFieldEntity) => e === 'finished_good' ? bizLabel(retail, 'Finished Goods', 'Products') : ENTITY_LABEL[e];
   const enabled = hasFeature(tenant?.plan, 'custom_fields');
   const { data: defs, loading, refetch } = useQuery<CustomFieldDef[]>(() => customFieldDefs.list(), []);
   const createMut = useMutation(customFieldDefs.create);
@@ -1674,7 +1684,7 @@ function CustomFieldsTab() {
             <div className="form-group">
               <label>Applies to</label>
               <select value={entity} onChange={e => setEntity(e.target.value as CustomFieldEntity)}>
-                {ENTITY_ORDER.map(en => <option key={en} value={en}>{ENTITY_LABEL[en]}</option>)}
+                {entityOrder.map(en => <option key={en} value={en}>{entityLabel(en)}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -1727,7 +1737,7 @@ function CustomFieldsTab() {
         if (rows.length === 0) return null;
         return (
           <div className="card" key={en} style={{ marginBottom: '1.25rem' }}>
-            <h3 style={{ marginBottom: '0.75rem' }}>{ENTITY_LABEL[en]}</h3>
+            <h3 style={{ marginBottom: '0.75rem' }}>{entityLabel(en)}</h3>
             <div className="lookup-list">
               {rows.map(d => (
                 <div key={d.id} className="lookup-row">
@@ -1772,6 +1782,7 @@ function CustomFieldsTab() {
 // ============================================================
 function EinvoicingTab() {
   const { tenant } = useAuth();
+  const retail = isRetail(tenant);
   const enabled = hasFeature(tenant?.plan, 'einvoicing');
   const { data, loading, error, refetch } = useQuery<EinvoiceReadiness>(() => compliance.einvoiceReadiness(), []);
 
@@ -1830,7 +1841,7 @@ function EinvoicingTab() {
           <strong>{data.products.ready}</strong> of <strong>{data.products.total}</strong> products have a tax
           category and classification code.
         </p>
-        <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Add these under Finished Goods → Edit for each product.</small>
+        <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>Add these under {bizLabel(retail, 'Finished Goods', 'Products')} → Edit for each product.</small>
 
         <hr className="divider" />
         <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' }}>B2B Customers</p>

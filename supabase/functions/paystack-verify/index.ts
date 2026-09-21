@@ -14,10 +14,13 @@
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+// Must match PLANS in src/lib/api.ts exactly — this is the server-side
+// source of truth a Paystack payment is checked against, independent of
+// whatever amount the client claims it charged.
 const PLAN_PRICES: Record<string, number> = {
-  starter: 7500,
-  growth: 20000,
-  business: 45000,
+  starter: 6000,
+  growth: 15000,
+  business: 30000,
 };
 
 const cors = {

@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, X, Eye, Wallet, Ban, Undo2, PackagePlus, PackageCheck } from 'lucide-react';
 import {
-  purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, lookups,
-  returns as returnsApi, PurchaseOrder, PurchaseOrderLine, Supplier, Material, Lookup,
+  purchases as purchasesApi, suppliers as suppliersApi, materials as materialsApi, finishedGoods as goodsApi, lookups,
+  returns as returnsApi, PurchaseOrder, PurchaseOrderLine, Supplier, Material, FinishedGood, Lookup,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { isRetail, label } from '../retail';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -38,15 +39,19 @@ const orderStatusMap: Record<string, { label: string; cls: string }> = {
   draft: { label: 'Draft', cls: 'badge-gray' },
 };
 
-// Supplier batch and expiry only show for materials that track them (0022).
-interface LineItem { material_id: string; qty: number; cost_price: number; supplier_batch_no: string; expiry_date: string; }
+// Supplier batch and expiry only show for products that track them (0022).
+// product_id resolves against materials for a manufacturing tenant or
+// finished_goods for a retail one (migration 0045) — never a mix, since a
+// tenant is one business_type or the other. See src/retail.
+interface LineItem { product_id: string; qty: number; cost_price: number; supplier_batch_no: string; expiry_date: string; }
 
 export default function Purchases() {
   const toast = useToast();
   // Voiding reverses stock and money. The database enforces admin-only
   // (guard_void, migration 0017) — this just keeps the button off screen
   // rather than letting staff click into a permission error.
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
+  const retail = isRetail(tenant);
   const isAdmin = profile?.role === 'admin';
   // Recording a purchase is admin+inventory; accounts can still see them
   // and settle supplier payments.
@@ -55,7 +60,18 @@ export default function Purchases() {
   const { data: rows, loading, error, refetch } = useQuery<PurchaseOrder[]>(() => purchasesApi.list(), []);
   const { data: suppliers } = useQuery<Supplier[]>(() => suppliersApi.list(), []);
   const { data: materials } = useQuery<Material[]>(() => materialsApi.list(), []);
+  const { data: goods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
+  // What a purchase line buys: materials for manufacturing, products for
+  // retail. Never both — see the LineItem comment above. Widened to a
+  // common shape so a single .find() works against either array.
+  const products: { id: string; name: string; unit: string | null; track_batches?: boolean }[] | null | undefined = retail ? goods : materials;
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
+  const productName = (i: { material_id?: string | null; finished_good_id?: string | null }) =>
+    i.material_id
+      ? (materials?.find(m => m.id === i.material_id)?.name ?? '—')
+      : i.finished_good_id
+      ? (goods?.find(g => g.id === i.finished_good_id)?.name ?? '—')
+      : '—';
 
   const createMut = useMutation(purchasesApi.create);
   const payMut = useMutation(purchasesApi.addPayment);
@@ -73,8 +89,8 @@ export default function Purchases() {
   const [cancelFor, setCancelFor] = useState<PurchaseOrder | null>(null);
   const cancelMut = useMutation(purchasesApi.cancelOrder);
 
-  const blankItem = (): LineItem => ({ material_id: '', qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
-  const tracksBatches = (materialId: string) => !!materials?.find(m => m.id === materialId)?.track_batches;
+  const blankItem = (): LineItem => ({ product_id: '', qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
+  const tracksBatches = (productId: string) => !!products?.find(p => p.id === productId)?.track_batches;
   const [form, setForm] = useState({
     supplierId: '', date: new Date().toISOString().split('T')[0], paymentTypeId: '', amountPaid: 0,
     items: [blankItem()],
@@ -96,25 +112,26 @@ export default function Purchases() {
     supplierId: '', date: new Date().toISOString().split('T')[0], paymentTypeId: '', amountPaid: 0, items: [blankItem()],
   });
 
-  const validItems = form.items.filter(i => i.material_id && i.qty > 0 && i.cost_price >= 0);
+  const validItems = form.items.filter(i => i.product_id && i.qty > 0 && i.cost_price >= 0);
   const canSubmit = validItems.length > 0 && total > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) { toast.error('Add at least one material with quantity and cost.'); return; }
+    if (!canSubmit) { toast.error(label(retail, 'Add at least one material with quantity and cost.', 'Add at least one product with quantity and cost.')); return; }
     const res = await createMut.mutate({
       supplierId: form.supplierId || null,
       date: form.date,
       paymentTypeId: form.paymentTypeId || null,
       amountPaid: Number(form.amountPaid) || 0,
       items: validItems.map(i => ({
-        material_id: i.material_id, qty: Number(i.qty), cost_price: Number(i.cost_price),
+        ...(retail ? { finished_good_id: i.product_id } : { material_id: i.product_id }),
+        qty: Number(i.qty), cost_price: Number(i.cost_price),
         ...(i.supplier_batch_no.trim() ? { supplier_batch_no: i.supplier_batch_no.trim() } : {}),
         ...(i.expiry_date ? { expiry_date: i.expiry_date } : {}),
       })),
     });
     if (res) {
-      toast.success('Purchase recorded — material stock updated.');
+      toast.success(label(retail, 'Purchase recorded — material stock updated.', 'Purchase recorded — product stock updated.'));
       setShowModal(false);
       resetForm();
       refetch();
@@ -205,7 +222,11 @@ export default function Purchases() {
         </div>
         {canCreatePurchase && (
           <div style={{ display: 'flex', gap: '0.6rem' }}>
-            <button className="btn-secondary" onClick={() => setShowOrderModal(true)}><PackagePlus size={16} /> Order Stock</button>
+            {/* Order-then-receive is deliberately materials-only (plan §3.1)
+               — purchase_order_lines.material_id stays not null, and a
+               retail tenant has no materials to order. Retail always buys
+               through Quick Purchase, which does support products. */}
+            {!retail && <button className="btn-secondary" onClick={() => setShowOrderModal(true)}><PackagePlus size={16} /> Order Stock</button>}
             <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> Quick Purchase</button>
           </div>
         )}
@@ -255,10 +276,10 @@ export default function Purchases() {
                   <div key={idx}>
                     <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr auto', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
                       <div className="form-group">
-                        <label>Material</label>
-                        <select value={item.material_id} onChange={e => updateItem(idx, 'material_id', e.target.value)}>
+                        <label>{label(retail, 'Material', 'Product')}</label>
+                        <select value={item.product_id} onChange={e => updateItem(idx, 'product_id', e.target.value)}>
                           <option value="">— select —</option>
-                          {materials?.map(m => <option key={m.id} value={m.id}>{m.name}{m.unit ? ` (${m.unit})` : ''}</option>)}
+                          {products?.map(p => <option key={p.id} value={p.id}>{p.name}{p.unit ? ` (${p.unit})` : ''}</option>)}
                         </select>
                       </div>
                       <div className="form-group">
@@ -273,7 +294,7 @@ export default function Purchases() {
                         <button type="button" onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: '0.5rem', marginBottom: '1rem' }} title="Remove item" aria-label="Remove this item"><X size={14} /></button>
                       )}
                     </div>
-                    {tracksBatches(item.material_id) && (
+                    {tracksBatches(item.product_id) && (
                       <div className="grid-2" style={{ marginTop: '-0.35rem', marginBottom: '0.5rem' }}>
                         <div className="form-group">
                           <label>Supplier's batch no.</label>
@@ -356,7 +377,7 @@ export default function Purchases() {
           id={viewId}
           onClose={() => setViewId(null)}
           supplierName={supplierName}
-          materialName={(id: string) => materials?.find(m => m.id === id)?.name ?? '—'}
+          productName={productName}
           isAdmin={isAdmin}
         />
       )}
@@ -364,7 +385,7 @@ export default function Purchases() {
       {voidFor && (
         <ConfirmDialog
           title="Void Purchase"
-          message={<>Void this {fmt(voidFor.total_amount)} purchase from <strong>{supplierName(voidFor.supplier_id)}</strong>? The received materials will be removed from stock. This is only possible if none of them have been used in production.</>}
+          message={<>Void this {fmt(voidFor.total_amount)} purchase from <strong>{supplierName(voidFor.supplier_id)}</strong>? The received stock will be removed. {label(retail, 'This is only possible if none of it has been used in production.', 'This is only possible if none of it has been sold yet.')}</>}
           confirmLabel="Void Purchase"
           pending={voidMut.pending}
           onConfirm={handleVoid}
@@ -375,7 +396,7 @@ export default function Purchases() {
       {returnFor && (
         <SupplierReturnModal
           purchase={returnFor}
-          materialName={(id: string) => materials?.find(m => m.id === id)?.name ?? '—'}
+          productName={productName}
           onClose={() => setReturnFor(null)}
           onDone={() => { setReturnFor(null); refetch(); }}
         />
@@ -415,10 +436,10 @@ export default function Purchases() {
 }
 
 // ---- Return goods to the supplier (partial, from one exact batch) ----
-interface SupplierReturnLine { purchase_item_id: string; material_id: string; label: string; cost_price: number; max: number; qty: number; }
-function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
+interface SupplierReturnLine { purchase_item_id: string; label: string; cost_price: number; max: number; qty: number; }
+function SupplierReturnModal({ purchase, productName, onClose, onDone }: {
   purchase: PurchaseOrder;
-  materialName: (id: string) => string;
+  productName: (i: { material_id?: string | null; finished_good_id?: string | null }) => string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -433,7 +454,7 @@ function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
       setLines((data.purchase_items ?? [])
         .filter((i: any) => Number(i.qty_remaining) > 0)
         .map((i: any) => ({
-          purchase_item_id: i.id, material_id: i.material_id, label: materialName(i.material_id),
+          purchase_item_id: i.id, label: productName(i),
           cost_price: i.cost_price, max: Number(i.qty_remaining), qty: 0,
         })));
     }
@@ -469,7 +490,7 @@ function SupplierReturnModal({ purchase, materialName, onClose, onDone }: {
         {loading && <Loading />}
         {error && <ErrorState message={error} />}
         {createMut.error && <ErrorState message={createMut.error} />}
-        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Nothing from this purchase is still unused — it's all gone into production or another branch.</p>}
+        {lines && lines.length === 0 && <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Nothing from this purchase is still unused — it's all been sold, used in production, or moved to another branch.</p>}
         {lines && lines.length > 0 && (
           <>
             {lines.map((l, idx) => (
@@ -705,10 +726,10 @@ function ReceivePurchaseModal({ purchase, materialName, materialTracksBatches, o
 }
 
 // ---- Purchase detail (fetches items + payments) ----
-function PurchaseDetail({ id, onClose, supplierName, materialName, isAdmin }: {
+function PurchaseDetail({ id, onClose, supplierName, productName, isAdmin }: {
   id: string; onClose: () => void;
   supplierName: (id: string | null) => string;
-  materialName: (id: string) => string;
+  productName: (i: { material_id?: string | null; finished_good_id?: string | null }) => string;
   isAdmin: boolean;
 }) {
   const toast = useToast();
@@ -776,12 +797,12 @@ function PurchaseDetail({ id, onClose, supplierName, materialName, isAdmin }: {
               )}
               <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ textAlign: 'left', color: '#64748b' }}><th>Material</th><th>Qty</th><th>Remaining</th><th>Unit Cost</th><th>Amount</th></tr>
+                  <tr style={{ textAlign: 'left', color: '#64748b' }}><th>Item</th><th>Qty</th><th>Remaining</th><th>Unit Cost</th><th>Amount</th></tr>
                 </thead>
                 <tbody>
                   {data.purchase_items?.map((i: any) => (
                     <tr key={i.id} style={{ borderTop: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '0.4rem 0' }}>{materialName(i.material_id)}</td>
+                      <td style={{ padding: '0.4rem 0' }}>{productName(i)}</td>
                       <td>{Number(i.qty).toLocaleString()}</td>
                       <td>{Number(i.qty_remaining).toLocaleString()}</td>
                       <td>{fmt(i.cost_price)}</td>
