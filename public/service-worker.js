@@ -1,4 +1,4 @@
-// StockFlow — app-shell service worker.
+// ProfixBook — app-shell service worker.
 //
 // Two different caching rules, because the app has two kinds of request:
 //
@@ -16,7 +16,7 @@
 // handling lives in the app layer, see lib/offlineCache.ts and
 // lib/offlineQueue.ts.
 
-const CACHE_NAME = 'stockflow-shell-v2';
+const CACHE_NAME = 'profixbook-shell-v1';
 const SHELL_URL = '/index.html';
 
 self.addEventListener('install', (event) => {

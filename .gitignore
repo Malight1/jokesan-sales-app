@@ -20,6 +20,9 @@ env
 .env.test.local
 .env.production.local
 
+# local-only notes that may hold test credentials — never committed
+*.local.md
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

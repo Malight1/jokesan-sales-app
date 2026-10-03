@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { NavLink, Link } from 'react-router-dom';
-import { Building2, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
+import BrandMark from '../components/BrandMark';
 
 const LINKS = [
   { to: '/product', label: 'Product' },
@@ -15,8 +16,8 @@ export default function MarketingNav() {
     <header className="mkt-nav">
       <div className="mkt-nav__inner">
         <Link to="/" className="mkt-nav__brand" onClick={() => setOpen(false)}>
-          <span className="mkt-nav__logo"><Building2 size={18} /></span>
-          StockFlow
+          <BrandMark size={30} className="mkt-nav__logo" />
+          ProfixBook
         </Link>
 
         <nav className="mkt-nav__links mkt-nav__links--desktop">

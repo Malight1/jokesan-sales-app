@@ -225,6 +225,7 @@ export default function Sales() {
         .filter(f => f.value !== undefined && f.value !== null && f.value !== '');
       await generateInvoicePdf({
         companyName: tenant?.name ?? 'My Business',
+        companyAddress: tenant?.address,
         invoiceNo: invoiceNo(s),
         date: s.transaction_date,
         customerName: customerName(s.customer_id),
@@ -236,6 +237,9 @@ export default function Sales() {
         total: s.total_amount, paid: s.amount_paid, balance: s.balance,
         subtotal: s.subtotal, vatAmount: s.vat_amount, vatRate: s.vat_rate,
         tin: tenant?.tin, logoDataUrl: logo,
+        // Only worth the customer's attention when there's actually a
+        // balance owed — generateInvoicePdf itself gates the same way.
+        bankDetails: s.balance > 0 ? tenant?.bank_details : null,
         customFields: invoiceFields.length > 0 ? invoiceFields : undefined,
       });
       toast.success('Invoice downloaded.');

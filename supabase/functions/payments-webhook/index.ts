@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — Paystack webhook: a transfer confirms itself (Phase 5a)
+// ProfixBook — Paystack webhook: a transfer confirms itself (Phase 5a)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
 // → name it "payments-webhook") OR via CLI, WITHOUT JWT verification —

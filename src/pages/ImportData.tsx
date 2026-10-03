@@ -107,7 +107,7 @@ export default function ImportData() {
   return (
     <div className="import-page">
       <div className="page-header">
-        <div className="page-title"><h1>Import Data</h1><p>Bring your existing records into StockFlow from Excel or CSV</p></div>
+        <div className="page-title"><h1>Import Data</h1><p>Bring your existing records into ProfixBook from Excel or CSV</p></div>
       </div>
 
       <div className="import-steps">

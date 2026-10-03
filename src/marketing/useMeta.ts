@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
-const DEFAULT_TITLE = 'StockFlow: Inventory and Sales for African SMEs';
-const DEFAULT_DESCRIPTION = "StockFlow: know your real profit, track stock, and chase debtors on WhatsApp. Inventory and sales for African manufacturing SMEs.";
+const DEFAULT_TITLE = 'ProfixBook: Inventory and Sales for African SMEs';
+const DEFAULT_DESCRIPTION = "ProfixBook: know your real profit, track stock, and chase debtors on WhatsApp. Inventory and sales for African manufacturing SMEs.";
 
 const setMetaTag = (name: string, content: string, attr: 'name' | 'property' = 'name') => {
   let tag = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${name}"]`);

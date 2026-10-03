@@ -321,7 +321,7 @@ function BillingTab() {
           <span className="badge-primary" style={{ fontSize: '0.9rem', padding: '0.35rem 0.8rem', textTransform: 'capitalize' }}>{currentPlan}</span>
           {currentPlan === 'trial' && trialEnds && (
             <span style={{ fontSize: '0.875rem', color: trialDaysLeft <= 3 ? '#dc2626' : '#64748b' }}>
-              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired — subscribe to keep using StockFlow'}
+              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired — subscribe to keep using ProfixBook'}
             </span>
           )}
           {planExpires && currentPlan !== 'trial' && (
@@ -364,7 +364,7 @@ function BillingTab() {
 // ============================================================
 // Payments — connect the business's OWN Paystack account so a transfer
 // can confirm itself (migration 0027, Phase 5a). Money never passes
-// through StockFlow; this only stores the key (in Supabase Vault, via the
+// through ProfixBook; this only stores the key (in Supabase Vault, via the
 // payments-connect Edge Function) and lets Sales generate "Pay now" links.
 // ============================================================
 function PaymentsTab() {
@@ -403,7 +403,7 @@ function PaymentsTab() {
           <Landmark size={18} color="#2563eb" /> Paystack
         </h3>
         <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
-          Connect your OWN Paystack account so a customer's transfer confirms itself — no bank alert to read. Money is collected directly into your account; StockFlow never holds it.
+          Connect your OWN Paystack account so a customer's transfer confirms itself — no bank alert to read. Money is collected directly into your account; ProfixBook never holds it.
         </p>
 
         {connected ? (
@@ -425,7 +425,7 @@ function PaymentsTab() {
               <input value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk_live_… or pk_test_…" autoComplete="off" />
             </div>
             <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.75rem' }}>
-              Find these under your Paystack dashboard → Settings → API Keys & Webhooks. Your secret key is checked once here, then stored securely — nobody at StockFlow can read it back.
+              Find these under your Paystack dashboard → Settings → API Keys & Webhooks. Your secret key is checked once here, then stored securely — nobody at ProfixBook can read it back.
             </small>
             <button className="btn-primary" type="submit" disabled={connecting}>
               {connecting ? 'Connecting…' : 'Connect Paystack'}
@@ -816,7 +816,7 @@ function BusinessTab() {
 // ============================================================
 function inviteMessage(email: string, role: string, tenantName: string): string {
   const appUrl = window.location.origin;
-  return `You've been invited to join ${tenantName} on StockFlow as ${role}.\n\n` +
+  return `You've been invited to join ${tenantName} on ProfixBook as ${role}.\n\n` +
     `Sign up here with this exact email (${email}):\n${appUrl}\n\n` +
     `Once you sign up, you'll land straight in the company — no extra setup needed.`;
 }
@@ -1665,7 +1665,7 @@ function CustomFieldsTab() {
         <ListPlus size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
         <h3 style={{ marginBottom: '0.35rem' }}>Custom fields</h3>
         <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
-          Track things StockFlow doesn't have a column for — a CAC number, a shelf position, a delivery
+          Track things ProfixBook doesn't have a column for — a CAC number, a shelf position, a delivery
           reference — on customers, suppliers, products and sales, on the {planFor('custom_fields')} plan and above.
         </p>
       </div>
@@ -1818,8 +1818,8 @@ function EinvoicingTab() {
         <h3 style={{ marginBottom: '0.25rem' }}>Readiness Score</h3>
         <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
           Nigeria's e-invoicing mandate isn't enforced yet — businesses over ₦1–5bn turnover from January 2027,
-          everyone else (most StockFlow customers) live July 2027, enforced January 2028. It needs an accredited
-          access-point provider, which StockFlow hasn't connected yet — this score covers only the master data
+          everyone else (most ProfixBook customers) live July 2027, enforced January 2028. It needs an accredited
+          access-point provider, which ProfixBook hasn't connected yet — this score covers only the master data
           you can get ready today.
         </p>
         <div style={{ fontSize: '2.5rem', fontWeight: 800, color: pctColor, lineHeight: 1 }}>{pct}%</div>
@@ -1855,7 +1855,7 @@ function EinvoicingTab() {
         <h3 style={{ marginBottom: '0.5rem' }}>When you're ready to connect a provider</h3>
         <p style={{ color: '#64748b', fontSize: '0.85rem' }}>
           Invoices go through an accredited access-point provider, which returns a reference number (IRN) and a QR
-          code for the invoice. StockFlow hasn't partnered with one yet — that's a business decision for you, not
+          code for the invoice. ProfixBook hasn't partnered with one yet — that's a business decision for you, not
           something we can pick on your behalf. Once you have, we build the adapter against their field
           specification (it has changed before, so get the current one directly from them).
         </p>

@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — Ask StockFlow, an AI assistant over the app's own data
+// ProfixBook — Ask ProfixBook, an AI assistant over the app's own data
 // (Phase 7b)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
@@ -7,13 +7,13 @@
 //   supabase functions deploy assistant
 //
 // Set the secret (Project Settings → Edge Functions → Secrets):
-//   GROQ_API_KEY = gsk_...   (StockFlow's own key, from console.groq.com
+//   GROQ_API_KEY = gsk_...   (ProfixBook's own key, from console.groq.com
 //   — never a per-tenant one, and it never reaches the frontend)
 //
 // Runs on Groq's free tier (OpenAI-compatible chat-completions API) —
 // picked over Anthropic/OpenAI specifically because it costs nothing to
 // try. Worth knowing: the free tier's rate limit is one shared bucket
-// across every StockFlow tenant, not per business, so it's realistic for
+// across every ProfixBook tenant, not per business, so it's realistic for
 // validating whether customers actually use this feature, not yet a
 // guarantee once usage is real. Moving to a paid Groq tier (or another
 // provider) later is a small, contained change — only this file and the
@@ -44,8 +44,8 @@ const cors = {
 const MODEL = 'openai/gpt-oss-120b';
 const MAX_TOOL_ROUNDS = 6;
 
-const SYSTEM_PROMPT = `You are "Ask StockFlow", built into a Nigerian inventory and manufacturing
-app called StockFlow. You answer questions about ONE business's own data by
+const SYSTEM_PROMPT = `You are "Ask ProfixBook", built into a Nigerian inventory and manufacturing
+app called ProfixBook. You answer questions about ONE business's own data by
 calling the tools available to you — you have no other source of numbers.
 
 Rules, no exceptions:

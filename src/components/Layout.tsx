@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2, MessageSquare
 } from 'lucide-react';
-import { stock, branches as branchesApi, StockLevel } from '../lib/api';
+import { stock, branches as branchesApi, support as supportApi, platform as platformApi, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { accountState } from '../lib/accountState';
 import { useAuth } from '../lib/AuthContext';
@@ -15,6 +15,7 @@ import { lowStockRows } from '../lib/branchStock';
 import { useOnlineSync } from '../lib/useOnlineSync';
 import PendingSyncPanel from './PendingSyncPanel';
 import ConfirmDialog from './ConfirmDialog';
+import BrandMark from './BrandMark';
 import { isRetail, label } from '../retail';
 import '../styles/layout.scss';
 
@@ -23,7 +24,7 @@ const navItems = [
     section: 'Overview',
     items: [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/assistant', label: 'Ask StockFlow', icon: Sparkles },
+      { to: '/assistant', label: 'Ask ProfixBook', icon: Sparkles },
     ],
   },
   {
@@ -117,7 +118,7 @@ const pageTitles: Record<string, string> = {
   '/profile': 'My Profile',
   '/settings': 'Settings',
   '/audit': 'Audit Log',
-  '/assistant': 'Ask StockFlow',
+  '/assistant': 'Ask ProfixBook',
   '/support': 'Support',
   '/platform': 'Platform Overview',
   '/platform/tenants': 'Tenants',
@@ -186,6 +187,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }));
   const alertCount = alertItems.length;
 
+  // Support replies this business hasn't read yet (0049), and on the admin
+  // side, conversations waiting on a reply. Re-checked on every page change
+  // so a badge clears as soon as the ticket has been opened.
+  const supportUnreadQ = useQuery<number>(
+    () => (profile ? supportApi.unreadCount() : Promise.resolve(0)), [profile, location.pathname]);
+  const supportUnread = supportUnreadQ.data ?? 0;
+  const adminWaitingQ = useQuery<number>(
+    () => (isPlatformAdmin
+      ? platformApi.tickets().then(ts => ts.filter(t => t.awaiting_reply).length).catch(() => 0)
+      : Promise.resolve(0)),
+    [isPlatformAdmin, location.pathname]);
+  const adminWaiting = adminWaitingQ.data ?? 0;
+  const bellCount = alertCount + supportUnread;
+
   // Close the notification dropdown on outside click / route change.
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -197,7 +212,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => { setNotifOpen(false); setDrawerOpen(false); }, [location.pathname]);
 
   const retail = isRetail(tenant);
-  const title = (retail && location.pathname === '/finished-goods') ? 'Products' : pageTitles[location.pathname] ?? 'StockFlow';
+  const title = (retail && location.pathname === '/finished-goods') ? 'Products'
+    : pageTitles[location.pathname]
+    // Detail pages (/platform/support/:id, /platform/tenants/:id, /support/:id)
+    // take their section's title rather than falling back to "ProfixBook".
+    ?? pageTitles[location.pathname.replace(/\/[^/]+$/, '')]
+    ?? 'ProfixBook';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
   const acct = accountState(tenant);
@@ -208,8 +228,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // app. Admin mode replaces the sidebar with just the platform tools
   // instead of appending them to an unrelated tenant's full nav.
   const inAdminMode = isPlatformAdmin && location.pathname.startsWith('/platform');
-  const tenantName = inAdminMode ? 'StockFlow' : (tenant?.name ?? 'StockFlow');
-  const initial = (tenantName[0] ?? 'S').toUpperCase();
+  const tenantName = inAdminMode ? 'ProfixBook' : (tenant?.name ?? 'ProfixBook');
+  const initial = (tenantName[0] ?? 'P').toUpperCase();
   const userName = profile?.full_name ?? 'User';
   const userInitial = (userName[0] ?? 'U').toUpperCase();
 
@@ -258,10 +278,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className={`sidebar-scrim${drawerOpen ? ' show' : ''}`} onClick={() => setDrawerOpen(false)} />
       <aside className={`sidebar${drawerOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
-          <div className="logo-icon">{initial}</div>
+          {/* A business sees its own initial; the platform side (and an
+              account with no business) is ProfixBook itself. */}
+          {inAdminMode || !tenant
+            ? <BrandMark size={38} className="logo-mark" />
+            : <div className="logo-icon">{initial}</div>}
           <div className="logo-text">
             <div className="name">{tenantName}</div>
-            <div className="tagline">{inAdminMode ? 'Platform Admin' : (multi ? myBranchName : 'Powered by StockFlow')}</div>
+            <div className="tagline">{inAdminMode ? 'Platform Admin' : (multi ? myBranchName : 'Powered by ProfixBook')}</div>
           </div>
         </div>
 
@@ -280,6 +304,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {label}
                   {to === '/stock-alerts' && alertCount > 0 && (
                     <span className="nav-badge">{alertCount}</span>
+                  )}
+                  {to === '/support' && supportUnread > 0 && (
+                    <span className="nav-badge" aria-label={`${supportUnread} new support ${supportUnread === 1 ? 'reply' : 'replies'}`}>{supportUnread}</span>
+                  )}
+                  {to === '/platform/support' && adminWaiting > 0 && (
+                    <span className="nav-badge" aria-label={`${adminWaiting} waiting on a reply`}>{adminWaiting}</span>
                   )}
                 </NavLink>
               ))}
@@ -353,25 +383,36 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <span className="date-badge">{today}</span>
 
             {/* Notifications */}
-            {canAccess(role, '/stock-alerts') && (
+            {(canAccess(role, '/stock-alerts') || supportUnread > 0) && (
               <div className="notif-wrap" ref={notifRef}>
                 <button
                   className={`icon-btn${notifOpen ? ' active-surface' : ''}`}
                   onClick={() => setNotifOpen(o => !o)}
-                  aria-label={`Notifications${alertCount ? `, ${alertCount} stock alerts` : ''}`}
+                  aria-label={`Notifications${bellCount ? `, ${bellCount} new` : ''}`}
                   aria-expanded={notifOpen}
                 >
                   <Bell size={18} />
-                  {alertCount > 0 && <span className="icon-btn-badge">{alertCount > 9 ? '9+' : alertCount}</span>}
+                  {bellCount > 0 && <span className="icon-btn-badge">{bellCount > 9 ? '9+' : bellCount}</span>}
                 </button>
                 {notifOpen && (
                   <div className="notif-dropdown" role="menu">
                     <div className="notif-head">
-                      <h3>Stock Alerts</h3>
-                      <Link to="/stock-alerts">View all</Link>
+                      <h3>{supportUnread > 0 ? 'Notifications' : 'Stock Alerts'}</h3>
+                      {canAccess(role, '/stock-alerts') && <Link to="/stock-alerts">View all</Link>}
                     </div>
                     <div className="notif-list">
-                      {alertItems.length === 0 ? (
+                      {supportUnread > 0 && (
+                        <Link to="/support" className="notif-item">
+                          <span className="notif-dot info"><MessageSquare size={15} /></span>
+                          <span className="notif-body">
+                            <span className="notif-title">ProfixBook Support replied</span>
+                            <span className="notif-sub">
+                              {supportUnread === 1 ? '1 ticket has a new reply' : `${supportUnread} tickets have new replies`}
+                            </span>
+                          </span>
+                        </Link>
+                      )}
+                      {!canAccess(role, '/stock-alerts') ? null : alertItems.length === 0 ? (
                         <div className="notif-empty">All stock levels are healthy.</div>
                       ) : (
                         alertItems.slice(0, 8).map(a => (

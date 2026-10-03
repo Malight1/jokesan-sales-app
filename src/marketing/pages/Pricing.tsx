@@ -10,7 +10,7 @@ const BILLING_FAQ = [
   { q: 'Do I need a card to start?', a: 'No. Every plan starts with a 14-day free trial. You only add a card when you choose a plan to continue on.' },
   { q: 'Can I switch plans later?', a: 'Yes, upgrade or downgrade any time from Settings. You are never locked into the plan you started on.' },
   { q: 'What happens to my data if I stop paying?', a: 'Your account moves to read-only rather than being deleted, so nothing you have recorded is lost while you decide.' },
-  { q: 'Is Paystack safe to pay through?', a: 'Yes. StockFlow never sees or stores your card details. Paystack handles the payment directly.' },
+  { q: 'Is Paystack safe to pay through?', a: 'Yes. ProfixBook never sees or stores your card details. Paystack handles the payment directly.' },
 ];
 
 export default function Pricing() {
@@ -18,7 +18,7 @@ export default function Pricing() {
   // number, so this line can never drift from what's actually charged.
   const cheapest = PLANS[0];
   useMeta(
-    'Pricing, StockFlow',
+    'Pricing, ProfixBook',
     `Starter, Growth and Business plans from ${money(cheapest.price)}/month. Every plan starts with a 14-day free trial, no card required.`
   );
   return (

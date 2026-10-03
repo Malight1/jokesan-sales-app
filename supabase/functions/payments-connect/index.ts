@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — connect a tenant's own Paystack account (Phase 5a)
+// ProfixBook — connect a tenant's own Paystack account (Phase 5a)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
 // → name it "payments-connect" → paste this) OR via CLI:
@@ -15,7 +15,7 @@
 // which only exists once the `vault` extension is enabled on this project
 // (Database → Extensions → supabase_vault).
 //
-// Money never passes through StockFlow — each business's own Paystack
+// Money never passes through ProfixBook — each business's own Paystack
 // account collects it directly. This function only ever sees the secret
 // key once, to verify it, then hands it straight to Vault.
 // ============================================================

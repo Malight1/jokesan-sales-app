@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, KeyRound, Loader2 } from 'lucide-react';
+import { KeyRound, Loader2 } from 'lucide-react';
+import BrandMark from '../components/BrandMark';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 import './Login.scss';
@@ -44,8 +45,8 @@ export default function AcceptInvite() {
       <div className="auth-screen">
         <div className="auth-card">
           <div className="auth-brand">
-            <div className="auth-logo"><Building2 size={22} /></div>
-            <h1>StockFlow</h1>
+            <BrandMark size={52} className="auth-mark" />
+            <h1>ProfixBook</h1>
           </div>
           <div className="auth-alert error">
             This invite link is invalid or has expired. Ask whoever invited you to send a new one, or sign in if you already have an account.

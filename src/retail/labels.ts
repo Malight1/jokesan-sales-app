@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — retail vocabulary.
+// ProfixBook — retail vocabulary.
 //
 // A shop owner buys and sells "products," not "finished goods" made from
 // "raw materials." The machine-level identifiers (finished_good, material,

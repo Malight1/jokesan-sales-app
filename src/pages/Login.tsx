@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { platform } from '../lib/api';
-import { Building2, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { Loader2 } from 'lucide-react';
+import BrandMark from '../components/BrandMark';
 import './Login.scss';
 
-type Mode = 'login' | 'signup';
+type Mode = 'login' | 'signup' | 'forgot';
 
 export default function Login() {
   const { signIn, signUp, session } = useAuth();
@@ -45,7 +47,15 @@ export default function Login() {
     setNotice(null);
     setLoading(true);
 
-    if (mode === 'login') {
+    if (mode === 'forgot') {
+      // Supabase answers the same whether or not the address has an
+      // account, so this never reveals who is signed up.
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) setError(error.message);
+      else setNotice(`If ${email.trim()} has an account, a link to set a new password is on its way. Check spam too.`);
+    } else if (mode === 'login') {
       const { error } = await signIn(email, password);
       if (error) setError(error);
     } else {
@@ -56,21 +66,49 @@ export default function Login() {
     setLoading(false);
   };
 
+  const switchMode = (next: Mode) => { setMode(next); setError(null); setNotice(null); };
+  // The most common reason a new owner can't get in: they never clicked
+  // the confirmation link (or it expired). Let them get a fresh one.
+  const unconfirmed = mode === 'login' && !!error && /confirm/i.test(error);
+  const resendConfirmation = async () => {
+    setLoading(true);
+    const { error: err } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+    setLoading(false);
+    if (err) setError(err.message);
+    else { setError(null); setNotice(`A new confirmation link is on its way to ${email.trim()}.`); }
+  };
+
   return (
     <div className="auth-screen">
       <div className="auth-card">
         <div className="auth-brand">
-          <div className="auth-logo"><Building2 size={22} /></div>
-          <h1>StockFlow</h1>
-          <p>Manufacturing &amp; sales, under control.</p>
+          <BrandMark size={52} className="auth-mark" />
+          <h1>ProfixBook</h1>
+          <p>Manufacturing, retail &amp; sales, under control.</p>
         </div>
 
-        <div className="auth-tabs">
-          <button className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(null); setNotice(null); }}>Sign In</button>
-          <button className={mode === 'signup' ? 'active' : ''} onClick={() => { setMode('signup'); setError(null); setNotice(null); }}>Create Account</button>
-        </div>
+        {mode === 'forgot' ? (
+          <div className="auth-intro">
+            <h2>Reset your password</h2>
+            <p>Enter the email you sign in with and we'll send you a link to set a new one.</p>
+          </div>
+        ) : (
+          <div className="auth-tabs">
+            <button className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>Sign In</button>
+            <button className={mode === 'signup' ? 'active' : ''} onClick={() => switchMode('signup')}>Create Account</button>
+          </div>
+        )}
 
-        {error && <div className="auth-alert error">{error}</div>}
+        {error && (
+          <div className="auth-alert error">
+            {error}
+            {unconfirmed && (
+              <button type="button" className="link-btn auth-alert-action" onClick={resendConfirmation} disabled={loading || !email.trim()}>
+                Send a new confirmation link
+              </button>
+            )}
+          </div>
+        )}
         {notice && <div className="auth-alert success">{notice}</div>}
 
         <form onSubmit={handleSubmit}>
@@ -105,19 +143,27 @@ export default function Login() {
             <label>Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" />
           </div>
-          <div className="form-group">
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} placeholder="••••••••" />
-          </div>
+          {mode !== 'forgot' && (
+            <div className="form-group">
+              <div className="auth-label-row">
+                <label htmlFor="auth-password">Password</label>
+                {mode === 'login' && (
+                  <button type="button" className="link-btn" onClick={() => switchMode('forgot')}>Forgot password?</button>
+                )}
+              </div>
+              <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} placeholder="••••••••" />
+            </div>
+          )}
 
           <button type="submit" className="btn-primary auth-submit" disabled={loading}>
-            {loading ? <><Loader2 size={16} className="spin" /> Please wait…</> : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {loading ? <><Loader2 size={16} className="spin" /> Please wait…</>
+              : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send Reset Link'}
           </button>
         </form>
 
         <p className="auth-foot">
-          {mode === 'login' ? "New here? " : 'Already have an account? '}
-          <button className="link-btn" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(null); setNotice(null); }}>
+          {mode === 'forgot' ? 'Remembered it? ' : mode === 'login' ? 'New here? ' : 'Already have an account? '}
+          <button className="link-btn" onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>
             {mode === 'login' ? 'Create an account' : 'Sign in'}
           </button>
         </p>

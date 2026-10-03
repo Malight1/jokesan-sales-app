@@ -1,4 +1,4 @@
-import { qtyByProduct, lowStockRows, decrementAt } from '../branchStock';
+import { qtyByProduct, valueAtCostByProduct, lowStockRows, decrementAt } from '../branchStock';
 import { StockLevel } from '../api';
 
 const row = (branch: string, product: string, name: string, qty: number, min = 5): StockLevel => ({
@@ -31,6 +31,39 @@ describe('qtyByProduct', () => {
   it('copes with numeric strings from Postgres', () => {
     const m = qtyByProduct([{ ...row('lagos', 'soap', 'Soap', 0), qty: '12.5' as unknown as number }], 'lagos');
     expect(m.get('soap')).toBe(12.5);
+  });
+});
+
+describe('valueAtCostByProduct (migration 0048)', () => {
+  // 25 units at Lagos worth ₦1,000 in cost, none at Abuja.
+  const priced: StockLevel[] = [{ ...row('lagos', 'soap', 'Soap', 25), value_at_cost: 1000 }];
+
+  it('sums cost across branches', () => {
+    const v = valueAtCostByProduct(priced);
+    expect(v.get('soap')).toBe(1000);
+    expect(v.has('soap')).toBe(true);
+  });
+
+  it('reads one branch only', () => {
+    const v = valueAtCostByProduct(priced, 'abuja');
+    expect(v.get('soap')).toBe(0);
+  });
+
+  it('a genuinely un-stocked product reads 0, distinct from "hidden"', () => {
+    const v = valueAtCostByProduct([{ ...row('lagos', 'lotion', 'Lotion', 0), value_at_cost: 0 }]);
+    expect(v.get('lotion')).toBe(0);
+    expect(v.has('lotion')).toBe(true);
+  });
+
+  it('treats a null value_at_cost as hidden from this role, not zero', () => {
+    const v = valueAtCostByProduct([{ ...row('lagos', 'soap', 'Soap', 25), value_at_cost: null }]);
+    expect(v.has('soap')).toBe(false);
+    expect(v.get('soap')).toBe(0);
+  });
+
+  it('treats a missing value_at_cost (data cached before 0048) as hidden too', () => {
+    const v = valueAtCostByProduct([row('lagos', 'soap', 'Soap', 25)]);
+    expect(v.has('soap')).toBe(false);
   });
 });
 

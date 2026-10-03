@@ -18,6 +18,12 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+// Dialogs can stack (New Supplier over Buy Stock, a confirm over a
+// detail view). Every one listens on document, so without this only-the-top-
+// one-answers rule a single Escape closed the whole stack, throwing away the
+// half-filled form underneath, and each layer's Tab trap fought the others.
+const openDialogs: HTMLElement[] = [];
+
 export function useModalA11y(onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -33,6 +39,7 @@ export function useModalA11y(onClose: () => void) {
     if (!el) return;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    openDialogs.push(el);
 
     // Point the dialog at its own heading. The headings are written by ~14
     // different pages, so rather than editing each one, we adopt whichever
@@ -44,7 +51,10 @@ export function useModalA11y(onClose: () => void) {
     }
 
     // Move focus into the dialog: the first real control, or the dialog itself.
-    const first = el.querySelector<HTMLElement>(FOCUSABLE);
+    // Skips the header's close button, which comes first in every dialog and
+    // left people having to Tab past it before they could type anything.
+    const controls = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
+    const first = controls.find(c => !c.classList.contains('close-btn')) ?? controls[0];
     (first ?? el).focus({ preventScroll: true });
 
     // The page behind a modal shouldn't scroll under it.
@@ -52,6 +62,7 @@ export function useModalA11y(onClose: () => void) {
     document.body.style.overflow = 'hidden';
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (openDialogs[openDialogs.length - 1] !== el) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current();
@@ -79,6 +90,8 @@ export function useModalA11y(onClose: () => void) {
     document.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
+      const at = openDialogs.lastIndexOf(el);
+      if (at !== -1) openDialogs.splice(at, 1);
       document.body.style.overflow = prevOverflow;
       // Send focus back where it came from, so closing a dialog doesn't dump
       // a keyboard user at the top of the page.

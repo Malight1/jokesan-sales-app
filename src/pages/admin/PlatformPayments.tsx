@@ -74,7 +74,7 @@ function PaymentsPanel() {
             ? <Empty message="No payments recorded yet." />
             : <DataTable columns={columns} rows={rows} getRowKey={p => p.id}
                 searchKeys={[p => p.tenant_name]} searchPlaceholder="Search by business…"
-                exportName="payments" exportTitle="StockFlow Payments" />}
+                exportName="payments" exportTitle="ProfixBook Payments" />}
         </>
       )}
     </div>

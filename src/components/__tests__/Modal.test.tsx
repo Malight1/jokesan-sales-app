@@ -38,6 +38,16 @@ describe('Modal', () => {
     expect(screen.getByLabelText('Name')).toHaveFocus();
   });
 
+  it('skips the header close button when choosing where to focus', () => {
+    render(
+      <Modal onClose={() => {}}>
+        <div className="modal-header"><h2>Add Product</h2><button className="close-btn" aria-label="Close">x</button></div>
+        <input aria-label="Product name" />
+      </Modal>,
+    );
+    expect(screen.getByLabelText('Product name')).toHaveFocus();
+  });
+
   it('closes on Escape', () => {
     render(<Harness />);
     fireEvent.click(screen.getByText('Open'));
@@ -71,6 +81,26 @@ describe('Modal', () => {
     save.focus();
     fireEvent.keyDown(document, { key: 'Tab' });
     expect(screen.getByLabelText('Name')).toHaveFocus();
+  });
+
+  it('closes only the top dialog when two are stacked', () => {
+    function Stacked() {
+      const [inner, setInner] = useState(true);
+      const [outer, setOuter] = useState(true);
+      return (
+        <>
+          {outer && <Modal onClose={() => setOuter(false)}><h2>Buy Stock</h2><input aria-label="Qty" /></Modal>}
+          {inner && <Modal onClose={() => setInner(false)}><h2>New Supplier</h2><input aria-label="Business name" /></Modal>}
+        </>
+      );
+    }
+    render(<Stacked />);
+    expect(screen.getAllByRole('dialog')).toHaveLength(2);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Buy Stock');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('locks background scrolling while open and restores it after', () => {

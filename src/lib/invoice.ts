@@ -5,6 +5,7 @@ const money = (n: number) => 'NGN ' + (n || 0).toLocaleString(undefined, { maxim
 
 export interface InvoiceData {
   companyName: string;
+  companyAddress?: string | null;
   invoiceNo: string;
   date: string;
   customerName: string;
@@ -19,6 +20,9 @@ export interface InvoiceData {
   vatRate?: number;
   tin?: string | null;
   logoDataUrl?: string | null;
+  // Only printed when there's a balance left to collect — a fully paid
+  // invoice has nothing left for the customer to act on.
+  bankDetails?: { bank_name?: string; account_name?: string; account_number?: string } | null;
   // Sale-entity custom fields flagged show_on_invoice (migration 0032).
   customFields?: { label: string; value: any }[];
 }
@@ -36,6 +40,10 @@ export async function generateInvoicePdf(d: InvoiceData) {
   const pageW = doc.internal.pageSize.getWidth();
 
   // Optional logo (data URL). Falls back to text name if absent/invalid.
+  // Company address/TIN print as one small muted line under the name,
+  // whichever of the two exist — this is the only place either appears,
+  // and a debtor's finance team wants to see who they're paying.
+  const companyMeta = [d.companyAddress, d.tin ? `TIN: ${d.tin}` : null].filter(Boolean).join('  ·  ');
   if (d.logoDataUrl) {
     try {
       const fmtType = d.logoDataUrl.includes('png') ? 'PNG' : 'JPEG';
@@ -44,14 +52,20 @@ export async function generateInvoicePdf(d: InvoiceData) {
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 41, 59);
       doc.text(d.companyName, 40, 22);
-      if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 40, 28); }
+      if (companyMeta) {
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
+        doc.text(doc.splitTextToSize(companyMeta, 90), 40, 28);
+      }
     } catch { /* ignore bad image */ }
   } else {
     doc.setFontSize(19);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
     doc.text(d.companyName, 14, 20);
-    if (d.tin) { doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(`TIN: ${d.tin}`, 14, 26); }
+    if (companyMeta) {
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
+      doc.text(doc.splitTextToSize(companyMeta, 90), 14, 26);
+    }
   }
 
   doc.setFontSize(22);
@@ -125,11 +139,40 @@ export async function generateInvoicePdf(d: InvoiceData) {
     ty += strong ? 8 : 6;
   });
 
+  // Left column, level with the totals: how to pay what's still owed.
+  // Only when there's actually a balance — a paid invoice has nothing
+  // left for the customer to act on, so this stays out of the way.
+  const hasBank = !!(d.bankDetails && (d.bankDetails.account_number || d.bankDetails.bank_name));
+  if (d.balance > 0 && hasBank) {
+    let by = afterTable;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text('PAY BALANCE TO', 14, by);
+    by += 6;
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    if (d.bankDetails!.bank_name) { doc.setFont('helvetica', 'bold'); doc.text(d.bankDetails!.bank_name, 14, by); by += 5.5; }
+    doc.setFont('helvetica', 'normal');
+    if (d.bankDetails!.account_number) { doc.text(d.bankDetails!.account_number, 14, by); by += 5.5; }
+    if (d.bankDetails!.account_name) { doc.setFontSize(9); doc.setTextColor(100, 116, 139); doc.text(d.bankDetails!.account_name, 14, by); }
+  }
+
+  // A closing line earns its place on every invoice, paid or not — it's
+  // the one thing that always belongs here regardless of what else does.
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    d.balance <= 0 ? 'Thank you for your business!' : 'Thank you — kindly settle the balance above at your earliest convenience.',
+    14, Math.max(ty, hasBank && d.balance > 0 ? afterTable + 18 : afterTable) + 10,
+  );
+
   // Footer
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+  doc.text('Generated with ProfixBook — profixbook.com', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
   doc.save(`${d.invoiceNo}.pdf`);
 }
@@ -260,7 +303,7 @@ export async function generateCreditNotePdf(d: CreditNoteData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+  doc.text('Generated with ProfixBook — profixbook.com', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
   doc.save(`${d.creditNoteNo}.pdf`);
 }
@@ -414,7 +457,7 @@ export async function generateQuotePdf(d: QuoteData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+  doc.text('Generated with ProfixBook — profixbook.com', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
   doc.save(`${d.docNo}.pdf`);
 }
@@ -531,7 +574,7 @@ export async function generateWaybillPdf(d: WaybillData) {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Generated with StockFlow — stockflow.africa', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
+  doc.text('Generated with ProfixBook — profixbook.com', pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
 
   doc.save(`${d.docNo}.pdf`);
 }

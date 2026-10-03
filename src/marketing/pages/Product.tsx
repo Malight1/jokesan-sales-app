@@ -54,6 +54,7 @@ const CARDS = [
       'Quick purchase for a supplier who delivers on the spot',
       'Real purchase orders: nothing owed until goods arrive',
       'Supplier returns, drawn from the exact batch',
+      'Retail Mode: buy finished stock straight from a supplier and sell it, no production step',
     ],
   },
   {
@@ -69,14 +70,14 @@ const CARDS = [
 
 export default function Product() {
   useMeta(
-    'Product, StockFlow',
-    'Every feature StockFlow actually ships: FIFO costing, offline POS, batch and expiry tracking, purchase orders, compliance tools, and an AI assistant.'
+    'Product, ProfixBook',
+    'Every feature ProfixBook actually ships: FIFO costing, offline POS, batch and expiry tracking, purchase orders, compliance tools, and an AI assistant.'
   );
   return (
     <div className="mkt-product">
       <section className="mkt-section mkt-section--intro">
         <span className="mkt-eyebrow">The full tour</span>
-        <h1>Everything StockFlow actually does.</h1>
+        <h1>Everything ProfixBook actually does.</h1>
         <p>No feature here is aspirational. This is what is live in the product today.</p>
       </section>
 
@@ -112,13 +113,13 @@ export default function Product() {
       <section className="mkt-product-row mkt-product-row--spotlight">
         <div className="mkt-product-row__copy">
           <span className="mkt-eyebrow">The spotlight</span>
-          <h2>Ask StockFlow</h2>
+          <h2>Ask ProfixBook</h2>
           <ul>
             <li>A chat built into the app that checks today's real numbers, stock and reorder suggestions for the person asking</li>
             <li>Scoped to exactly what the asking person's role can see. The database is still the only real security boundary</li>
           </ul>
         </div>
-        <ScreenshotFrame src="/screenshots/assistant.png" alt="Ask StockFlow" />
+        <ScreenshotFrame src="/screenshots/assistant.png" alt="Ask ProfixBook" />
       </section>
 
       <section className="mkt-final-cta">

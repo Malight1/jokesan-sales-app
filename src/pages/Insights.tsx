@@ -157,7 +157,7 @@ export default function Insights() {
           <Lightbulb size={30} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
           <h3>Insights appear as you trade</h3>
           <p style={{ color: '#64748b', fontSize: '0.9rem', marginTop: '0.35rem' }}>
-            Once you have a few weeks of purchases, production and sales, StockFlow will spot cost creep, reorder timing, slow stock and overdue debts automatically.
+            Once you have a few weeks of purchases, production and sales, ProfixBook will spot cost creep, reorder timing, slow stock and overdue debts automatically.
           </p>
         </div>
       ) : (

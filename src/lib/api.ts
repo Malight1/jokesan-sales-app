@@ -472,7 +472,16 @@ export const deliveries = {
 // ============================================================
 export const purchases = {
   list: () => runAll<PurchaseOrder>((f, t) => supabase.from('purchase_orders').select('*').order('purchase_date', { ascending: false }).range(f, t)),
-  detail: (id: string) => run<any>(supabase.from('purchase_orders').select('*, purchase_items(*), purchase_payments(*)').eq('id', id).single()),
+  // A finished-goods line keeps qty_remaining at 0 (migration 0045); what's
+  // still on the shelf lives on its fg_batches layer, embedded here as
+  // fg_batch so the detail and return screens can read the real figure.
+  detail: (id: string) => run<any>(supabase.from('purchase_orders')
+    .select('*, purchase_items(*, fg_batch:fg_batch_id(qty_remaining)), purchase_payments(*)').eq('id', id).single()),
+  // Latest price paid per product, newest first, for prefilling a new
+  // purchase's unit cost. '*' so it still works before 0045 adds
+  // finished_good_id.
+  recentCosts: () => run<any[]>(supabase.from('purchase_items').select('*')
+    .order('created_at', { ascending: false }).limit(500)),
   create: (params: {
     supplierId: string | null; date: string; paymentTypeId: string | null;
     amountPaid: number;
@@ -701,6 +710,11 @@ export interface StockLevel {
   // What can actually be sold: leaves out expired, on-hold and recalled
   // stock (0022). Missing from data cached before that migration.
   sellable_qty?: number;
+  // What this row's remaining stock cost to buy or make (0048). Money-gated
+  // like expiry_overview()/retail_stock_value(): null for anyone who isn't
+  // accounts/admin, so the frontend can tell "hidden" from "genuinely 0" —
+  // and missing entirely from data cached before this migration.
+  value_at_cost?: number | null;
 }
 
 export const stock = {
@@ -1010,7 +1024,7 @@ export const reorder = {
 // E-INVOICING (NRS) READINESS (migration 0035, Phase 7c)
 //
 // Nigeria's e-invoicing mandate isn't enforced yet and needs an
-// accredited provider StockFlow hasn't chosen — so there's no submission
+// accredited provider ProfixBook hasn't chosen — so there's no submission
 // here, only a readiness score for the master data a future provider
 // will want (business TIN/RC number/address, a B2B customer's TIN, a
 // product's tax category and classification code).
@@ -1027,7 +1041,7 @@ export const compliance = {
 };
 
 // ============================================================
-// ASK STOCKFLOW — an AI assistant over the app's own data (migration
+// ASK PROFIXBOOK — an AI assistant over the app's own data (migration
 // 0036, Phase 7b)
 //
 // The `assistant` Edge Function is the only thing that calls Claude —
@@ -1186,7 +1200,11 @@ export interface PlatformPayment {
   provider: string; status: string; reference: string | null; created_at: string; current_period_end: string | null;
 }
 export interface PlatformAttentionItem {
-  tenant_id: string; tenant_name: string; kind: 'trial_expiring' | 'renewal_due' | 'past_due'; detail: string; at: string;
+  tenant_id: string; tenant_name: string;
+  kind: 'ticket_waiting' | 'unconfirmed_owner' | 'trial_expiring' | 'renewal_due' | 'past_due';
+  detail: string; at: string;
+  // The ticket, for kind 'ticket_waiting' (migration 0049).
+  ref_id?: string | null;
 }
 export interface PlatformTenantDetail {
   tenant: Record<string, any>; profiles: Record<string, any>[]; branches: Record<string, any>[];
@@ -1207,6 +1225,32 @@ export interface SupportTicket {
   id: string; tenant_id: string; tenant_name?: string; subject: string; category: SupportCategory;
   status: 'open' | 'in_progress' | 'resolved' | 'closed'; priority: string;
   created_at: string; updated_at: string; message_count?: number; last_message_at?: string | null;
+  // Who spoke last and what's unread (migration 0049). Optional until it has run.
+  last_sender?: 'tenant' | 'admin' | null;
+  tenant_unread?: boolean;
+  // Admin queue only (platform_tickets).
+  awaiting_reply?: boolean; unread?: boolean;
+  created_by?: string | null; created_by_name?: string | null; created_by_email?: string | null;
+}
+// A read-only look inside one business, for diagnosing a support issue
+// (platform_tenant_snapshot, migration 0049).
+export interface PlatformSnapshotUser {
+  id: string; full_name: string | null; email: string | null; phone: string | null; role: string;
+  is_active: boolean; last_sign_in_at: string | null; email_confirmed_at: string | null; created_at: string;
+}
+export interface PlatformStockIssue {
+  kind: 'finished_good' | 'material'; id: string; name: string; unit: string | null;
+  on_record: number; in_batches: number; in_ledger: number;
+}
+export interface PlatformSnapshot {
+  access: { can_write: boolean; reason: 'suspended' | 'trial_expired' | 'plan_expired' | null };
+  counts: { products: number; materials: number; customers: number; suppliers: number; sales: number; purchases: number; branches: number };
+  last_sale_at: string | null; last_activity_at: string | null;
+  users: PlatformSnapshotUser[];
+  stock_issues: PlatformStockIssue[];
+  recent_sales: { id: string; doc_no: string | null; transaction_date: string; total_amount: number; amount_paid: number; balance: number; payment_status: string; voided: boolean; created_at: string }[];
+  recent_purchases: { id: string; doc_no: string | null; purchase_date: string; total_amount: number; total_paid: number; balance: number; status: string | null; voided: boolean; created_at: string }[];
+  recent_audit: { id: number; action: string; entity: string | null; entity_id: string | null; meta: Record<string, any> | null; created_at: string; actor: string | null }[];
 }
 export interface SupportAttachment {
   id: string; file_name: string; storage_path: string; content_type: string | null;
@@ -1244,15 +1288,69 @@ export const platform = {
     const { error } = await supabase.auth.resend({ type: 'signup', email });
     if (error) throw new Error(error.message);
   },
-  tickets: (status?: string) => rpc<SupportTicket[]>('platform_tickets', { p_status: status ?? null }),
+  tickets: (status?: string, tenantId?: string) =>
+    rpc<SupportTicket[]>('platform_tickets', { p_status: status ?? null, ...(tenantId ? { p_tenant_id: tenantId } : {}) }),
+  ticket: async (id: string): Promise<SupportTicket | null> =>
+    (await rpc<SupportTicket[]>('platform_tickets', { p_status: null, p_ticket_id: id }))[0] ?? null,
   ticketMessages: (id: string) => rpc<SupportTicketMessage[]>('platform_ticket_messages', { p_ticket_id: id }),
-  replyTicket: (id: string, body: string) => rpcVoid('platform_reply_ticket', { p_ticket_id: id, p_body: body }),
+  // Returns the new message's id (0049), so files can be attached to it.
+  replyTicket: async (id: string, body: string): Promise<string> => {
+    const messageId = await rpc<string>('platform_reply_ticket', { p_ticket_id: id, p_body: body });
+    notifyTicket(id, 'admin_reply');
+    return messageId;
+  },
   updateTicketStatus: (id: string, status: string) => rpcVoid('platform_update_ticket_status', { p_ticket_id: id, p_status: status }),
+  markTicketSeen: (id: string) => rpcVoid('platform_mark_ticket_seen', { p_ticket_id: id }),
+  // Same private bucket and per-business folder as a customer's own
+  // upload; the RPC checks the folder matches the ticket's business.
+  uploadTicketAttachment: async (tenantId: string, ticketId: string, messageId: string, file: File): Promise<void> => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${tenantId}/${ticketId}/${Date.now()}-${safeName}`;
+    const up = await supabase.storage.from('ticket-attachments').upload(path, file, { contentType: file.type });
+    if (up.error) throw new Error(up.error.message);
+    await rpc('platform_add_ticket_attachment', {
+      p_message_id: messageId, p_file_name: file.name, p_storage_path: path,
+      p_content_type: file.type || null, p_size: file.size,
+    });
+  },
+  openTicket: async (tenantId: string, subject: string, category: SupportCategory, body: string): Promise<string> => {
+    const ticketId = await rpc<string>('platform_open_ticket', { p_tenant_id: tenantId, p_subject: subject, p_category: category, p_body: body });
+    notifyTicket(ticketId, 'admin_reply');
+    return ticketId;
+  },
+  snapshot: (tenantId: string) => rpc<PlatformSnapshot>('platform_tenant_snapshot', { p_tenant_id: tenantId }),
+  // Sends Supabase's own reset email straight from the browser (works for
+  // any address with the public key), then leaves a trail on the business.
+  sendPasswordReset: async (tenantId: string, email: string): Promise<void> => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` });
+    if (error) throw new Error(error.message);
+    await rpcVoid('platform_log_action', { p_tenant_id: tenantId, p_action: 'platform.password_reset_sent', p_meta: { email } }).catch(() => {});
+  },
+  logConfirmationResent: (tenantId: string, email: string) =>
+    rpcVoid('platform_log_action', { p_tenant_id: tenantId, p_action: 'platform.confirmation_resent', p_meta: { email } }).catch(() => {}),
+  // "View as" (platform-impersonate Edge Function): a one-time sign-in
+  // link for one team member, opened in a new tab so the admin's own
+  // session is never touched. Every call is logged against that
+  // member's own business — see the function's own header comment.
+  impersonate: async (profileId: string, reason?: string): Promise<{ url: string; viewedAs: string }> => {
+    const { data, error } = await supabase.functions.invoke('platform-impersonate', { body: { profileId, reason } });
+    if (error) throw new Error((data as any)?.error ?? error.message);
+    if (data?.error) throw new Error(data.error);
+    return data;
+  },
 };
 
 // ============================================================
 // SUPPORT (tenant-facing — file and follow up on a ticket)
 // ============================================================
+// Best-effort email notification (ticket-notify Edge Function, deployed
+// separately — see its own header comment). Never awaited by a caller,
+// never lets a missing deploy or a missing RESEND_API_KEY block the
+// reply itself from going through.
+const notifyTicket = (ticketId: string, trigger: 'ticket_opened' | 'tenant_reply' | 'admin_reply') => {
+  supabase.functions.invoke('ticket-notify', { body: { ticketId, trigger } }).catch(() => {});
+};
+
 export const support = {
   myTickets: () => runAll<SupportTicket>((f, t) =>
     supabase.from('support_tickets').select('*').order('created_at', { ascending: false }).range(f, t)),
@@ -1263,11 +1361,21 @@ export const support = {
   create: async (subject: string, category: SupportCategory, body: string): Promise<{ ticket: SupportTicket; messageId: string }> => {
     const ticket = await run<SupportTicket>(supabase.from('support_tickets').insert({ subject, category }).select().single());
     const message = await run<{ id: string }>(supabase.from('support_ticket_messages').insert({ ticket_id: ticket.id, sender_type: 'tenant', body }).select().single());
+    notifyTicket(ticket.id, 'ticket_opened');
     return { ticket, messageId: message.id };
+  },
+  // Opening a ticket clears its "new reply" flag (0049). Silent on a
+  // database that hasn't run it yet.
+  markSeen: (ticketId: string) => rpcVoid('mark_ticket_seen', { p_ticket_id: ticketId }).catch(() => {}),
+  // How many tickets have a support reply this business hasn't read.
+  unreadCount: async (): Promise<number> => {
+    const { count, error } = await supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('tenant_unread', true);
+    return error ? 0 : count ?? 0;
   },
   reply: async (ticketId: string, body: string): Promise<string> => {
     const message = await run<{ id: string }>(
       supabase.from('support_ticket_messages').insert({ ticket_id: ticketId, sender_type: 'tenant', body }).select().single());
+    notifyTicket(ticketId, 'tenant_reply');
     return message.id;
   },
   // Attachments live in a private bucket, one folder per tenant (same
@@ -1309,7 +1417,7 @@ export const support = {
 export const PLANS = [
   { id: 'starter',  name: 'Starter',  price: 6000,  users: 1,  blurb: 'Solo owner', features: ['Full ERP + invoices', 'Point of sale', 'WhatsApp receipts & reminders', 'CSV import', 'VAT', '1 user, 1 branch'] },
   { id: 'growth',   name: 'Growth',   price: 15000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', '5 users, up to 3 branches'] },
-  { id: 'business', name: 'Business',  price: 30000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Automatic payment confirmation', 'Ask StockFlow (AI assistant)', 'Custom fields & e-invoicing readiness', 'Unlimited branches', '15 users, priority support'] },
+  { id: 'business', name: 'Business',  price: 30000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Automatic payment confirmation', 'Ask ProfixBook (AI assistant)', 'Custom fields & e-invoicing readiness', 'Unlimited branches', '15 users, priority support'] },
 ] as const;
 
 export const billing = {
@@ -1324,7 +1432,7 @@ export const billing = {
 // AUTOMATIC PAYMENT CONFIRMATION (migration 0027, Phase 5a)
 //
 // Each business connects its OWN Paystack account — money never passes
-// through StockFlow. Connecting and reading back the secret both happen
+// through ProfixBook. Connecting and reading back the secret both happen
 // inside Edge Functions; the app only ever sees integration_status()'s
 // public-facing shape (status + public key, never the secret).
 // ============================================================

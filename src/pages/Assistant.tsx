@@ -40,13 +40,13 @@ export default function Assistant() {
     }
   };
 
-  if (quotaLoading) return <Loading label="Loading Ask StockFlow…" />;
+  if (quotaLoading) return <Loading label="Loading Ask ProfixBook…" />;
 
   if (quota && !quota.enabled) {
     return (
       <div className="card" style={{ maxWidth: 520, textAlign: 'center', padding: '2.5rem 1.5rem', margin: '2rem auto' }}>
         <Sparkles size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
-        <h3 style={{ marginBottom: '0.35rem' }}>Ask StockFlow</h3>
+        <h3 style={{ marginBottom: '0.35rem' }}>Ask ProfixBook</h3>
         <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
           Ask plain questions about your own sales, stock, profit and reorder needs — answered from your real
           data, on the {planFor('assistant')} plan and above.
@@ -61,7 +61,7 @@ export default function Assistant() {
     <div>
       <div className="page-header">
         <div className="page-title">
-          <h1>Ask StockFlow</h1>
+          <h1>Ask ProfixBook</h1>
           <p>{quota ? `${quota.remaining} of ${quota.limit} questions left this month` : ' '}</p>
         </div>
       </div>

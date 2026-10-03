@@ -3,12 +3,12 @@ import { Link } from 'react-router-dom';
 import useMeta from '../useMeta';
 
 const FAQS = [
-  { q: 'Does StockFlow work with no internet?',
+  { q: 'Does ProfixBook work with no internet?',
     a: 'Yes. Point of sale queues sales while you are offline and syncs for real the moment you are back online. The server is still the final word, so a real stock conflict is flagged for you to resolve rather than silently guessed at.' },
   { q: 'Can each branch have its own stock?',
     a: 'Yes. Every branch keeps completely separate stock. Moving stock between branches goes through a transfer that preserves the original FIFO cost, so your margins stay accurate wherever something ends up being sold.' },
-  { q: 'Is StockFlow ready for Nigeria\'s new e-invoicing rules?',
-    a: 'StockFlow scores your business\'s readiness against the real NRS requirements and shows exactly what is missing: your TIN, RC number, and the right tax fields on your products and customers. It does not yet submit invoices directly to NRS, since that needs an accredited provider StockFlow has not connected to yet, but you will be ahead of the 2027/2028 enforcement dates either way.' },
+  { q: 'Is ProfixBook ready for Nigeria\'s new e-invoicing rules?',
+    a: 'ProfixBook scores your business\'s readiness against the real NRS requirements and shows exactly what is missing: your TIN, RC number, and the right tax fields on your products and customers. It does not yet submit invoices directly to NRS, since that needs an accredited provider ProfixBook has not connected to yet, but you will be ahead of the 2027/2028 enforcement dates either way.' },
   { q: 'Can I bring in my existing Excel or notebook records?',
     a: 'Yes, through the CSV import tool. Bring in your products and opening stock without retyping everything by hand.' },
   { q: 'What happens with a fake bank-transfer alert now?',
@@ -16,12 +16,12 @@ const FAQS = [
   { q: 'What if I stop paying?',
     a: 'Your account moves to read-only rather than being deleted, so nothing you have recorded is lost while you decide what to do next.' },
   { q: 'Do I need to install anything?',
-    a: 'No. StockFlow runs in the browser on any phone, tablet or computer. Nothing to install, and it works as an installable app on your phone\'s home screen if you want it there.' },
+    a: 'No. ProfixBook runs in the browser on any phone, tablet or computer. Nothing to install, and it works as an installable app on your phone\'s home screen if you want it there.' },
 ];
 
 export default function Faq() {
   useMeta(
-    'FAQ, StockFlow',
+    'FAQ, ProfixBook',
     'Answers to what people ask before they start: offline support, multi-branch stock, e-invoicing readiness, and more.'
   );
   return (

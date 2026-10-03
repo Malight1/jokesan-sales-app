@@ -25,7 +25,7 @@ export default function BarcodeScanner({ onScan, onClose }: { onScan: (code: str
         { fps: 10, qrbox: { width: 250, height: 150 } },
         (decodedText: string) => {
           onScan(decodedText);
-          stop();
+          handleClose();
         },
         () => { /* per-frame decode misses — expected while aiming, ignore */ }
       ).then(() => setStarting(false))

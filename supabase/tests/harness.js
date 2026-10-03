@@ -31,7 +31,10 @@ create table auth.users (
   id uuid primary key default gen_random_uuid(),
   email text,
   raw_user_meta_data jsonb default '{}'::jsonb,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  -- Real Supabase columns the support snapshot (0049) reads.
+  last_sign_in_at timestamptz,
+  email_confirmed_at timestamptz
 );
 -- Supabase resolves the caller from the JWT; here a GUC stands in for it.
 create or replace function auth.uid() returns uuid language sql stable as $$

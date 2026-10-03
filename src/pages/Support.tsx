@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, X, Paperclip } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Plus, X, Paperclip, LifeBuoy } from 'lucide-react';
 import { support, SupportTicket, SUPPORT_CATEGORIES, SupportCategory } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
-import { Loading, ErrorState, Empty } from '../components/DataStates';
+import { Loading, ErrorState } from '../components/DataStates';
 import Modal from '../components/Modal';
+import { ago } from '../components/SupportConversation';
+import './Support.scss';
 
 const statusBadge: Record<string, string> = {
   open: 'badge-warning', in_progress: 'badge-primary', resolved: 'badge-success', closed: 'badge-gray',
+};
+const statusLabel: Record<string, string> = {
+  open: 'Open', in_progress: 'In progress', resolved: 'Resolved', closed: 'Closed',
 };
 const categoryLabel = (c: string) => SUPPORT_CATEGORIES.find(x => x.id === c)?.label ?? c;
 
@@ -30,21 +35,35 @@ export default function Support() {
       {error && <ErrorState message={error} onRetry={refetch} />}
 
       {!loading && !error && tickets && (
-        tickets.length === 0 ? <Empty message="No support tickets yet. Filed one? It'll show up here." /> : (
-          <div className="table-wrapper">
-            <table>
-              <thead><tr><th>Subject</th><th>Category</th><th>Status</th><th>Last Activity</th></tr></thead>
-              <tbody>
-                {tickets.map(t => (
-                  <tr key={t.id} onClick={() => navigate(`/support/${t.id}`)} style={{ cursor: 'pointer' }}>
-                    <td data-label="Subject"><strong>{t.subject}</strong></td>
-                    <td data-label="Category">{categoryLabel(t.category)}</td>
-                    <td data-label="Status"><span className={statusBadge[t.status]}>{t.status.replace('_', ' ')}</span></td>
-                    <td data-label="Last Activity">{new Date(t.updated_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        tickets.length === 0 ? (
+          <div className="sp-inbox">
+            <div className="sp-inbox-empty">
+              <LifeBuoy size={28} style={{ color: '#2563eb' }} />
+              <strong>No tickets yet</strong>
+              Stuck on something, or a figure looks wrong? Tap New Ticket and tell us. We reply right here.
+            </div>
+          </div>
+        ) : (
+          <div className="sp-inbox">
+            {tickets.map(t => {
+              const fresh = !!t.tenant_unread;
+              const finished = t.status === 'resolved' || t.status === 'closed';
+              return (
+                <Link key={t.id} to={`/support/${t.id}`} className={`sp-row${fresh ? ' is-unread' : ''}`}>
+                  <span className={`sp-dot${fresh ? ' is-on' : ''}`} aria-label={fresh ? 'New reply' : undefined} />
+                  <span className="sp-row-main">
+                    <span className="sp-row-subject">{t.subject}</span>
+                    <span className="sp-row-sub">{categoryLabel(t.category)}</span>
+                  </span>
+                  <span className="sp-row-side">
+                    <span className={statusBadge[t.status]}>{statusLabel[t.status] ?? t.status}</span>
+                    {fresh ? <span className="sp-turn is-new">Support replied {ago(t.last_message_at)}</span>
+                      : !finished && t.last_sender === 'tenant' ? <span>Waiting on support</span>
+                      : <span>{ago(t.last_message_at ?? t.updated_at)}</span>}
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         )
       )}

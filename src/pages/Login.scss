@@ -21,6 +21,10 @@
       text-align: center;
       margin-bottom: 1.5rem;
 
+      // The ProfixBook mark (BrandMark) on the sign-in, reset and invite-error
+      // screens; .auth-logo below is still the icon tile AcceptInvite uses.
+      .auth-mark { display: block; margin: 0 auto 0.75rem; }
+
       .auth-logo {
         width: 52px;
         height: 52px;
@@ -66,6 +70,41 @@
 
       &.error   { background: $danger-light; color: darken($danger, 8%); }
       &.success { background: $success-light; color: darken($success, 8%); }
+    }
+
+    // Shared link-style button: "Forgot password?", the resend link in an
+    // error, and the sign-in/sign-up switch at the foot.
+    .link-btn {
+      padding: 0;
+      background: none;
+      border: none;
+      color: $primary;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: $font-size-sm;
+      cursor: pointer;
+      &:hover { text-decoration: underline; }
+      &:focus-visible { outline: none; box-shadow: $ring; border-radius: 4px; }
+      &:disabled { opacity: 0.6; cursor: default; text-decoration: none; }
+    }
+
+    .auth-label-row {
+      @include flex(baseline, space-between, 0.5rem);
+      .link-btn { font-size: $font-size-xs; }
+    }
+
+    .auth-alert-action {
+      display: block;
+      margin-top: 0.4rem;
+      color: inherit;
+      text-decoration: underline;
+    }
+
+    .auth-intro {
+      margin-bottom: 1.25rem;
+      text-align: center;
+      h2 { font-size: $font-size-lg; color: $gray-900; margin-bottom: 0.3rem; }
+      p { font-size: $font-size-sm; color: $gray-500; line-height: 1.5; }
     }
 
     .auth-submit {

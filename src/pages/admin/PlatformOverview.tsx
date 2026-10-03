@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, DollarSign, Wallet, LifeBuoy, UserMinus, AlertTriangle } from 'lucide-react';
+import { Building2, DollarSign, Wallet, LifeBuoy, UserMinus, AlertTriangle, MessageSquare, MailWarning } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -15,6 +15,8 @@ const fmt = (n: number) => '₦' + (n || 0).toLocaleString();
 const planPrice = (id: string) => PLANS.find(p => p.id === id)?.price ?? 0;
 
 const attentionLabel: Record<string, string> = {
+  ticket_waiting: 'Waiting on a reply',
+  unconfirmed_owner: "Can't sign in yet",
   trial_expiring: 'Trial expiring',
   renewal_due: 'Renewal due',
   past_due: 'Past due',
@@ -51,7 +53,7 @@ function Overview() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title"><h1>Platform Overview</h1><p>How StockFlow is doing across every tenant</p></div>
+        <div className="page-title"><h1>Platform Overview</h1><p>How ProfixBook is doing across every tenant</p></div>
       </div>
 
       {loading && <Loading label="Loading platform overview…" />}
@@ -80,9 +82,9 @@ function Overview() {
             </div>
             <Link to="/platform/support" className="stat-card" style={{ display: 'block', color: 'inherit', textDecoration: 'none' }}>
               <div className="stat-icon yellow"><LifeBuoy size={18} /></div>
-              <div className="stat-label">Open Tickets</div>
+              <div className="stat-label">Support</div>
               <div className="stat-value">{stats.data.open_tickets}</div>
-              <div className="stat-sub">Awaiting a reply</div>
+              <div className="stat-sub">{stats.data.open_tickets === 1 ? 'Customer waiting on you' : 'Customers waiting on you'}</div>
             </Link>
             <div className="stat-card">
               <div className="stat-icon red"><UserMinus size={18} /></div>
@@ -145,9 +147,11 @@ function Overview() {
               ) : (
                 <div>
                   {(attention.data ?? []).map((a, i) => (
-                    <Link key={i} to={`/platform/tenants/${a.tenant_id}`}
+                    <Link key={i} to={a.kind === 'ticket_waiting' && a.ref_id ? `/platform/support/${a.ref_id}` : `/platform/tenants/${a.tenant_id}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0', borderBottom: '1px solid #f1f5f9', color: 'inherit', textDecoration: 'none' }}>
-                      <AlertTriangle size={15} color={a.kind === 'past_due' ? '#dc2626' : '#d97706'} />
+                      {a.kind === 'ticket_waiting' ? <MessageSquare size={15} color="#2563eb" />
+                        : a.kind === 'unconfirmed_owner' ? <MailWarning size={15} color="#d97706" />
+                        : <AlertTriangle size={15} color={a.kind === 'past_due' ? '#dc2626' : '#d97706'} />}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{a.tenant_name}</div>
                         <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{attentionLabel[a.kind]} · {a.detail}</div>

@@ -48,15 +48,7 @@
     margin-right: auto;
   }
 
-  &__logo {
-    width: 28px;
-    height: 28px;
-    border-radius: $radius-sm;
-    background: $primary;
-    color: $white;
-    display: grid;
-    place-items: center;
-  }
+  &__logo { flex-shrink: 0; }
 
   &__links a {
     color: $gray-600;
@@ -108,6 +100,17 @@
   margin-bottom: 0.6rem;
 }
 
+// Fade-and-rise on scroll into view (Reveal.tsx). The global reduced-motion
+// rule in global.scss already collapses this to instant, so no separate
+// override is needed here.
+.mkt-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.6s $ease, transform 0.6s $ease;
+
+  &.is-visible { opacity: 1; transform: none; }
+}
+
 .mkt-section {
   max-width: 1280px;
   margin: 0 auto;
@@ -154,10 +157,25 @@
   &__cta .btn-primary, &__cta .btn-secondary { display: inline-flex; align-items: center; gap: 0.4rem; }
   &__trust { font-size: 0.82rem; color: $gray-400; }
 
+  // The only content above the fold, so it plays on load rather than on
+  // scroll into view (Reveal.tsx is for everything below it). Each line
+  // arrives a beat after the last, top to bottom, the order it reads in.
+  &__copy > * { animation: mkt-hero-in 0.7s $ease both; }
+  &__copy > *:nth-child(1) { animation-delay: 0.05s; }
+  &__copy > *:nth-child(2) { animation-delay: 0.15s; }
+  &__copy > *:nth-child(3) { animation-delay: 0.25s; }
+  &__copy > *:nth-child(4) { animation-delay: 0.35s; }
+  &__shot { animation: mkt-hero-in 0.8s $ease 0.3s both; }
+
   @media (max-width: 900px) {
     grid-template-columns: 1fr;
     padding-top: 2.5rem;
   }
+}
+
+@keyframes mkt-hero-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
 }
 
 // ---------------------------------------------------------------- screenshot frame
@@ -195,6 +213,9 @@
   border-radius: $radius-lg;
   overflow: hidden;
   box-shadow: $shadow-xs;
+  transition: box-shadow 0.2s $ease, transform 0.2s $ease, border-color 0.2s $ease;
+
+  &:hover { box-shadow: $shadow-sm; transform: translateY(-1px); border-color: $gray-300; }
 
   &__problem {
     padding: 1rem 1.2rem;
@@ -270,8 +291,14 @@
   box-shadow: $shadow-sm;
   display: flex;
   flex-direction: column;
+  transition: box-shadow 0.2s $ease, transform 0.2s $ease;
 
-  &--popular { border-color: $primary; box-shadow: 0 0 0 1px $primary, $shadow-md; }
+  &:hover { box-shadow: $shadow-md; transform: translateY(-2px); }
+  &--popular {
+    border-color: $primary;
+    box-shadow: 0 0 0 1px $primary, $shadow-md;
+    &:hover { box-shadow: 0 0 0 1px $primary, $shadow-lg; }
+  }
 
   &__badge {
     position: absolute;
@@ -373,6 +400,9 @@
   border-radius: $radius-lg;
   padding: 1.6rem 1.5rem;
   box-shadow: $shadow-sm;
+  transition: box-shadow 0.2s $ease, transform 0.2s $ease;
+
+  &:hover { box-shadow: $shadow-md; transform: translateY(-2px); }
 
   &__icon {
     width: 40px;
@@ -400,7 +430,11 @@
   background: $sidebar-bg;
   color: $white;
 
-  h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin: 0 0 0.6rem; }
+  // Explicit, not inherited: global.scss's bare `h2 { color: $gray-900 }`
+  // beats an inherited color every time, regardless of specificity, so
+  // this section's h2 was rendering near-black on this dark background
+  // until this line existed. Caught in the redesign audit, not new.
+  h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin: 0 0 0.6rem; color: $white; }
   p { color: rgba(255,255,255,0.7); margin: 0 0 1.6rem; }
   .btn-primary { display: inline-flex; align-items: center; gap: 0.4rem; }
 }
@@ -441,7 +475,7 @@
     justify-content: space-between;
   }
 
-  &__brand { strong { color: $gray-900; } p { color: $gray-500; font-size: 0.85rem; margin: 0.3rem 0 0; } }
+  &__brand { strong { color: $gray-900; display: inline-flex; align-items: center; gap: 0.5rem; } p { color: $gray-500; font-size: 0.85rem; margin: 0.3rem 0 0; } }
 
   &__links { display: flex; flex-direction: column; gap: 0.6rem; a { color: $gray-600; text-decoration: none; font-size: 0.87rem; &:hover { color: $primary; } } }
   &__whatsapp { display: inline-flex; align-items: center; gap: 0.35rem; }

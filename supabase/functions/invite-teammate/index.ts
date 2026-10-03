@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — real invite email (Supabase Edge Function)
+// ProfixBook — real invite email (Supabase Edge Function)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
 // → name it "invite-teammate" → paste this) OR via CLI:

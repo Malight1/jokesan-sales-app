@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — create a Paystack pay link for a sale (Phase 5a)
+// ProfixBook — create a Paystack pay link for a sale (Phase 5a)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
 // → name it "payment-link-create" → paste this) OR via CLI:
@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     // 3) Ask Paystack to initialize the transaction on the BUSINESS'S OWN
     //    account. metadata carries what the webhook needs to auto-confirm.
     const customer = Array.isArray(sale.customers) ? sale.customers[0] : sale.customers;
-    const email = customer?.email || `customer+${saleId}@stockflow.invoice`;
+    const email = customer?.email || `customer+${saleId}@profixbook.invoice`;
     const initRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' },

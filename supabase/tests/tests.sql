@@ -2947,6 +2947,211 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 52. stock_levels value_at_cost (0048) ----------
+-- Money-gated exactly like retail_stock_value() (0046) and
+-- expiry_overview() (0022): null for anyone who isn't accounts/admin, not
+-- 0, so the frontend can tell "no access" from "genuinely nothing on the
+-- shelf". Checked against soap's own fg_batches layers rather than a
+-- hardcoded number, since they've moved through two dozen sections of
+-- production, sales, transfers and returns by this point in the file.
+-- ('soap' is a finished good here, produced from Caustic Soda — see
+-- section 1 — so its cost lives on fg_batches.unit_cost, not
+-- purchase_items, which only holds its raw material's cost.)
+do $$
+declare
+  v_expected numeric;
+  v_seen     numeric;
+begin
+  -- fg_batches is RLS-scoped to the caller's own tenant, so the ground
+  -- truth has to be read under the same admin session as stock_levels()
+  -- itself, not from outside any t_as (which sees no tenant at all).
+  perform t_as('00000000-0000-0000-0000-000000000001'); -- admin
+  select coalesce(sum(qty_remaining * unit_cost), 0) into v_expected
+    from fg_batches where finished_good_id = t_id('soap');
+  select coalesce(sum(value_at_cost), 0) into v_seen
+    from public.stock_levels(null) where product_id = t_id('soap');
+  perform t_rec('admin sees soap''s stock value at cost, matching its production/purchase layers exactly',
+    v_seen = v_expected, format('expected %s got %s', v_expected, v_seen));
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000004'); -- bookkeeper (accounts)
+  select coalesce(sum(value_at_cost), 0) into v_seen
+    from public.stock_levels(null) where product_id = t_id('soap');
+  perform t_rec('accounts sees the same figure as admin', v_seen = v_expected);
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000002'); -- cashier (sales)
+  perform t_rec('a cashier gets null value_at_cost, not a real number, on every row',
+    not exists (select 1 from public.stock_levels(null) where value_at_cost is not null));
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000003'); -- storekeeper (inventory)
+  perform t_rec('a storekeeper (not accounts) gets null value_at_cost too',
+    not exists (select 1 from public.stock_levels(null) where value_at_cost is not null));
+  perform t_su();
+end $$;
+
+-- ---------- 53. support tooling (0049) ----------
+-- The main tenant's owner (…001) files a ticket; the platform admin from
+-- section 42 (…ad) works it. Checks the queue tells each side who is
+-- waiting, that a customer's reply reopens a finished ticket, and that
+-- the diagnostic snapshot reports what support needs to see.
+do $$
+declare
+  v_admin  uuid := '00000000-0000-0000-0000-0000000000ad';
+  v_owner  uuid := '00000000-0000-0000-0000-000000000001';
+  v_ticket uuid;
+  v_msg    uuid;
+  v_row    record;
+  v_snap   jsonb;
+begin
+  -- Customer opens a ticket with a first message.
+  perform t_as(v_owner);
+  execute 'insert into support_tickets (subject, category) values (''Stock looks wrong'', ''stock_data'') returning id' into v_ticket;
+  execute format('insert into support_ticket_messages (ticket_id, sender_type, body) values (%L::uuid, ''tenant'', ''Soap shows 3 but I have 5'')', v_ticket);
+  perform t_su();
+
+  perform t_as(v_admin);
+  select * into v_row from public.platform_tickets(null, null, v_ticket);
+  perform t_rec('a new customer message makes the ticket wait on support', v_row.awaiting_reply and v_row.last_sender = 'tenant');
+  perform t_rec('...and shows as unread to support', v_row.unread);
+  perform t_rec('the queue says who filed it', v_row.created_by = v_owner);
+  perform t_rec('tickets waiting on support are listed before everything else',
+    not exists (
+      select 1 from (select awaiting_reply, lag(awaiting_reply) over () as prev from public.platform_tickets()) q
+       where q.awaiting_reply and q.prev = false));
+  perform t_rec('Needs Attention lists the waiting ticket, linking to the ticket itself',
+    exists (select 1 from public.platform_needs_attention() where kind = 'ticket_waiting' and ref_id = v_ticket));
+  perform t_rec('the overview counts it as awaiting a reply',
+    (select open_tickets from public.platform_overview_stats()) >= 1);
+
+  perform public.platform_mark_ticket_seen(v_ticket);
+  select * into v_row from public.platform_tickets(null, null, v_ticket);
+  perform t_rec('opening it clears unread but it still awaits a reply', not v_row.unread and v_row.awaiting_reply);
+
+  select public.platform_reply_ticket(v_ticket, 'Checking your batches now.') into v_msg;
+  perform t_rec('an admin reply returns its message id, so files can be attached to it', v_msg is not null);
+  select * into v_row from public.platform_tickets(null, null, v_ticket);
+  perform t_rec('after the admin replies, the ticket waits on the customer instead', not v_row.awaiting_reply and v_row.last_sender = 'admin');
+  perform t_err('an empty admin reply is refused',
+    format('select public.platform_reply_ticket(%L::uuid, %L)', v_ticket, '   '), 'Write a reply first');
+
+  -- Attachments: only into this ticket's own business folder.
+  perform t_err('an admin attachment filed under another business''s folder is refused',
+    format('select public.platform_add_ticket_attachment(%L::uuid, %L, %L, %L, 10)',
+           v_msg, 'guide.png', gen_random_uuid()::text || '/x/guide.png', 'image/png'),
+    'different business');
+  perform t_ok('an admin attachment in the right business''s folder is recorded',
+    format('select public.platform_add_ticket_attachment(%L::uuid, %L, %L, %L, 10)',
+           v_msg, 'guide.png', t_id('tenant')::text || '/' || v_ticket::text || '/guide.png', 'image/png'));
+  perform t_su();
+
+  perform t_rec('the customer sees the admin''s attachment through their own RLS',
+    exists (select 1 from support_ticket_attachments where message_id = v_msg and tenant_id = t_id('tenant')));
+  perform t_rec('the customer has an unread reply',
+    (select tenant_unread from support_tickets where id = v_ticket));
+
+  -- Someone in another business can't mark it read.
+  perform t_as(v_admin);  -- acting as a member of their own, different tenant
+  perform public.mark_ticket_seen(v_ticket);
+  perform t_su();
+  perform t_rec('another business can''t mark someone else''s ticket read',
+    (select tenant_unread from support_tickets where id = v_ticket));
+
+  perform t_as(v_owner);
+  perform public.mark_ticket_seen(v_ticket);
+  perform t_su();
+  perform t_rec('the customer opening the ticket marks the reply read',
+    (select not tenant_unread from support_tickets where id = v_ticket));
+
+  -- Resolved, then the customer writes back: it must come back to life.
+  perform t_as(v_admin);
+  perform public.platform_update_ticket_status(v_ticket, 'resolved');
+  perform t_su();
+  perform t_as(v_owner);
+  execute format('insert into support_ticket_messages (ticket_id, sender_type, body) values (%L::uuid, ''tenant'', ''Still wrong today'')', v_ticket);
+  perform t_su();
+  perform t_rec('a customer reply on a resolved ticket reopens it',
+    (select status = 'open' and last_sender = 'tenant' from support_tickets where id = v_ticket));
+
+  -- Admin-started conversations.
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a non-admin cannot start a conversation as support',
+    format('select public.platform_open_ticket(%L::uuid, %L, %L, %L)', t_id('tenant'), 'Hi', 'other', 'Hello'), 'Not authorised');
+  perform t_err('a non-admin cannot read another business''s snapshot',
+    format('select public.platform_tenant_snapshot(%L::uuid)', t_id('tenant')), 'Not authorised');
+  perform t_err('a non-admin cannot write a platform log entry',
+    format('select public.platform_log_action(%L::uuid, %L)', t_id('tenant'), 'platform.password_reset_sent'), 'Not authorised');
+  perform t_su();
+
+  perform t_as(v_admin);
+  select public.platform_open_ticket(t_id('tenant'), 'Your payment did not go through', 'billing', 'Can you try the card again?') into v_ticket;
+  perform t_err('only known actions can be logged',
+    format('select public.platform_log_action(%L::uuid, %L)', t_id('tenant'), 'platform.anything'), 'Unknown action');
+  perform public.platform_log_action(t_id('tenant'), 'platform.password_reset_sent', '{"email":"owner@jokesan.ng"}');
+  perform t_su();
+  perform t_rec('an admin-started conversation belongs to the business and was filed by nobody on their side',
+    (select tenant_id = t_id('tenant') and created_by is null and status = 'in_progress' and last_sender = 'admin'
+       from support_tickets where id = v_ticket));
+  perform t_rec('starting a conversation is logged against that business',
+    exists (select 1 from audit_logs where tenant_id = t_id('tenant') and action = 'platform.open_ticket' and entity_id = v_ticket::text));
+  perform t_rec('a browser-side support action is logged against that business too',
+    exists (select 1 from audit_logs where tenant_id = t_id('tenant') and action = 'platform.password_reset_sent'));
+  perform t_as(v_owner);
+  perform t_rec('the business sees the conversation support started, unread',
+    exists (select 1 from support_tickets where id = v_ticket and tenant_unread));
+  perform t_su();
+
+  -- The diagnostic snapshot.
+  perform t_as(v_admin);
+  select public.platform_tenant_snapshot(t_id('tenant')) into v_snap;
+  perform t_su();
+  perform t_rec('snapshot counts the business''s products',
+    (v_snap->'counts'->>'products')::int = (select count(*) from finished_goods where tenant_id = t_id('tenant')));
+  perform t_rec('snapshot says a live business can save',
+    (v_snap->'access'->>'can_write')::boolean and v_snap->'access'->>'reason' is null);
+  perform t_rec('snapshot lists the team with their sign-in state',
+    jsonb_array_length(v_snap->'users') = (select count(*) from profiles where tenant_id = t_id('tenant'))
+    and (v_snap->'users'->0) ? 'email_confirmed_at' and (v_snap->'users'->0) ? 'last_sign_in_at');
+  perform t_rec('snapshot finds no stock problems when the books balance',
+    jsonb_array_length(v_snap->'stock_issues') = 0, (v_snap->'stock_issues')::text);
+  perform t_rec('snapshot shows recent sales and the business''s own activity',
+    jsonb_array_length(v_snap->'recent_sales') > 0 and jsonb_array_length(v_snap->'recent_audit') > 0);
+
+  -- Knock soap's record out of line with its batches (bypassing the
+  -- guards, as a bad import or an old bug would), then put it back.
+  set session_replication_role = replica;
+  update finished_goods set qty_balance = qty_balance + 1 where id = t_id('soap');
+  set session_replication_role = origin;
+  perform t_as(v_admin);
+  select public.platform_tenant_snapshot(t_id('tenant')) into v_snap;
+  perform t_su();
+  perform t_rec('snapshot flags a product whose record disagrees with its batches and ledger',
+    exists (select 1 from jsonb_array_elements(v_snap->'stock_issues') e where (e->>'id')::uuid = t_id('soap')));
+  set session_replication_role = replica;
+  update finished_goods set qty_balance = qty_balance - 1 where id = t_id('soap');
+  set session_replication_role = origin;
+
+  update tenants set is_active = false where id = t_id('tenant');
+  perform t_as(v_admin);
+  select public.platform_tenant_snapshot(t_id('tenant')) into v_snap;
+  perform t_su();
+  update tenants set is_active = true where id = t_id('tenant');
+  perform t_rec('snapshot explains why a suspended business can''t save',
+    not (v_snap->'access'->>'can_write')::boolean and v_snap->'access'->>'reason' = 'suspended');
+
+  -- Unconfirmed owners show up until they confirm.
+  perform t_as(v_admin);
+  perform t_rec('an owner who never confirmed their email needs attention',
+    exists (select 1 from public.platform_needs_attention() where kind = 'unconfirmed_owner' and tenant_id = t_id('tenant')));
+  perform t_su();
+  update auth.users set email_confirmed_at = now() where id = v_owner;
+  perform t_as(v_admin);
+  perform t_rec('...and stops needing it once they have',
+    not exists (select 1 from public.platform_needs_attention() where kind = 'unconfirmed_owner' and tenant_id = t_id('tenant')));
+  perform t_su();
+end $$;
+
 -- ---------- 20. books balance everywhere ----------
 do $$
 begin

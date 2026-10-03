@@ -25,6 +25,28 @@ export function qtyByProduct(
   return out;
 }
 
+/**
+ * Cash tied up per product, at cost (migration 0048), for one branch or
+ * summed across all when branchId is empty. null if the row's own
+ * value_at_cost is null (hidden from this role) or missing (cached before
+ * 0048) — distinguished from a real 0 with `has`, the way the money
+ * columns on the retail dashboard already do.
+ */
+export function valueAtCostByProduct(
+  levels: StockLevel[] | null | undefined,
+  branchId?: string | null,
+): { get: (productId: string) => number; has: (productId: string) => boolean } {
+  const out = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const l of levels ?? []) {
+    if (branchId && l.branch_id !== branchId) continue;
+    if (l.value_at_cost === null || l.value_at_cost === undefined) continue;
+    seen.add(l.product_id);
+    out.set(l.product_id, (out.get(l.product_id) ?? 0) + Number(l.value_at_cost));
+  }
+  return { get: id => out.get(id) ?? 0, has: id => seen.has(id) };
+}
+
 /** Rows at or below their reorder level — out-of-stock first, then the
  *  emptiest. Judged on sellable stock: a shelf of expired soap is empty. */
 export function lowStockRows(levels: StockLevel[] | null | undefined): StockLevel[] {

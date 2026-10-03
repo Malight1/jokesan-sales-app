@@ -1,326 +1,992 @@
 @use '../styles/variables' as *;
 @use '../styles/mixins' as *;
 
-.pos {
-  display: grid;
-  grid-template-columns: 1fr 360px;
+// The till. Built for a counter: a tablet or a laptop with a USB scanner,
+// a queue of customers, and a cashier who shouldn't have to think.
+//   - every tap target is 40px+, the primary action 56px
+//   - the charge button never scrolls out of view
+//   - blue means "selected / in this sale", nothing else
+//   - money is tabular so columns of naira don't jitter
+
+// Text-weight semantic colours: the fill tokens fall under 4.5:1 as text.
+$ok-text: #15803d;
+$warn-text: #b45309;
+
+.pos-page {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
   height: calc(100vh - #{$header-height} - 3rem);
+  height: calc(100dvh - #{$header-height} - 3rem);
 
-  // ---- product grid ----
-  .pos-products {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-
-    .pos-search {
-      @include flex(center, flex-start, 0.5rem);
-      background: $white;
-      border: 1px solid $gray-300;
-      border-radius: $border-radius;
-      padding: 0 0.8rem;
-      margin-bottom: 0.85rem;
-      color: $gray-400;
-
-      input { border: none; outline: none; padding: 0.65rem 0; font-size: $font-size-base; width: 100%; background: transparent; }
-    }
-
-    .product-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 0.65rem;
-      overflow-y: auto;
-      padding-right: 0.25rem;
-      align-content: start;
-    }
-
-    .product-tile {
-      @include flex(flex-start, center, 0.2rem);
-      flex-direction: column;
-      text-align: center;
-      padding: 0.9rem 0.6rem;
-      background: $white;
-      border: 1px solid $gray-200;
-      border-radius: $border-radius-lg;
-      cursor: pointer;
-      transition: $transition;
-      min-height: 92px;
-
-      &:hover:not(.out) { border-color: $primary; box-shadow: $shadow-md; transform: translateY(-1px); }
-      &.out { opacity: 0.5; cursor: not-allowed; }
-
-      .p-name { font-size: $font-size-sm; font-weight: 600; color: $gray-800; line-height: 1.25; }
-      .p-price { font-size: $font-size-base; font-weight: 700; color: $primary; }
-      .p-stock { font-size: 0.68rem; color: $gray-400;
-        &.low { color: $warning; } &.zero { color: $danger; } }
-    }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
 
-  // ---- cart ----
-  .pos-cart {
+  kbd {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid $gray-300;
+    border-bottom-width: 2px;
+    border-radius: 4px;
     background: $white;
-    border: 1px solid $gray-200;
-    border-radius: $border-radius-lg;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-
-    .cart-head {
-      @include flex(center, flex-start, 0.5rem);
-      padding: 1rem 1.1rem;
-      border-bottom: 1px solid $gray-200;
-      color: $gray-700;
-      h2 { font-size: $font-size-base; flex: 1; }
-      .clear-btn { background: none; border: none; cursor: pointer; color: $gray-400; &:hover { color: $danger; } }
-    }
-
-    .cart-lines { flex: 1; overflow-y: auto; padding: 0.5rem; min-height: 0; }
-
-    .cart-empty {
-      @include flex(center, center, 0.5rem);
-      flex-direction: column;
-      height: 100%;
-      color: $gray-300;
-      p { font-size: $font-size-sm; }
-    }
-
-    .cart-line {
-      @include flex(center, flex-start, 0.5rem);
-      padding: 0.55rem 0.6rem;
-      border-radius: $border-radius;
-      &:hover { background: $gray-50; }
-
-      .cl-info { flex: 1; min-width: 0;
-        .cl-name { font-size: $font-size-sm; font-weight: 600; color: $gray-800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .cl-price { font-size: $font-size-xs; color: $gray-400; }
-      }
-      .cl-qty {
-        @include flex(center, center, 0.4rem);
-        button { @include flex(center, center); width: 24px; height: 24px; border: 1px solid $gray-300; background: $white; border-radius: 6px; cursor: pointer; color: $gray-600;
-          &:hover { background: $gray-100; } }
-        span { min-width: 20px; text-align: center; font-weight: 600; font-size: $font-size-sm; }
-      }
-      .cl-amount { font-size: $font-size-sm; font-weight: 600; min-width: 64px; text-align: right; }
-      .cl-remove { background: none; border: none; cursor: pointer; color: $gray-300; &:hover { color: $danger; } }
-    }
-
-    .cart-checkout {
-      border-top: 1px solid $gray-200;
-      padding: 0.9rem 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
-
-      .cart-total {
-        @include flex(center, space-between);
-        font-size: $font-size-lg;
-        strong { font-size: $font-size-xl; color: $gray-900; }
-      }
-
-      .cust-select { @include input-base; }
-
-      .field-label {
-        font-size: $font-size-xs;
-        font-weight: 600;
-        color: $gray-500;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        margin-bottom: -0.2rem;
-      }
-
-      .pay-modes {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.4rem;
-        button {
-          padding: 0.5rem; border: 1px solid $gray-300; background: $white; border-radius: $border-radius;
-          font-size: $font-size-xs; font-weight: 600; cursor: pointer; color: $gray-600;
-          transition: $transition-fast;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          &:hover:not(.active) { border-color: $primary; color: $primary; }
-          &.active { background: $primary; color: $white; border-color: $primary; }
-        }
-      }
-
-      // ---- cash tender panel ----
-      .tender-panel {
-        background: $primary-light;
-        border: 1px solid rgba($primary, 0.18);
-        border-radius: $border-radius-lg;
-        padding: 0.75rem 0.8rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-
-        .field-label {
-          color: $primary;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .kp-toggle {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.25rem;
-          padding: 0.25rem 0.5rem;
-          border: 1px solid rgba($primary, 0.3);
-          background: $white;
-          border-radius: $border-radius;
-          font-size: 0.68rem;
-          font-weight: 700;
-          letter-spacing: normal;
-          text-transform: none;
-          color: $primary;
-          cursor: pointer;
-          transition: $transition-fast;
-
-          &:hover { background: $primary-light; }
-          &.active { background: $primary; color: $white; border-color: $primary; }
-        }
-
-        .amount-field {
-          position: relative;
-          display: flex;
-          align-items: center;
-          min-width: 0;
-
-          .affix {
-            position: absolute;
-            left: 0.85rem;
-            font-size: $font-size-lg;
-            font-weight: 700;
-            color: $gray-400;
-            pointer-events: none;
-          }
-
-          .tender-input {
-            width: 100%;
-            padding: 0.6rem 0.8rem 0.6rem 2.1rem;
-            font-size: $font-size-xl;
-            font-weight: 700;
-            color: $gray-900;
-            border: 1px solid $gray-300;
-            border-radius: $border-radius;
-            background: $white;
-            outline: none;
-            transition: $transition-fast;
-
-            &:focus { border-color: $primary; box-shadow: $ring; }
-            &::placeholder { color: $gray-300; font-weight: 700; }
-          }
-        }
-
-        .quick-amounts {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 0.35rem;
-
-          button {
-            padding: 0.4rem 0.2rem;
-            border: 1px solid $gray-300;
-            background: $white;
-            border-radius: $border-radius;
-            font-size: 0.72rem;
-            font-weight: 700;
-            color: $gray-700;
-            cursor: pointer;
-            transition: $transition-fast;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-
-            &:hover { border-color: $primary; color: $primary; }
-            &.active { background: $primary; color: $white; border-color: $primary; }
-          }
-        }
-
-        // Touch-friendly on-screen numpad — for tablet/kiosk counters with
-        // no physical keyboard. 44px+ targets per touch-accessibility min.
-        .numeric-keypad {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 0.4rem;
-
-          button {
-            @include flex(center, center);
-            height: 44px;
-            border: 1px solid $gray-300;
-            background: $white;
-            border-radius: $border-radius;
-            font-size: $font-size-base;
-            font-weight: 700;
-            color: $gray-800;
-            cursor: pointer;
-            transition: $transition-fast;
-
-            &:hover { border-color: $primary; }
-            &:active { background: $primary-light; border-color: $primary; color: $primary; transform: translateY(1px); }
-          }
-
-          .kp-clear {
-            grid-column: 1 / -1;
-            color: $danger;
-            font-size: $font-size-sm;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            &:active { background: rgba($danger, 0.08); border-color: $danger; color: $danger; }
-          }
-        }
-
-        .tender-feedback {
-          font-size: $font-size-sm;
-          font-weight: 500;
-          padding: 0.4rem 0.6rem;
-          border-radius: $border-radius;
-          strong { font-weight: 700; }
-
-          &.short { background: rgba($danger, 0.1); color: $danger; }
-          &.change { background: rgba($success, 0.12); color: $success; }
-          &.exact { background: rgba($gray-400, 0.15); color: $gray-600; }
-          &.balance { background: rgba($warning, 0.12); color: darken($warning, 12%); }
-        }
-      }
-
-      .checkout-btn {
-        justify-content: center;
-        padding: 0.85rem;
-        font-size: $font-size-base;
-        margin-top: 0.2rem;
-
-        &:disabled { opacity: 0.55; cursor: not-allowed; }
-      }
-    }
+    color: $gray-600;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.4;
   }
 }
 
-// ---- success screen ----
-.pos-success {
-  @include flex(center, center, 0.75rem);
+.pos {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 31vw, 420px);
+  gap: 1.25rem;
+}
+
+// ================================================================ products
+.pos-products {
+  display: flex;
   flex-direction: column;
-  min-height: calc(100vh - #{$header-height} - 4rem);
+  min-width: 0;
+  min-height: 0;
+}
+
+.pos-toolbar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pos-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 48px;
+  padding: 0 0.6rem 0 0.9rem;
+  background: $white;
+  border: 1.5px solid $gray-300;
+  border-radius: $radius;
+  color: $gray-400;
+  cursor: text;
+  transition: border-color 0.15s $ease, box-shadow 0.15s $ease;
+
+  &:focus-within { border-color: $primary; box-shadow: $ring; color: $primary; }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: $font-size-base;
+    color: $gray-900;
+    &::placeholder { color: $gray-400; }
+  }
+
+  &__clear {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: $radius-full;
+    background: $gray-100;
+    color: $gray-600;
+    cursor: pointer;
+    &:hover { background: $gray-200; }
+  }
+}
+
+.pos-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 48px;
+  padding: 0 1rem;
+  border: 1.5px solid $gray-300;
+  border-radius: $radius;
+  background: $white;
+  color: $gray-700;
+  font-family: inherit;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s $ease, color 0.15s $ease;
+
+  &:hover { border-color: $primary; color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; border-color: $primary; }
+  &:active { transform: translateY(1px); }
+}
+
+.pos-hint {
+  min-height: 1.25rem;
+  margin: 0.55rem 0 0.7rem;
+  font-size: $font-size-xs;
+  color: $gray-500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  strong { color: $gray-800; }
+  kbd { margin: 0 0.15rem; }
+}
+
+.product-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  grid-auto-rows: min-content;
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding: 2px 0.25rem 1rem 2px;  // room for the focus ring
+  align-content: start;
+}
+
+.ptile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  min-height: 140px;
+  padding: 0.85rem;
+  background: $white;
+  border: 1.5px solid $gray-200;
+  border-radius: $radius-lg;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s $ease, box-shadow 0.15s $ease, transform 0.1s $ease, background-color 0.15s $ease;
+
+  &:hover:not(:disabled) { border-color: $primary; box-shadow: $shadow-md; }
+  &:active:not(:disabled) { transform: scale(0.97); }
+  &:focus-visible { outline: none; border-color: $primary; box-shadow: $ring; }
+
+  // Already in this sale: the grid answers "did that tap land?" by itself.
+  &.in-cart { border-color: $primary; background: $primary-light; }
+
+  &.is-out {
+    cursor: not-allowed;
+    background: $gray-50;
+    .ptile-swatch, .ptile-name, .ptile-price { opacity: 0.45; }
+  }
+}
+
+.ptile-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 0.2rem;
+}
+
+.ptile-swatch {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: $radius;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.ptile-count {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 0.45rem;
+  border-radius: $radius-full;
+  background: $primary;
+  color: $white;
+  font-size: 0.8rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ptile-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: $gray-900;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ptile-price {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: $gray-900;
+  font-variant-numeric: tabular-nums;
+}
+
+.ptile-stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: $gray-500;
+
+  &.is-low { color: $warn-text; font-weight: 600; }
+  &.is-zero { color: $danger; font-weight: 600; }
+}
+
+.pos-noresults {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: $gray-500;
+  font-size: $font-size-sm;
+  text-align: center;
+}
+
+// ================================================================ current sale
+.pos-cart {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+}
+
+.cart-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid $gray-200;
+
+  h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: $font-size-base;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    small { font-size: $font-size-sm; font-weight: 500; color: $gray-500; }
+  }
+}
+
+.cart-count {
+  padding: 0.2rem 0.6rem;
+  border-radius: $radius-full;
+  background: $primary-light;
+  color: $primary-dark;
+  font-size: $font-size-xs;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cart-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 0.55rem;
+  border: none;
+  border-radius: $radius;
+  background: none;
+  color: $gray-500;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s $ease, color 0.15s $ease;
+
+  &:hover { background: $danger-light; color: $danger; }
+  &.is-armed { background: $danger; color: $white; }
+}
+
+.cart-close { display: none; }
+
+// Who wins the height: the items. The list takes what it needs (up to
+// ~55% of the column); the payment panel below gives up space first,
+// down to its own 30% floor, and only past that does the list scroll.
+// So one item doesn't hog empty space, and five items are all visible.
+.cart-lines {
+  flex: 1 1 auto;
+  min-height: 110px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem 0.6rem;
+
+  .pos-cart.has-items & { max-height: 55%; }
+}
+
+.cart-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  height: 100%;
+  padding: 2rem 1.5rem;
+  color: $gray-400;
+  text-align: center;
+  p { max-width: 22ch; font-size: $font-size-sm; color: $gray-500; }
+}
+
+// One row per item: what it is, how many, what it costs. Half the height
+// of a two-row line, so a normal basket fits without scrolling.
+.cart-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(4.5rem, auto);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.35rem;
+  border-bottom: 1px solid $gray-100;
+  border-radius: $radius;
+
+  &:last-child { border-bottom: none; }
+  &.is-flash { animation: pos-flash 0.9s ease-out; }
+}
+
+@keyframes pos-flash {
+  from { background: rgba(37, 99, 235, 0.14); }
+  to { background: transparent; }
+}
+
+.cl-info { min-width: 0; }
+
+.cl-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: $gray-900;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.cl-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.45rem;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  color: $gray-500;
+  font-variant-numeric: tabular-nums;
+
+  s { color: $gray-400; }
+}
+
+.cl-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: $primary;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  &:hover { text-decoration: underline; }
+}
+
+.cl-reason { margin-top: 0.1rem; font-size: 0.72rem; color: $ok-text; font-weight: 600; }
+
+.cl-amount {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: $gray-900;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-qty {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid $gray-300;
+  border-radius: $radius;
+
+  button {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: none;
+    background: $white;
+    color: $gray-700;
+    cursor: pointer;
+    transition: background-color 0.12s $ease;
+
+    &:hover:not(:disabled) { background: $gray-100; }
+    &:active:not(:disabled) { background: $gray-200; }
+    &:disabled { color: $gray-300; cursor: not-allowed; }
+  }
+
+  span {
+    display: grid;
+    place-items: center;
+    min-width: 42px;
+    border-left: 1px solid $gray-200;
+    border-right: 1px solid $gray-200;
+    font-weight: 700;
+    color: $gray-900;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// ---- checkout: scrolls on its own; the total + charge button below it don't ----
+.cart-checkout {
+  flex: 0 100 auto;       // shrinks ~100x faster than the item list
+  min-height: 30%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.8rem 1rem 0.9rem;
+  border-top: 1px solid $gray-200;
+  background: $gray-50;
+}
+
+.co-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.co-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: $font-size-sm;
+  color: $gray-600;
+  font-variant-numeric: tabular-nums;
+
+  &.is-saving { color: $ok-text; font-weight: 600; }
+}
+
+.co-link {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 32px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: $primary;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  cursor: pointer;
+  &:hover { text-decoration: underline; }
+}
+
+.co-discount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  label { font-size: $font-size-sm; color: $gray-600; }
+}
+
+.co-money {
+  position: relative;
+  width: 9rem;
+  span { position: absolute; left: 0.7rem; top: 50%; transform: translateY(-50%); color: $gray-400; font-weight: 700; }
+  input { @include input-base; padding-left: 1.7rem; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+}
+
+.co-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+
+  > label, .co-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: $gray-700;
+  }
+}
+
+.co-select {
+  @include input-base;
+  min-height: 44px;
+  font-size: $font-size-sm;
+  &.is-needed { border-color: $warning; box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15); }
+}
+
+.co-help {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: $gray-500;
+  &.is-warn { color: $warn-text; }
+}
+
+.pay-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 0.5rem;
+
+  button {
+    min-height: 44px;
+    padding: 0.4rem 0.6rem;
+    border: 1.5px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-700;
+    font-family: inherit;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: border-color 0.15s $ease, background-color 0.15s $ease, color 0.15s $ease;
+
+    &:hover:not(.is-on) { border-color: $gray-400; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+    &.is-on { border-color: $primary; background: $primary-light; color: $primary-dark; }
+    &.is-credit.is-on { border-color: $warning; background: $warning-light; color: $warn-text; }
+  }
+}
+
+.co-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 32px;
+  font-size: $font-size-sm;
+  color: $gray-700;
+  cursor: pointer;
+
+  input { width: 18px; height: 18px; margin: 0; accent-color: $primary; cursor: pointer; }
+}
+
+// ---- cash / part-payment panel ----
+.tender-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+}
+
+.tp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  label { font-size: 0.8rem; font-weight: 600; color: $gray-700; }
+  em { margin-left: 0.25rem; font-style: normal; font-weight: 500; color: $gray-400; }
+}
+
+.kp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 30px;
+  padding: 0 0.6rem;
+  border: 1px solid $gray-300;
+  border-radius: $radius;
+  background: $white;
+  color: $gray-600;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover { border-color: $primary; color: $primary; }
+  &.is-on { border-color: $primary; background: $primary; color: $white; }
+}
+
+.amount-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+
+  .affix {
+    position: absolute;
+    left: 0.9rem;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: $gray-400;
+    pointer-events: none;
+  }
+
+  .tender-input {
+    width: 100%;
+    height: 46px;
+    padding: 0 0.9rem 0 2.2rem;
+    border: 1.5px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-900;
+    font-family: inherit;
+    font-size: 1.25rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+    transition: border-color 0.15s $ease, box-shadow 0.15s $ease;
+
+    &:focus { border-color: $primary; box-shadow: $ring; }
+    &::placeholder { color: $gray-300; }
+  }
+}
+
+.quick-amounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 0.4rem;
+
+  button {
+    min-height: 36px;
+    padding: 0 0.35rem;
+    border: 1px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-700;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover { border-color: $primary; color: $primary; }
+    &.is-on { border-color: $primary; background: $primary; color: $white; }
+  }
+}
+
+// Touch numpad for counters with no physical keyboard.
+.numeric-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+
+  button {
+    display: grid;
+    place-items: center;
+    height: 52px;
+    border: 1px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-800;
+    font-family: inherit;
+    font-size: 1.15rem;
+    font-weight: 700;
+    cursor: pointer;
+
+    &:hover { border-color: $primary; }
+    &:active { background: $primary-light; border-color: $primary; color: $primary; }
+  }
+
+  .kp-clear {
+    grid-column: 1 / -1;
+    height: 44px;
+    color: $danger;
+    font-size: $font-size-sm;
+    &:active { background: $danger-light; border-color: $danger; color: $danger; }
+  }
+}
+
+.tender-feedback {
+  padding: 0.55rem 0.7rem;
+  border-radius: $radius;
+  font-size: $font-size-sm;
+  line-height: 1.4;
+  strong { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  &.is-short { background: $danger-light; color: $danger; }
+  &.is-change { background: $success-light; color: $ok-text; }
+  &.is-balance { background: $warning-light; color: $warn-text; }
+}
+
+// ---- the one button that matters, always visible ----
+.co-foot {
+  flex: none;
+  padding: 0.7rem 1rem 1rem;
+  border-top: 1px solid $gray-200;
+  background: $white;
+  // A soft edge that reads as "the options above scroll under this".
+  box-shadow: 0 -8px 14px -10px rgba(15, 23, 42, 0.18);
+  position: relative;
+}
+
+// Always on screen, whatever the payment panel above is scrolled to.
+.co-sum {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+
+  span { font-size: $font-size-sm; font-weight: 600; color: $gray-600; }
+  strong {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: $gray-900;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.checkout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: $radius;
+  background: $primary;
+  color: $white;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color 0.15s $ease, transform 0.1s $ease;
+
+  &:hover:not(:disabled) { background: $primary-dark; }
+  &:active:not(:disabled) { transform: translateY(1px); }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &:disabled { cursor: not-allowed; }
+  &:disabled:not(.is-blocked) { opacity: 0.7; }
+
+  // A blocked sale reads as an instruction, not as a faded button that
+  // looks like it's still loading.
+  &.is-blocked { background: $gray-200; color: $gray-700; font-size: $font-size-sm; }
+
+  kbd { border-color: rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.15); color: $white; }
+}
+
+.pos-mobilebar { display: none; }
+
+// Keyboard shortcut hints mean nothing on a touchscreen till.
+@media (hover: none) {
+  .pos-search__kbd, .checkout-btn kbd, .ps-next kbd { display: none; }
+}
+
+// Tablet-landscape counters: the search box needs the room more than the
+// Scan / Returns labels do (they keep their icon, title and aria-label).
+@media (max-width: 1280px) {
+  .pos-tool { padding: 0 0.85rem; span { display: none; } }
+}
+
+// ================================================================ success
+.pos-success {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - #{$header-height} - 3rem);
+  padding: 1rem 0;
+}
+
+.ps-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 440px;
+  padding: 2rem 1.75rem 1.75rem;
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
   text-align: center;
 
-  h1 { font-size: $font-size-2xl; color: $success; }
-
-  .success-figures {
-    @include flex(center, center, 2rem);
-    margin: 0.5rem 0 1rem;
-    div { text-align: center;
-      span { display: block; font-size: $font-size-xs; color: $gray-500; text-transform: uppercase; letter-spacing: 0.05em; }
-      strong { font-size: $font-size-xl; color: $gray-900; }
-    }
-    .change strong { color: $success; }
-    .bal strong { color: $danger; }
-  }
-
-  .success-actions { @include flex(center, center, 0.75rem); margin-bottom: 1.25rem; flex-wrap: wrap; }
-
-  .btn-primary.big { padding: 0.85rem 2.5rem; font-size: $font-size-base; }
+  h1 { margin: 0; font-size: $font-size-2xl; font-weight: 800; color: $gray-900; }
 }
 
-@media (max-width: 820px) {
-  .pos { grid-template-columns: 1fr; height: auto; }
+.ps-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  margin-bottom: 0.25rem;
+  border-radius: $radius-full;
+  background: $success-light;
+  color: $success;
+
+  .is-offline & { background: $warning-light; color: $warn-text; }
+}
+
+.ps-sub { margin: 0; font-size: $font-size-sm; color: $gray-500; font-variant-numeric: tabular-nums; }
+.ps-note { margin: 0; max-width: 34ch; font-size: $font-size-sm; color: $gray-600; line-height: 1.5; }
+
+.ps-change {
+  width: 100%;
+  margin: 0.6rem 0 0.2rem;
+  padding: 1rem;
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  border-radius: $radius-lg;
+  background: $success-light;
+
+  span { display: block; font-size: $font-size-sm; font-weight: 600; color: $ok-text; }
+  strong {
+    display: block;
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: $ok-text;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.ps-figures {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0.4rem 0 0.6rem;
+
+  div { padding: 0.6rem 0.4rem; border-radius: $radius; background: $gray-50; }
+  dt { font-size: $font-size-xs; color: $gray-500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dd { margin: 0.1rem 0 0; font-size: 1.05rem; font-weight: 700; color: $gray-900; font-variant-numeric: tabular-nums; }
+  .is-owed dd { color: $danger; }
+}
+
+.ps-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  button { flex: 1 1 10rem; justify-content: center; min-height: 44px; }
+}
+
+.ps-next {
+  width: 100%;
+  min-height: 54px;
+  margin-top: 0.4rem;
+  justify-content: center;
+  gap: 0.6rem;
+  font-size: $font-size-base;
+
+  kbd {
+    padding: 0.05rem 0.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    color: $white;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+}
+
+// ================================================================ phones
+// The sale becomes a sheet the cashier pulls up from a bar at the bottom,
+// instead of sitting under the entire product list.
+@media (max-width: 900px) {
+  .pos-page { height: auto; }
+
+  .pos {
+    display: block;
+    padding-bottom: 5.5rem;       // clearance for the sale bar
+  }
+
+  .pos-tool span { display: none; }
+  .pos-tool { padding: 0 0.85rem; }
+
+  .product-grid {
+    overflow: visible;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .pos-cart {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    border: none;
+    border-radius: 0;
+    transform: translateY(100%);
+    visibility: hidden;
+    transition: transform 0.28s $ease, visibility 0.28s;
+
+    &.is-open { transform: none; visibility: visible; }
+  }
+
+  .cart-close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    margin-left: -0.4rem;
+    border: none;
+    border-radius: $radius-full;
+    background: none;
+    color: $gray-700;
+    cursor: pointer;
+    &:hover { background: $gray-100; }
+  }
+
+  .co-foot { padding-bottom: calc(1rem + env(safe-area-inset-bottom)); }
+
+  .pos-mobilebar {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    z-index: 800;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 56px;
+    padding: 0 1rem;
+    border: none;
+    border-radius: $radius-lg;
+    background: $primary;
+    color: $white;
+    box-shadow: $shadow-lg;
+    font-family: inherit;
+    font-size: $font-size-base;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+
+    .mb-count {
+      display: grid;
+      place-items: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 0.4rem;
+      border-radius: $radius-full;
+      background: $white;
+      color: $primary;
+      font-size: 0.85rem;
+      font-weight: 800;
+    }
+    .mb-label { flex: 1; text-align: left; }
+  }
 }

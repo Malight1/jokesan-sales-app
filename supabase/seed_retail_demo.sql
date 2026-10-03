@@ -7,9 +7,12 @@
 --   1. Go to /login?signup=1
 --   2. Full name / company name: anything, e.g. "Demo Retail Shop"
 --   3. "What kind of business is this?" -> I buy and resell stock
---   4. Email: demo.retail@stockflow.test (or change V_ADMIN_EMAIL below
---      to whatever you used), pick any password, sign up, confirm the
---      email if your project requires it.
+--   4. Email: reserved TLDs like .test/.invalid/.example are rejected by
+--      Supabase's own signup validation, so it has to be a real
+--      deliverable address (a +alias on your own inbox works fine, e.g.
+--      you+demoretail@gmail.com) — change V_ADMIN_EMAIL below to match.
+--      Pick any password, sign up, confirm the email if your project
+--      requires it.
 -- This script cannot create that account itself — Supabase Auth users
 -- need to go through the real signup flow (password hashing, email
 -- confirmation, etc.), not a raw SQL insert.
@@ -30,7 +33,7 @@
 
 do $$
 declare
-  v_admin_email text := 'demo.retail@stockflow.test'; -- <-- change if you signed up with a different email
+  v_admin_email text := 'oguntunde722+demoretail@gmail.com'; -- <-- change if you signed up with a different email
   v_admin       uuid;
   v_tenant      uuid;
   v_paytype     uuid;

@@ -1,0 +1,470 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+// Support, on both sides: the customer's Support pages and the platform
+// admin's queue and ticket view. Namespaced .sp-*.
+
+$warn-text: #b45309;
+
+// ---- conversation ----
+.sp-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.25rem 0 1rem;
+}
+
+.sp-empty-thread { color: $gray-400; font-size: $font-size-sm; padding: 1rem 0; }
+
+.sp-msg {
+  max-width: min(78%, 40rem);
+  padding: 0.7rem 0.9rem;
+  border-radius: $radius-lg;
+  border: 1px solid $gray-200;
+  background: $white;
+
+  &.is-mine {
+    align-self: flex-end;
+    background: $primary-light;
+    border-color: $primary-100;
+    border-bottom-right-radius: $radius-sm;
+  }
+  &.is-theirs {
+    align-self: flex-start;
+    background: $gray-50;
+    border-bottom-left-radius: $radius-sm;
+  }
+
+  .sp-msg-head {
+    @include flex(baseline, space-between, 0.75rem);
+    margin-bottom: 0.25rem;
+    strong { font-size: $font-size-xs; color: $gray-700; }
+    time { font-size: 0.7rem; color: $gray-400; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  }
+  &.is-support .sp-msg-head strong { color: $primary-dark; }
+
+  .sp-msg-body {
+    font-size: $font-size-sm;
+    line-height: 1.55;
+    color: $gray-800;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+
+.sp-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.sp-att {
+  @include flex(center, flex-start, 0.35rem);
+  max-width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid $primary-100;
+  border-radius: $radius-sm;
+  background: $white;
+  color: $primary;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  cursor: pointer;
+  span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { border-color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+
+.sp-att-img {
+  display: flex;
+  flex-direction: column;
+  width: 9.5rem;
+  padding: 0;
+  border: 1px solid $gray-200;
+  border-radius: $radius;
+  background: $white;
+  overflow: hidden;
+  cursor: zoom-in;
+  font-family: inherit;
+  text-align: left;
+
+  img, .sp-att-img-loading {
+    display: block;
+    width: 100%;
+    height: 6.5rem;
+    object-fit: cover;
+    background: $gray-100;
+  }
+  .sp-att-name {
+    padding: 0.3rem 0.45rem;
+    font-size: 0.7rem;
+    color: $gray-600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &:hover { border-color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+
+// ---- composer ----
+.sp-composer {
+  padding-top: 1rem;
+  border-top: 1px solid $gray-200;
+
+  .sp-composer-label { display: block; font-size: $font-size-sm; font-weight: 600; color: $gray-700; margin-bottom: 0.4rem; }
+  textarea { @include input-base; resize: vertical; min-height: 96px; line-height: 1.5; }
+}
+
+.sp-composer-actions {
+  @include flex(center, flex-end, 0.5rem);
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.sp-composer-hint { margin-right: auto; font-size: $font-size-xs; color: $gray-400; }
+
+.sp-attach {
+  cursor: pointer;
+  input { display: none; }
+}
+
+.sp-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    @include flex(center, flex-start, 0.3rem);
+    padding: 0.2rem 0.3rem 0.2rem 0.5rem;
+    border-radius: $radius-full;
+    background: $gray-100;
+    font-size: $font-size-xs;
+    color: $gray-700;
+    max-width: 100%;
+    span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
+  button {
+    @include flex(center, center);
+    width: 20px; height: 20px;
+    border: none; border-radius: $radius-full;
+    background: none; color: $gray-500; cursor: pointer;
+    &:hover { background: $danger-light; color: $danger; }
+  }
+}
+
+.sp-quick {
+  select { @include input-base; width: auto; padding-top: 0.35rem; padding-bottom: 0.35rem; font-size: $font-size-xs; }
+}
+
+// ---- status line under a ticket title ----
+.sp-meta {
+  @include flex(center, flex-start, 0.5rem);
+  flex-wrap: wrap;
+  font-size: $font-size-sm;
+  color: $gray-500;
+  a { color: $primary; font-weight: 600; text-decoration: none; &:hover { text-decoration: underline; } }
+}
+
+.sp-turn {
+  @include flex(center, flex-start, 0.35rem);
+  font-size: $font-size-xs;
+  font-weight: 600;
+  &.is-you { color: $warn-text; }
+  &.is-them { color: $gray-500; }
+  &.is-new { color: $primary; }
+}
+
+.sp-back {
+  @include flex(center, flex-start, 0.25rem);
+  width: fit-content;
+  margin-bottom: 0.4rem;
+  font-size: $font-size-xs;
+  color: $gray-500;
+  text-decoration: none;
+  &:hover { color: $primary; }
+}
+
+// ---- inbox (both the customer's list and the admin queue) ----
+.sp-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+
+  button {
+    @include flex(center, center, 0.35rem);
+    min-height: 34px;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid $gray-300;
+    border-radius: $radius-full;
+    background: $white;
+    color: $gray-600;
+    font-family: inherit;
+    font-size: $font-size-xs;
+    font-weight: 600;
+    cursor: pointer;
+    &:hover:not(.is-on) { border-color: $gray-400; }
+    &.is-on { border-color: $primary; background: $primary-light; color: $primary-dark; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+    .sp-count {
+      min-width: 18px;
+      padding: 0 0.35rem;
+      border-radius: $radius-full;
+      background: $gray-100;
+      color: $gray-600;
+      font-size: 0.68rem;
+      line-height: 18px;
+      text-align: center;
+    }
+    &.is-on .sp-count { background: $primary; color: $white; }
+  }
+}
+
+.sp-toolbar {
+  @include flex(center, space-between, 0.75rem);
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+
+  .sp-search {
+    @include input-base;
+    width: min(100%, 18rem);
+  }
+}
+
+.sp-inbox {
+  @include card;
+  padding: 0;
+  overflow: hidden;
+}
+
+.sp-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid $gray-100;
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.12s $ease;
+
+  &:last-child { border-bottom: none; }
+  &:hover { background: $gray-50; }
+  &:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.4); }
+
+  .sp-dot {
+    width: 8px; height: 8px;
+    border-radius: $radius-full;
+    background: transparent;
+    &.is-on { background: $primary; }
+  }
+
+  .sp-row-main { min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+  .sp-row-top { @include flex(baseline, flex-start, 0.5rem); min-width: 0; }
+  .sp-row-subject {
+    font-size: $font-size-sm;
+    font-weight: 600;
+    color: $gray-900;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &.is-unread .sp-row-subject { font-weight: 800; }
+  .sp-row-sub {
+    font-size: $font-size-xs;
+    color: $gray-500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sp-row-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.3rem;
+    font-size: $font-size-xs;
+    color: $gray-500;
+    white-space: nowrap;
+  }
+}
+
+.sp-inbox-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: $gray-500;
+  font-size: $font-size-sm;
+  svg { color: $success; margin-bottom: 0.4rem; }
+  strong { display: block; color: $gray-800; font-size: $font-size-base; margin-bottom: 0.2rem; }
+}
+
+// ---- admin ticket view: conversation + business context ----
+.sp-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1.25rem;
+  align-items: start;
+
+  @media (max-width: 1100px) { grid-template-columns: minmax(0, 1fr); }
+}
+
+.sp-main { @include card; padding: 1.1rem 1.25rem; }
+
+.sp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: sticky;
+  top: calc(#{$header-height} + 1rem);
+
+  @media (max-width: 1100px) { position: static; }
+}
+
+.sp-panel {
+  @include card;
+  padding: 0.95rem 1rem;
+
+  h3 {
+    @include flex(center, space-between, 0.5rem);
+    margin-bottom: 0.65rem;
+    font-size: $font-size-xs;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: $gray-500;
+    a { text-transform: none; letter-spacing: 0; font-weight: 600; color: $primary; text-decoration: none; &:hover { text-decoration: underline; } }
+  }
+}
+
+.sp-kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  font-size: $font-size-sm;
+  dt { color: $gray-500; }
+  dd { margin: 0; color: $gray-800; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+}
+
+.sp-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border-radius: $radius;
+  font-size: $font-size-sm;
+  line-height: 1.45;
+  &.is-bad { background: $danger-light; color: darken($danger, 6%); }
+  &.is-warn { background: $warning-light; color: $warn-text; }
+  &.is-good { background: $success-light; color: darken($success, 6%); }
+  strong { font-weight: 700; }
+}
+
+.sp-person {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid $gray-100;
+  &:last-child { border-bottom: none; padding-bottom: 0; }
+  &:first-of-type { padding-top: 0; }
+
+  .sp-person-name { @include flex(center, space-between, 0.5rem); font-size: $font-size-sm; font-weight: 600; color: $gray-900; }
+  .sp-person-sub { font-size: $font-size-xs; color: $gray-500; overflow-wrap: anywhere; }
+  .sp-person-flags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.15rem; }
+  .sp-person-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+}
+
+.sp-mini-btn {
+  @include flex(center, center, 0.3rem);
+  padding: 0.25rem 0.55rem;
+  border: 1px solid $gray-300;
+  border-radius: $radius-sm;
+  background: $white;
+  color: $gray-700;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  cursor: pointer;
+  &:hover:not(:disabled) { border-color: $primary; color: $primary; }
+  &:disabled { opacity: 0.55; cursor: default; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &.is-primary { border-color: $primary; background: $primary; color: $white; &:hover:not(:disabled) { background: $primary-dark; color: $white; } }
+}
+
+.sp-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  a {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.45rem 0.55rem;
+    border-radius: $radius-sm;
+    color: inherit;
+    text-decoration: none;
+    &:hover { background: $gray-50; }
+    strong { font-size: $font-size-sm; color: $gray-800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    span { font-size: $font-size-xs; color: $gray-500; }
+  }
+}
+
+// ---- diagnostics on the business page ----
+.sp-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+
+  div {
+    padding: 0.6rem 0.75rem;
+    border: 1px solid $gray-200;
+    border-radius: $radius;
+    span { display: block; font-size: $font-size-xs; color: $gray-500; }
+    strong { font-size: $font-size-lg; color: $gray-900; font-variant-numeric: tabular-nums; }
+  }
+}
+
+.sp-subhead {
+  @include flex(center, space-between, 0.5rem);
+  margin: 1.1rem 0 0.5rem;
+  font-size: $font-size-sm;
+  font-weight: 700;
+  color: $gray-800;
+  small { font-weight: 500; color: $gray-500; }
+}
+
+.sp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: $font-size-sm;
+  font-variant-numeric: tabular-nums;
+
+  th {
+    text-align: left;
+    padding: 0.45rem 0.5rem;
+    font-size: $font-size-xs;
+    font-weight: 600;
+    color: $gray-500;
+    background: $gray-50;
+    border-bottom: 1px solid $gray-200;
+  }
+  td { padding: 0.5rem; border-bottom: 1px solid $gray-100; color: $gray-700; vertical-align: top; }
+  .is-right { text-align: right; }
+  .is-bad { color: $danger; font-weight: 700; }
+  .is-muted { color: $gray-400; }
+  tr.is-voided td { color: $gray-400; text-decoration: line-through; }
+}
+
+.sp-scroll { overflow-x: auto; }
+
+@media (max-width: 640px) {
+  .sp-msg { max-width: 92%; }
+  .sp-row { grid-template-columns: 10px minmax(0, 1fr); }
+  .sp-row .sp-row-side { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; }
+  .sp-composer-hint { display: none; }
+}

@@ -1,0 +1,471 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+// Procurement: Purchases list, Quick Purchase, payments, returns,
+// receiving, and the Suppliers page. Everything is namespaced .pur-*;
+// these modals used to borrow .total-row/.remove-item/.section-title
+// from Sales.scss, where they're nested under the sales page and so
+// never applied here at all.
+
+$warn-text: #b45309;
+
+// ---- list page summary strip ----
+.pur-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.pur-stat {
+  @include card;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+
+  .pur-stat-label {
+    font-size: $font-size-xs;
+    font-weight: 600;
+    color: $gray-500;
+  }
+  .pur-stat-value {
+    font-size: $font-size-xl;
+    font-weight: 700;
+    color: $gray-900;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .pur-stat-sub { font-size: $font-size-xs; color: $gray-500; }
+  &.is-owed .pur-stat-value { color: $danger; }
+  &.is-clear .pur-stat-value { color: $success; }
+}
+
+.pur-num { font-variant-numeric: tabular-nums; }
+.pur-muted { color: $gray-500; }
+.pur-owed { color: $danger; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pur-credit { color: $success; font-weight: 600; }
+
+// ---- modal intro line under the title ----
+.pur-intro {
+  margin: -0.25rem 0 1rem;
+  font-size: $font-size-sm;
+  color: $gray-500;
+  line-height: 1.5;
+}
+
+.pur-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.6rem;
+  font-size: $font-size-sm;
+  font-weight: 700;
+  color: $gray-800;
+
+  small { font-weight: 500; color: $gray-500; font-size: $font-size-xs; }
+}
+
+// Supplier select with an inline "New" button beside it
+.pur-with-action {
+  display: flex;
+  gap: 0.4rem;
+  select { flex: 1; min-width: 0; }
+  .btn-secondary { flex-shrink: 0; }
+}
+
+// ---- line items ----
+.pur-lines {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+
+.pur-lines-head,
+.pur-line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 0.9fr) minmax(0, 1.2fr) minmax(5.5rem, auto) 36px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pur-lines-head {
+  padding: 0.5rem 0.75rem;
+  background: $gray-50;
+  border-bottom: 1px solid $gray-200;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $gray-500;
+
+  .is-right { text-align: right; }
+}
+
+.pur-line {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid $gray-100;
+  &:last-child { border-bottom: none; }
+
+  select, input { @include input-base; }
+
+  // Visible only on phones, where the column header row is hidden
+  .pur-cell-label { display: none; }
+}
+
+.pur-line-amount {
+  text-align: right;
+  font-weight: 700;
+  color: $gray-900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  &.is-empty { color: $gray-300; font-weight: 500; }
+}
+
+.pur-remove {
+  @include flex(center, center);
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: $gray-400;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: $transition-fast;
+
+  &:hover { background: $danger-light; color: $danger; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &:disabled { visibility: hidden; }
+}
+
+// What the picked product looks like right now: stock, last cost, margin
+.pur-line-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  margin-top: 0.45rem;
+  font-size: $font-size-xs;
+  color: $gray-500;
+  font-variant-numeric: tabular-nums;
+
+  strong { color: $gray-700; font-weight: 600; }
+  .is-good strong { color: $success; }
+  .is-thin strong { color: $warn-text; }
+  .is-loss { color: $danger; font-weight: 600; strong { color: $danger; } }
+  button {
+    padding: 0;
+    border: none;
+    background: none;
+    color: $primary;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    &:hover { text-decoration: underline; }
+    &:focus-visible { outline: none; box-shadow: $ring; border-radius: 2px; }
+  }
+}
+
+.pur-line-batch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+
+  label { font-size: $font-size-xs; font-weight: 500; color: $gray-600; display: flex; flex-direction: column; gap: 0.25rem; }
+}
+
+.pur-add-line {
+  @include flex(center, flex-start, 0.4rem);
+  padding: 0.45rem 0.2rem;
+  border: none;
+  background: none;
+  color: $primary;
+  font-family: inherit;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: $radius-sm;
+  &:hover { color: $primary-dark; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+
+// ---- payment ----
+.pur-pay {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid $gray-200;
+}
+
+.pur-chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+
+  button {
+    min-height: 44px;
+    padding: 0.4rem 0.6rem;
+    border: 1.5px solid $gray-300;
+    border-radius: $radius;
+    background: $white;
+    color: $gray-700;
+    font-family: inherit;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: border-color 0.15s $ease, background-color 0.15s $ease, color 0.15s $ease;
+
+    &:hover:not(.is-on) { border-color: $gray-400; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+    &.is-on { border-color: $primary; background: $primary-light; color: $primary-dark; }
+    &.is-credit.is-on { border-color: $warning; background: $warning-light; color: $warn-text; }
+  }
+}
+
+// ---- totals ----
+.pur-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+  padding: 0.85rem 1rem;
+  background: $gray-50;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  font-variant-numeric: tabular-nums;
+
+  .pur-sum-row {
+    @include flex(baseline, space-between, 1rem);
+    font-size: $font-size-sm;
+    color: $gray-600;
+    strong { color: $gray-800; }
+  }
+  .pur-sum-total {
+    @include flex(baseline, space-between, 1rem);
+    padding-top: 0.45rem;
+    margin-top: 0.15rem;
+    border-top: 1px solid $gray-200;
+    font-weight: 700;
+    color: $gray-900;
+    span:last-child { font-size: $font-size-xl; letter-spacing: -0.02em; }
+  }
+  .is-owed strong { color: $danger; }
+  .is-credit strong { color: $success; }
+}
+
+.pur-total {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0 0;
+  border-top: 1px solid $gray-200;
+  text-align: right;
+  color: $gray-800;
+  font-variant-numeric: tabular-nums;
+
+  small { display: block; margin-top: 0.2rem; font-size: $font-size-xs; color: $gray-500; }
+}
+
+.pur-note {
+  margin: 0.6rem 0 0;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+  color: $gray-500;
+  &.is-warn { color: $warn-text; }
+}
+
+// Why the save button is disabled, said on the button itself
+.pur-save {
+  min-width: 11rem;
+  justify-content: center;
+}
+
+// ---- payment modal ----
+.pur-pay-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 1rem;
+  background: $danger-light;
+  border-radius: $radius;
+  font-size: $font-size-sm;
+  color: $gray-600;
+
+  strong { font-size: $font-size-xl; color: $danger; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+}
+
+.pur-quick-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+
+  button {
+    padding: 0.3rem 0.65rem;
+    border: 1px solid $gray-300;
+    border-radius: $radius-full;
+    background: $white;
+    color: $gray-700;
+    font-family: inherit;
+    font-size: $font-size-xs;
+    font-weight: 600;
+    cursor: pointer;
+    &:hover { border-color: $primary; color: $primary; }
+    &.is-on { border-color: $primary; background: $primary-light; color: $primary-dark; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+  }
+}
+
+// ---- detail modal ----
+.pur-detail-head {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.1rem;
+
+  > div { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+  // Direct children only: the "You owe" figure is itself a span inside
+  // the strong, and must keep its own red/green.
+  > div > span { font-size: $font-size-xs; color: $gray-500; }
+  > div > strong { font-size: $font-size-sm; color: $gray-900; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+}
+
+.pur-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: $font-size-sm;
+  margin-bottom: 1rem;
+  font-variant-numeric: tabular-nums;
+
+  th {
+    text-align: left;
+    padding: 0.45rem 0.5rem;
+    font-size: $font-size-xs;
+    font-weight: 600;
+    color: $gray-500;
+    background: $gray-50;
+    border-bottom: 1px solid $gray-200;
+    &:first-child { border-radius: $radius-sm 0 0 $radius-sm; }
+    &:last-child { border-radius: 0 $radius-sm $radius-sm 0; }
+  }
+  td {
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid $gray-100;
+    color: $gray-700;
+    vertical-align: top;
+  }
+  .is-right { text-align: right; }
+  tfoot td { border-bottom: none; font-weight: 700; color: $gray-900; }
+  tr.is-voided td { color: $gray-400; }
+  .strike { text-decoration: line-through; }
+}
+
+.pur-sub-title {
+  margin: 1.1rem 0 0.5rem;
+  font-size: $font-size-sm;
+  font-weight: 700;
+  color: $gray-800;
+}
+
+// ---- return / receive rows ----
+.pur-return-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid $gray-100;
+
+  .pur-return-name { font-size: $font-size-sm; font-weight: 600; color: $gray-800; }
+  .pur-return-meta { font-size: $font-size-xs; color: $gray-500; margin-top: 0.15rem; }
+  .pur-return-meta button {
+    margin-left: 0.4rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: $primary;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    &:hover { text-decoration: underline; }
+  }
+  input { @include input-base; text-align: right; }
+}
+
+.pur-receive-line {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid $gray-100;
+
+  .pur-receive-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.6rem;
+    align-items: flex-end;
+  }
+  .form-group { margin-bottom: 0; }
+  small { color: $gray-500; font-size: $font-size-xs; }
+}
+
+// ---- suppliers ----
+.pur-supplier-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  strong { color: $gray-900; }
+  span { font-size: $font-size-xs; color: $gray-500; }
+}
+
+.pur-tel {
+  color: $gray-700;
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  &:hover { color: $primary; text-decoration: underline; }
+}
+
+.pur-field-hint {
+  font-size: $font-size-xs;
+  color: $gray-500;
+  line-height: 1.45;
+  &.is-warn { color: $warn-text; }
+  &.is-bad { color: $danger; }
+}
+
+// ---- phones: line items become stacked cards ----
+@media (max-width: 640px) {
+  .pur-lines-head { display: none; }
+
+  .pur-line .pur-line-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
+    grid-template-areas:
+      'product product remove'
+      'qty     cost    cost'
+      'amount  amount  amount';
+    row-gap: 0.5rem;
+
+    > :nth-child(1) { grid-area: product; }
+    > :nth-child(2) { grid-area: qty; }
+    > :nth-child(3) { grid-area: cost; }
+    > :nth-child(4) { grid-area: amount; }
+    > :nth-child(5) { grid-area: remove; }
+  }
+
+  .pur-line .pur-cell-label {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: $font-size-xs;
+    font-weight: 500;
+    color: $gray-500;
+  }
+
+  .pur-line-amount { text-align: left; }
+  .pur-line-amount::before { content: 'Amount  '; font-weight: 500; color: $gray-500; }
+
+  .pur-line-batch { grid-template-columns: 1fr; }
+  .pur-detail-head { grid-template-columns: 1fr 1fr; }
+  .pur-receive-line .pur-receive-row { grid-template-columns: 1fr 1fr; }
+  .pur-receive-line .pur-receive-row > :first-child { grid-column: 1 / -1; }
+  .pur-save { min-width: 0; flex: 1; }
+}

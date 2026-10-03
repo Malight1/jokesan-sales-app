@@ -56,7 +56,7 @@ function TenantsPanel() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title"><h1>Tenants</h1><p>Every business on StockFlow</p></div>
+        <div className="page-title"><h1>Tenants</h1><p>Every business on ProfixBook</p></div>
       </div>
 
       {loading && <Loading label="Loading tenants…" />}
@@ -67,7 +67,7 @@ function TenantsPanel() {
           <DataTable
             columns={columns} rows={filtered} getRowKey={t => t.id} rowActions={rowActions}
             searchKeys={[t => t.name]} searchPlaceholder="Search tenants…"
-            exportName="tenants" exportTitle="StockFlow Tenants"
+            exportName="tenants" exportTitle="ProfixBook Tenants"
             toolbarExtra={
               <select value={planFilter} onChange={e => setPlanFilter(e.target.value)}>
                 <option value="">All plans</option>

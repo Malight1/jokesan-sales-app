@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { PLANS } from '../../lib/api';
 import ScreenshotFrame from '../ScreenshotFrame';
+import Reveal from '../Reveal';
 import useMeta from '../useMeta';
 
 const PROBLEMS: { problem: string; solution: React.ReactNode }[] = [
   { problem: "I sell for what feels right. I don't actually know my margin.",
     solution: <>Real <b>FIFO costing</b> on every sale, raw material through production to finished-goods COGS. Not an estimate.</> },
+  { problem: 'Every inventory app assumes I make things. I just buy and sell them.',
+    solution: <><b>Retail Mode</b> buys stock straight from a supplier and puts it on the shelf. No fake raw material, no fake production run, a dashboard built around your till.</> },
   { problem: 'Someone sent a fake bank alert and I only found out at closing.',
     solution: <><b>Paystack pay links</b> confirm themselves the moment a customer actually pays.</> },
   { problem: "My storekeeper's WhatsApp is my inventory system.",
@@ -20,8 +23,8 @@ const PROBLEMS: { problem: string; solution: React.ReactNode }[] = [
 
 export default function Home() {
   useMeta(
-    'StockFlow, Inventory & Sales for African SMEs',
-    'Know your real profit, track stock, and chase debtors on WhatsApp. Real FIFO costing, offline POS, and NAFDAC-ready batch tracking, built for Nigerian manufacturers and traders.'
+    'ProfixBook, Inventory & Sales for African SMEs',
+    'Know your real profit, track stock, and chase debtors on WhatsApp. Real FIFO costing, offline POS, and NAFDAC-ready batch tracking, built for Nigerian manufacturers, shops, and traders.'
   );
   return (
     <>
@@ -35,30 +38,32 @@ export default function Home() {
           </div>
           <p className="mkt-hero__trust">14-day free trial. No card needed.</p>
         </div>
-        <ScreenshotFrame src="/screenshots/dashboard.png" alt="StockFlow owner dashboard showing sales, profit and debtors" className="mkt-hero__shot" />
+        <ScreenshotFrame src="/screenshots/dashboard.png" alt="ProfixBook owner dashboard showing sales, profit and debtors" className="mkt-hero__shot" />
       </section>
 
       <section id="how-it-helps" className="mkt-section">
-        <div className="mkt-section__head">
+        <Reveal className="mkt-section__head">
           <span className="mkt-eyebrow">The problem</span>
           <h2>Every one of these is a real reason a Nigerian SME loses money quietly.</h2>
-        </div>
+        </Reveal>
         <div className="mkt-pstable">
           {PROBLEMS.map((p, i) => (
-            <div className="mkt-prow" key={i}>
-              <div className="mkt-prow__problem">&ldquo;{p.problem}&rdquo;</div>
-              <div className="mkt-prow__arrow"><ArrowRight size={16} /></div>
-              <div className="mkt-prow__solution">{p.solution}</div>
-            </div>
+            <Reveal delay={Math.min(i, 5) * 60} key={i}>
+              <div className="mkt-prow">
+                <div className="mkt-prow__problem">&ldquo;{p.problem}&rdquo;</div>
+                <div className="mkt-prow__arrow"><ArrowRight size={16} /></div>
+                <div className="mkt-prow__solution">{p.solution}</div>
+              </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       <section className="mkt-section mkt-section--alt">
-        <div className="mkt-capabilities">
+        <Reveal className="mkt-capabilities">
           <div className="mkt-capabilities__lead">
             <h2>Three things no spreadsheet or general selling app does for you.</h2>
-            <p><Link to="/product">See the full tour of everything StockFlow does <ArrowRight size={14} /></Link></p>
+            <p><Link to="/product">See the full tour of everything ProfixBook does <ArrowRight size={14} /></Link></p>
           </div>
           <div className="mkt-capabilities__main">
             <ScreenshotFrame src="/screenshots/dashboard.png" alt="Know your real profit" />
@@ -77,13 +82,13 @@ export default function Home() {
               <p>Batch numbers, expiry dates, first-expiry-first-out picking, and a full recall trace.</p>
             </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       <section className="mkt-section">
-        <div className="mkt-section__head">
+        <Reveal className="mkt-section__head">
           <h2>One plan for a solo owner, one for a growing team, one for multiple branches.</h2>
-        </div>
+        </Reveal>
         <div className="mkt-pricing">
           {PLANS.map(p => (
             <div className={`mkt-plan ${p.id === 'growth' ? 'mkt-plan--popular' : ''}`} key={p.id}>
@@ -102,9 +107,11 @@ export default function Home() {
       </section>
 
       <section className="mkt-final-cta">
-        <h2>Stop guessing your margin.</h2>
-        <p>Start free for 14 days. No card required.</p>
-        <Link to="/login?signup=1" className="btn-primary btn-lg">Start free trial <ArrowRight size={16} /></Link>
+        <Reveal>
+          <h2>Stop guessing your margin.</h2>
+          <p>Start free for 14 days. No card required.</p>
+          <Link to="/login?signup=1" className="btn-primary btn-lg">Start free trial <ArrowRight size={16} /></Link>
+        </Reveal>
       </section>
     </>
   );

@@ -1,5 +1,5 @@
 // ============================================================
-// StockFlow — Paystack payment verification (Supabase Edge Function)
+// ProfixBook — Paystack payment verification (Supabase Edge Function)
 //
 // Deploy from the Supabase dashboard (Edge Functions → New function
 // → name it "paystack-verify" → paste this) OR via CLI:

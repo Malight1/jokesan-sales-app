@@ -48,7 +48,8 @@ export interface Tenant {
     variance_alert: number;
     pay_out_limit: number;
   };
-  // Printed on a proforma invoice only (migration 0028).
+  // Printed on a proforma invoice (migration 0028), and on a real invoice
+  // or POS receipt too whenever it's left with a balance still owed.
   bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
   // Smart reorder suggestions (migration 0034, Phase 7a). Optional until it has run.
   reorder_z?: number;
