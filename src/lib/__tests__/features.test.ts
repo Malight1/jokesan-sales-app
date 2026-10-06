@@ -1,4 +1,4 @@
-import { hasFeature, planFor } from '../features';
+import { hasFeature, planFor, isPriority } from '../features';
 
 // Must agree with plan_level()/feature_level() in migration 0021 — the
 // database refuses the write either way; this decides what the UI offers.
@@ -31,5 +31,19 @@ describe('plan features', () => {
   it('names the cheapest plan that includes a feature', () => {
     expect(planFor('batch_tracking')).toBe('Growth');
     expect(planFor('einvoicing')).toBe('Business');
+  });
+
+  it('puts the assistant on Growth and up, not Starter (0050)', () => {
+    expect(hasFeature('starter', 'assistant')).toBe(false);
+    expect(hasFeature('growth', 'assistant')).toBe(true);
+    expect(planFor('assistant')).toBe('Growth');
+  });
+
+  it('gives Business and Enterprise priority support only', () => {
+    expect(isPriority('business')).toBe(true);
+    expect(isPriority('enterprise')).toBe(true);
+    expect(isPriority('growth')).toBe(false);
+    expect(isPriority('trial')).toBe(false);
+    expect(isPriority(undefined)).toBe(false);
   });
 });

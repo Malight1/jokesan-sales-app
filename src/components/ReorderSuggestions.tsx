@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { PackagePlus, ShoppingBag } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { PackagePlus, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { reorder as reorderApi, ReorderSuggestion } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -9,8 +10,10 @@ import { Loading } from './DataStates';
 // Real, server-computed reorder math (migration 0034, Phase 7a) — daily
 // usage, its variability, the learned supplier lead time, a safety margin
 // and a cover-days target, all worked out in plain SQL so the numbers can
-// be checked. Materials only; a "produce" suggestion for finished goods
-// (checked against the BOM's feasibility) isn't built yet.
+// be checked. Materials are ordered in bulk as purchase orders. A shop's
+// own products (0050, from how fast each one sells) get a Buy link that
+// opens Quick Purchase with the product, quantity and supplier filled in.
+// A manufacturer's finished goods are produced, so they get no row.
 export default function ReorderSuggestions() {
   const toast = useToast();
   const { multi, myBranchName } = useBranches();
@@ -19,10 +22,11 @@ export default function ReorderSuggestions() {
   const createMut = useMutation(reorderApi.createOrders);
 
   const needed = useMemo(() => (data ?? []).filter(s => s.suggested_qty > 0), [data]);
+  const neededMaterials = useMemo(() => needed.filter(s => s.product_kind === 'material'), [needed]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Everything needed starts checked, once per load of the suggestion list.
-  useEffect(() => { setSelected(new Set(needed.map(s => s.product_id))); }, [needed.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSelected(new Set(neededMaterials.map(s => s.product_id))); }, [neededMaterials.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (id: string) => setSelected(prev => {
     const next = new Set(prev);
@@ -38,10 +42,10 @@ export default function ReorderSuggestions() {
     const orderedCount = res.created.length;
     const skippedCount = res.skipped.length;
     if (orderedCount > 0) {
-      toast.success(`${orderedCount} purchase order${orderedCount !== 1 ? 's' : ''} created — check Purchases.`);
+      toast.success(`${orderedCount} purchase order${orderedCount !== 1 ? 's' : ''} created. Check Purchases.`);
     }
     if (skippedCount > 0) {
-      toast.error(`${skippedCount} material${skippedCount !== 1 ? 's' : ''} skipped — no supplier on record yet: ${res.skipped.map(s => s.name).join(', ')}.`);
+      toast.error(`${skippedCount} material${skippedCount !== 1 ? 's' : ''} skipped, no supplier on record yet: ${res.skipped.map(s => s.name).join(', ')}.`);
     }
     refetch();
   };
@@ -54,14 +58,34 @@ export default function ReorderSuggestions() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <PackagePlus size={18} color="#2563eb" />
-          Reorder Suggestions{multi ? ` — ${myBranchName}` : ''}
+          Reorder Suggestions{multi ? `: ${myBranchName}` : ''}
         </h3>
-        <button className="btn-primary btn-sm" disabled={selected.size === 0 || createMut.pending} onClick={createOrders}>
-          <ShoppingBag size={14} /> {createMut.pending ? 'Creating…' : `Create Purchase Order${selected.size !== 1 ? 's' : ''}`}
-        </button>
+        {neededMaterials.length > 0 && (
+          <button className="btn-primary btn-sm" disabled={selected.size === 0 || createMut.pending} onClick={createOrders}>
+            <ShoppingBag size={14} /> {createMut.pending ? 'Creating…' : `Create Purchase Order${selected.size !== 1 ? 's' : ''}`}
+          </button>
+        )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {needed.map(s => (
+        {needed.map(s => s.product_kind === 'finished_good' ? (
+          <div key={s.product_id}
+               style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', padding: '0.6rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <strong>{s.name}</strong>
+                <span style={{ color: '#2563eb', fontWeight: 600 }}>
+                  Buy {s.suggested_qty.toLocaleString()} {s.unit ?? 'units'}
+                </span>
+              </div>
+              <p style={{ color: '#64748b', fontSize: '0.82rem', margin: '0.25rem 0 0' }}>{s.reason}</p>
+            </div>
+            <Link className="btn-secondary btn-sm" style={{ flexShrink: 0 }}
+                  to={`/purchases?restock=${s.product_id}&qty=${s.suggested_qty}${s.supplier_id ? `&supplier=${s.supplier_id}` : ''}`}
+                  aria-label={`Buy ${s.suggested_qty} ${s.unit ?? 'units'} of ${s.name}`}>
+              <ShoppingCart size={14} aria-hidden="true" /> Buy
+            </Link>
+          </div>
+        ) : (
           <label key={s.product_id}
                  style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', padding: '0.6rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer' }}>
             <input type="checkbox" style={{ width: 'auto', marginTop: 3 }} checked={selected.has(s.product_id)} onChange={() => toggle(s.product_id)} />
@@ -75,7 +99,7 @@ export default function ReorderSuggestions() {
               <p style={{ color: '#64748b', fontSize: '0.82rem', margin: '0.25rem 0 0' }}>{s.reason}</p>
               {!s.supplier_id && (
                 <p style={{ color: '#dc2626', fontSize: '0.78rem', margin: '0.25rem 0 0' }}>
-                  No supplier on record for this material yet — it will be skipped when creating orders.
+                  No supplier on record for this material yet, so it will be skipped when creating orders.
                 </p>
               )}
             </div>

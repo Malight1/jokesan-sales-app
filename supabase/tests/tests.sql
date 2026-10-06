@@ -439,14 +439,14 @@ begin
   select doc_no into v_nb from sales_orders where id = v_b;
   select doc_no into v_nc from sales_orders where id = v_c;
 
-  perform t_rec('every sale gets a server-issued invoice number (INV-000123)', v_na ~ '^INV-[0-9]{6}$', v_na);
+  perform t_rec('every sale gets a server-issued invoice number carrying the business code (JM-INV-000123, 0051)', v_na ~ '^JM-INV-[0-9]{6}$', v_na);
   perform t_rec('invoice numbers run in sequence', right(v_nb, 6)::int = right(v_na, 6)::int + 1, v_na || ' → ' || v_nb);
   perform t_rec('a sale that fails gives its number back (no gap)', right(v_nc, 6)::int = right(v_nb, 6)::int + 1, v_nb || ' → ' || v_nc);
   select count(*), count(distinct doc_no) into v_n, v_d from sales_orders where tenant_id = t_id('tenant');
   perform t_rec('no two sales in a company share a number', v_n = v_d and v_n > 0, format('%s sales, %s numbers', v_n, v_d));
-  perform t_rec('each company has its own sequence (legacy company starts at INV-000001)',
+  perform t_rec('each company has its own sequence (the legacy company starts at its own 000001)',
     exists (select 1 from sales_orders so join profiles p on p.tenant_id = so.tenant_id
-             where p.id = '00000000-0000-0000-0000-00000000000a' and so.doc_no = 'INV-000001'));
+             where p.id = '00000000-0000-0000-0000-00000000000a' and so.doc_no ~ '^[A-Z0-9]{2,6}-INV-000001$'));
   perform t_err('an issued invoice number can''t be changed, even from the SQL editor',
     format('update sales_orders set doc_no = %L where id = %L::uuid', 'INV-999999', v_a), 'can''t be changed');
   perform t_rec('voiding a sale leaves an audit entry',
@@ -1334,7 +1334,7 @@ begin
     'select public.close_shift(-1)', 'negative');
   select public.close_shift(700, null, 'counted twice, matches') into v_zr;
   perform t_rec('closing the till issues a real Z number and zero variance',
-    (v_zr->>'doc_no') like 'Z-%' and (v_zr->>'variance')::numeric = 0, v_zr::text);
+    (v_zr->>'doc_no') like 'JKS-Z-%' and (v_zr->>'variance')::numeric = 0, v_zr::text);
 
   perform t_err('closing again with no open till is refused', 'select public.close_shift(0)', 'no open till');
 
@@ -1534,7 +1534,7 @@ begin
   perform t_as(v_cashier);
   execute format('select public.create_quote(%L::uuid, %L, %L::jsonb, %L::date, %L)',
     v_cust, 'quote', t_items(v_qsoap, 2, 90), current_date + 14, 'first draft') into v_quote;
-  perform t_rec('a quote gets a real QT- number', (select doc_no from quotes where id = v_quote) like 'QT-%');
+  perform t_rec('a quote gets a real QT- number', (select doc_no from quotes where id = v_quote) like 'JKS-QT-%');
   perform t_rec('the quote totals the line at the price given, with the discount vs list tracked',
     (select subtotal = 180 and discount_total = 20 and status = 'draft' from quotes where id = v_quote),
     (select format('subtotal=%s discount=%s status=%s', subtotal, discount_total, status) from quotes where id = v_quote));
@@ -1545,7 +1545,7 @@ begin
   -- ---- C: a proforma is the same engine, a different kind and number ---- (still as v_cashier)
   execute format('select public.create_quote(%L::uuid, %L, %L::jsonb)', v_cust, 'proforma', t_items(v_qsoap, 1, 100)) into v_proforma;
   perform t_su();
-  perform t_rec('a proforma gets its own PF- number', (select doc_no from quotes where id = v_proforma) like 'PF-%');
+  perform t_rec('a proforma gets its own PF- number', (select doc_no from quotes where id = v_proforma) like 'JKS-PF-%');
 
   -- ---- D: status moves forward, but never past converted ----
   perform t_as(v_cashier);
@@ -1637,7 +1637,7 @@ begin
     current_date + 7) into v_po;
   perform t_su();
   perform t_rec('an order gets a real PO- number, status ordered, and an expected date',
-    (select doc_no like 'PO-%' and status = 'ordered' and expected_date = current_date + 7 from purchase_orders where id = v_po));
+    (select doc_no like '%-PO-%' and status = 'ordered' and expected_date = current_date + 7 from purchase_orders where id = v_po));
   perform t_rec('nothing is owed and no stock has moved yet',
     (select total_amount = 0 and balance = 0 from purchase_orders where id = v_po)
     and (select qty_balance from materials where id = v_mat) = 0);
@@ -1660,7 +1660,7 @@ begin
   select public.receive_purchase_order(v_po,
     jsonb_build_array(jsonb_build_object('line_id', v_line1, 'qty', 60))) into v_gr1;
   perform t_su();
-  perform t_rec('a partial receipt gets its own GRN- number', (select doc_no from goods_receipts where id = v_gr1) like 'GRN-%');
+  perform t_rec('a partial receipt gets its own GRN- number', (select doc_no from goods_receipts where id = v_gr1) like 'JKS-GRN-%');
   perform t_rec('the order moves to partial, and only the received value is now owed',
     (select status = 'partial' and total_amount = 600 from purchase_orders where id = v_po));
   perform t_rec('the advance now covers half the received value (balance -300 + 600 = 300 owed)',
@@ -1869,7 +1869,7 @@ begin
     jsonb_build_array(jsonb_build_object('sale_item_id', v_item1, 'qty', 6)),
     'Musa', 'ABC-123XY', 'Ikeja') into v_delivery;
   perform t_rec('a delivery note gets a real DN- number and starts pending',
-    (select doc_no like 'DN-%' and status = 'pending' and driver_name = 'Musa' from deliveries where id = v_delivery));
+    (select doc_no like '%-DN-%' and status = 'pending' and driver_name = 'Musa' from deliveries where id = v_delivery));
 
   -- ---- C: can't claim more than what's left of the sold line (10 sold, 6 claimed, 4 left) ----
   perform t_err('a delivery note can''t claim more than what''s left to deliver',
@@ -2247,12 +2247,14 @@ declare
   v_store uuid := '00000000-0000-0000-0000-000000000003';
   v_q     jsonb;
 begin
-  -- ---- A: the assistant is a Business-plan feature, enforced server-side
-  --    (unlike custom fields/audit/reorder, a question here has a real
-  --    per-call cost against the Anthropic API) ----
+  -- ---- A: the assistant is a Growth-and-up feature (0050; it was
+  --    Business-only in 0036), enforced server-side (unlike custom
+  --    fields/audit/reorder, a question here has a real per-call cost
+  --    against the Anthropic API) ----
+  update tenants set plan = 'starter' where id = t_id('tenant');
   perform t_as(v_admin);
-  perform t_err('the assistant is not available below the Business plan',
-    'select public.check_and_record_assistant_question()', 'Business plan');
+  perform t_err('the assistant is not available on Starter',
+    'select public.check_and_record_assistant_question()', 'Growth plan');
   perform t_su();
 
   update tenants set plan = 'business', assistant_monthly_limit = 2 where id = t_id('tenant');
@@ -2354,8 +2356,8 @@ begin
   perform t_ok('Growth can view reorder suggestions', 'select public.reorder_suggestions()');
   perform t_su();
 
-  -- ---- C: seat limit — Starter's 1 seat is already spent on the admin,
-  -- so any invite at all is refused; Growth's 5 has to be actually filled
+  -- ---- C: seat limit. Starter's 2 seats (0050) are already spent on this
+  -- tenant's many staff, so any invite at all is refused; Growth's 5 has to be actually filled
   -- to find the edge, computed from whatever this shared tenant already
   -- has rather than an assumed headcount. ----
   declare
@@ -2366,7 +2368,7 @@ begin
     perform t_su();
 
     perform t_as(v_admin);
-    perform t_err('Starter''s 1 seat is already the admin — no one else can be invited',
+    perform t_err('Starter''s 2 seats are already taken on this shared tenant, so no one else can be invited',
       format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)',
         t_id('tenant'), 'seat-starter-test@example.com', 'sales'),
       'team member');
@@ -3150,6 +3152,227 @@ begin
   perform t_rec('...and stops needing it once they have',
     not exists (select 1 from public.platform_needs_attention() where kind = 'unconfirmed_owner' and tenant_id = t_id('tenant')));
   perform t_su();
+end $$;
+
+-- ---------- 54. launch pricing and billing (0050) ----------
+-- A fresh retail shop (owner …d1) so plan, founding number and usage
+-- figures are exact. Payments are confirmed the way the paystack-verify
+-- Edge Function does it: as service_role, never as the logged-in user.
+do $$
+declare
+  v_owner    uuid := '00000000-0000-0000-0000-0000000000d1';
+  v_platform uuid := '00000000-0000-0000-0000-0000000000ad';
+  v_tenant   uuid;
+  v_supplier uuid;
+  v_product  uuid;
+  v_res      jsonb;
+  v_exp      timestamptz;
+  v_spots    int;
+  v_ticket   uuid;
+  v_row      record;
+begin
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_owner, 'billing-owner@stockflow.test', '{"company_name":"Billing Test Shop","business_type":"retail"}');
+  select tenant_id into v_tenant from profiles where id = v_owner;
+
+  -- ---- A: the price list ----
+  perform t_rec('list prices are 5,000 / 12,000 / 25,000',
+    plan_list_price('starter') = 5000 and plan_list_price('growth') = 12000 and plan_list_price('business') = 25000);
+  perform t_rec('a new business has no assistant override, so its plan decides',
+    (select assistant_monthly_limit is null from tenants where id = v_tenant));
+
+  -- ---- B: the browser can no longer grant itself a plan ----
+  perform t_as(v_owner);
+  perform t_err('a business admin can no longer call activate_subscription directly',
+    format('select public.activate_subscription(%L::plan_tier, %L, 0, now() + interval ''10 years'')', 'business', 'FAKE-REF'),
+    'permission denied');
+  perform t_err('nor confirm_subscription_payment',
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, 9999999)', v_tenant, 'business', 'monthly', 'FAKE-REF-2'),
+    'permission denied');
+  perform t_rec('the plan did not change', (select plan::text = 'trial' from tenants where id = v_tenant));
+  perform t_su();
+
+  -- Anyone, even logged out, can read the number of founding spots left.
+  select founding_spots_left() into v_spots;
+  execute 'set role anon';
+  perform t_rec('a visitor can read how many founding spots are left',
+    public.founding_spots_left() = v_spots);
+  execute 'reset role';
+
+  -- ---- C: confirming payments (as the Edge Function) ----
+  execute 'set role service_role';
+  perform t_err('paying less than the plan price is refused',
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-LOW', 1199900),
+    'less than');
+  select public.confirm_subscription_payment(v_tenant, 'growth', 'monthly', 'PSK-1', 1200000) into v_res;
+  execute 'reset role';
+  perform t_rec('a full monthly payment moves the business to Growth for a month from today',
+    (select plan::text = 'growth' and is_active and plan_expires_at::date = (now() + interval '1 month')::date
+       from tenants where id = v_tenant));
+  perform t_rec('the payment is recorded with its reference and interval',
+    exists (select 1 from subscriptions where tenant_id = v_tenant and paystack_sub_code = 'PSK-1'
+              and interval = 'monthly' and amount = 12000));
+  perform t_rec('the first payer becomes a founding customer',
+    (v_res->>'founding_number') is not null
+    and (select founding_number is not null and founding_since is not null from tenants where id = v_tenant));
+  perform t_rec('...which takes one founding spot', founding_spots_left() = v_spots - 1);
+
+  select plan_expires_at into v_exp from tenants where id = v_tenant;
+  execute 'set role service_role';
+  perform t_err('the same Paystack reference cannot be used twice',
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-1', 1200000),
+    'already been used');
+  perform t_err('an annual payment at the monthly price is refused',
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'annual', 'PSK-A0', 1200000),
+    'less than');
+  -- Annual = 10 months' price for 12 months, added on top of the month
+  -- already paid for rather than starting again from today.
+  perform public.confirm_subscription_payment(v_tenant, 'growth', 'annual', 'PSK-A1', 12000000);
+  execute 'reset role';
+  perform t_rec('paying annually early adds 12 months to the current expiry, not to today',
+    (select plan_expires_at = v_exp + interval '12 months' from tenants where id = v_tenant));
+  perform t_rec('a founding customer keeps the same number on renewal',
+    (select founding_number = (v_res->>'founding_number')::int from tenants where id = v_tenant)
+    and founding_spots_left() = v_spots - 1);
+  perform t_as(v_owner);
+  select public.my_billing() into v_res;
+  perform t_su();
+  perform t_rec('my_billing reports the founding number and this business''s own prices',
+    (v_res->>'founding_number') is not null and (v_res->'prices'->>'business')::numeric = 25000);
+
+  -- ---- D: assistant allowance follows the plan ----
+  perform t_as(v_owner);
+  select public.assistant_quota() into v_res;
+  perform t_rec('Growth includes the assistant with 20 questions a month',
+    (v_res->>'enabled')::boolean and (v_res->>'limit')::int = 20);
+  perform t_su();
+  update tenants set plan = 'business' where id = v_tenant;
+  perform t_as(v_owner);
+  select public.assistant_quota() into v_res;
+  perform t_rec('Business gets 100', (v_res->>'limit')::int = 100);
+  perform t_su();
+  update tenants set assistant_monthly_limit = 7 where id = v_tenant;
+  perform t_as(v_owner);
+  select public.assistant_quota() into v_res;
+  perform t_rec('a limit the platform admin set by hand still wins over the plan', (v_res->>'limit')::int = 7);
+  perform t_su();
+  update tenants set plan = 'starter', assistant_monthly_limit = null where id = v_tenant;
+  perform t_as(v_owner);
+  select public.assistant_quota() into v_res;
+  perform t_rec('Starter has no assistant', not (v_res->>'enabled')::boolean and (v_res->>'limit')::int = 0);
+
+  -- ---- E: Starter seats: the owner plus one ----
+  perform t_ok('Starter can invite one member of staff',
+    format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)', v_tenant, 'starter-staff-1@example.com', 'sales'));
+  perform t_err('...but not a second',
+    format('insert into staff_invites (tenant_id, email, role) values (%L::uuid, %L, %L)', v_tenant, 'starter-staff-2@example.com', 'sales'),
+    'team member');
+  perform t_su();
+
+  -- ---- F: reorder suggestions for a shop's own products ----
+  update tenants set plan = 'growth' where id = v_tenant;
+  perform t_as(v_owner);
+  insert into suppliers (tenant_id, company_store) values (v_tenant, 'Reorder Supplier') returning id into v_supplier;
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+    values (v_tenant, 'Reorder Malt', 'crate', 2, 3000, 1.4) returning id into v_product;
+  perform public.create_purchase(v_supplier, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('finished_good_id', v_product, 'qty', 10, 'cost_price', 2000)));
+  perform public.create_sale(null, current_date, null, 27000, t_items(v_product, 9, 3000)::jsonb);
+  select * into v_row from public.reorder_suggestions() where product_id = v_product;
+  perform t_rec('a shop gets a reorder row for a product it sells',
+    v_row.product_kind = 'finished_good' and v_row.daily_usage > 0 and v_row.on_hand = 1 and v_row.suggested_qty > 0,
+    format('usage %s on hand %s suggest %s', v_row.daily_usage, v_row.on_hand, v_row.suggested_qty));
+  perform t_rec('...naming the supplier it was last bought from', v_row.supplier_name = 'Reorder Supplier');
+  perform t_rec('...in plain words', v_row.reason ilike 'You sell about%Buy%');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  update tenants set plan = 'growth' where id = t_id('tenant');
+  perform t_rec('a manufacturer still gets no "buy" rows for goods it produces',
+    not exists (select 1 from public.reorder_suggestions() where product_kind = 'finished_good'));
+  perform t_su();
+
+  -- ---- G: priority support: Business tickets first ----
+  update tenants set plan = 'business' where id = t_id('tenant');
+  perform t_as(v_owner);
+  execute 'insert into support_tickets (subject, category) values (''Starter-ish question'', ''other'') returning id' into v_ticket;
+  execute format('insert into support_ticket_messages (ticket_id, sender_type, body) values (%L::uuid, ''tenant'', ''Hello'')', v_ticket);
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute 'insert into support_tickets (subject, category) values (''Business question'', ''other'') returning id' into v_ticket;
+  execute format('insert into support_ticket_messages (ticket_id, sender_type, body) values (%L::uuid, ''tenant'', ''Hello'')', v_ticket);
+  perform t_su();
+
+  perform t_as(v_platform);
+  select * into v_row from public.platform_tickets(null, null, v_ticket);
+  perform t_rec('the queue shows each ticket''s plan', v_row.tenant_plan = 'business');
+  perform t_rec('among tickets waiting on support, Business ones come first',
+    not exists (
+      select 1 from (
+        select awaiting_reply, tenant_plan in ('business', 'enterprise') as pri,
+               lag(awaiting_reply) over () as prev_wait,
+               lag(tenant_plan in ('business', 'enterprise')) over () as prev_pri
+          from public.platform_tickets()) q
+       where q.awaiting_reply and q.prev_wait and q.pri and not q.prev_pri));
+  perform t_su();
+end $$;
+
+-- ---------- 55. document numbers unique across businesses (0051) ----------
+-- "Jokesan Multi" claimed JM with its first invoice, then (section 21)
+-- rebranded to JKS through the old prefix setting. A second business with
+-- the same initials must get a different code, and nobody may take a code
+-- another business has ever printed.
+do $$
+declare
+  v_owner  uuid := '00000000-0000-0000-0000-0000000000e1';
+  v_tenant uuid;
+  v_no     text;
+  v_n int; v_d int;
+begin
+  perform t_rec('the first business keeps JM reserved after moving to JKS',
+    exists (select 1 from doc_codes where code = 'JM' and tenant_id = t_id('tenant') and not is_current)
+    and exists (select 1 from doc_codes where code = 'JKS' and tenant_id = t_id('tenant') and is_current));
+  perform t_rec('its very first invoice carried JM',
+    exists (select 1 from sales_orders where tenant_id = t_id('tenant') and doc_no = 'JM-INV-000001'));
+
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (v_owner, 'jolly-mart@stockflow.test', '{"company_name":"Jolly Mart","business_type":"retail"}');
+  select tenant_id into v_tenant from profiles where id = v_owner;
+
+  perform t_as(v_owner);
+  perform t_rec('a business with the same initials gets its own code (JM2)', public.my_doc_code() = 'JM2');
+  perform t_su();
+  select public.next_doc_no(v_tenant, 'INV') into v_no;
+  perform t_rec('so its first invoice can never match the other business''s', v_no = 'JM2-INV-000001', v_no);
+
+  perform t_as(v_owner);
+  perform t_err('another business''s current code can''t be taken',
+    $q$select public.set_doc_code('JKS')$q$, 'already used by another business');
+  perform t_err('nor one it used before (its old invoices still carry it)',
+    $q$select public.set_doc_code('jm')$q$, 'already used by another business');
+  perform t_err('a code needs 2 to 6 letters or numbers', $q$select public.set_doc_code('J')$q$, '2 to 6');
+  perform t_err('a document type can''t be a code', $q$select public.set_doc_code('INV')$q$, 'document type');
+  perform t_ok('a free code can be picked', $q$select public.set_doc_code('jolly')$q$);
+  perform t_err('codes can''t be written straight into the table',
+    format('insert into doc_codes (code, tenant_id) values (%L, %L::uuid)', 'SNEAKY', v_tenant), 'row-level security');
+  perform t_su();
+  select public.next_doc_no(v_tenant, 'INV') into v_no;
+  perform t_rec('the new code applies to the next invoice and the count carries on', v_no = 'JOLLY-INV-000002', v_no);
+
+  perform t_as(v_owner);
+  perform t_ok('a business can go back to one of its own old codes', $q$select public.set_doc_code('JM2')$q$);
+  perform t_su();
+  perform t_rec('which is then current again',
+    (select is_current from doc_codes where code = 'JM2') and not (select is_current from doc_codes where code = 'JOLLY'));
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a cashier can''t change the code', $q$select public.set_doc_code('ZZZ')$q$, 'Only an admin');
+  perform t_su();
+
+  select count(*), count(distinct doc_no) into v_n, v_d from sales_orders where doc_no ~ '^[A-Z0-9]{2,6}-INV-[0-9]+$';
+  perform t_rec('no two invoices on the whole platform share a number', v_n = v_d and v_n > 0, format('%s invoices, %s numbers', v_n, v_d));
+  perform t_rec('the database enforces that too, not just the counter',
+    exists (select 1 from pg_indexes where indexname = 'uq_sales_orders_doc_no_global'));
 end $$;
 
 -- ---------- 20. books balance everywhere ----------

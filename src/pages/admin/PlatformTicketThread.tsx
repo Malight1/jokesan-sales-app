@@ -12,6 +12,7 @@ import { Loading, ErrorState } from '../../components/DataStates';
 import PlatformGate from '../../components/PlatformGate';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { MessageList, Composer, ago } from '../../components/SupportConversation';
+import { isPriority } from '../../lib/features';
 import '../Support.scss';
 
 const statusOptions = [
@@ -108,6 +109,7 @@ function ThreadPanel() {
           <h1>{ticket.subject}</h1>
           <div className="sp-meta">
             <Link to={`/platform/tenants/${ticket.tenant_id}`}>{ticket.tenant_name}</Link>
+            {isPriority(ticket.tenant_plan) && <span className="sp-priority">Priority, {ticket.tenant_plan} plan</span>}
             <span>· {categoryLabel(ticket.category)}</span>
             <span>· opened {fmtDate(ticket.created_at)}</span>
             {ticket.awaiting_reply && <span className="sp-turn is-you">· Waiting on you {ago(ticket.last_message_at)}</span>}

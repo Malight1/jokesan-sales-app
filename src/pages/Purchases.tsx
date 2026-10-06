@@ -116,7 +116,7 @@ export default function Purchases() {
   const voidMut = useMutation(purchasesApi.void);
   const cancelMut = useMutation(purchasesApi.cancelOrder);
 
-  const [buying, setBuying] = useState<{ productId: string | null } | null>(null);
+  const [buying, setBuying] = useState<{ productId: string | null; qty?: number; supplierId?: string | null } | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
   const [voidFor, setVoidFor] = useState<PurchaseOrder | null>(null);
   const [payFor, setPayFor] = useState<PurchaseOrder | null>(null);
@@ -127,13 +127,15 @@ export default function Purchases() {
 
   // "Restock" on the Products page lands here as ?restock=<product id>
   // and opens Quick Purchase with that product already on the first line.
+  // Reorder suggestions add &qty= and &supplier= to prefill those too.
   const [params, setParams] = useSearchParams();
   const restockId = params.get('restock');
   useEffect(() => {
     if (!restockId) return;
-    if (canCreatePurchase) setBuying({ productId: restockId });
-    setParams(p => { p.delete('restock'); return p; }, { replace: true });
-  }, [restockId, canCreatePurchase, setParams]);
+    const qty = Number(params.get('qty'));
+    if (canCreatePurchase) setBuying({ productId: restockId, qty: qty > 0 ? qty : undefined, supplierId: params.get('supplier') });
+    setParams(p => { p.delete('restock'); p.delete('qty'); p.delete('supplier'); return p; }, { replace: true });
+  }, [restockId, canCreatePurchase, params, setParams]);
 
   const supplierName = (id: string | null) => (id ? supplierTitle(suppliers?.find(x => x.id === id)) : 'No supplier');
   const reloadAll = () => { refetch(); materialsQ.refetch(); goodsQ.refetch(); };
@@ -284,6 +286,8 @@ export default function Purchases() {
           productsLoading={!(retail ? goods : materials)}
           payTypes={payTypes ?? []}
           initialProductId={buying.productId}
+          initialQty={buying.qty}
+          initialSupplierId={buying.supplierId}
           onSupplierAdded={() => suppliersQ.refetch()}
           onClose={() => setBuying(null)}
           onDone={() => { setBuying(null); reloadAll(); }}
@@ -372,15 +376,17 @@ export default function Purchases() {
 interface Line { key: number; product_id: string; qty: number; cost_price: number; supplier_batch_no: string; expiry_date: string; }
 type PayMode = 'full' | 'part' | 'credit';
 let lineSeq = 0;
-const newLine = (product_id = ''): Line => ({ key: ++lineSeq, product_id, qty: 1, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
+const newLine = (product_id = '', qty = 1): Line => ({ key: ++lineSeq, product_id, qty, cost_price: 0, supplier_batch_no: '', expiry_date: '' });
 
-function QuickPurchaseModal({ retail, suppliers, products, productsLoading, payTypes, initialProductId, onSupplierAdded, onClose, onDone }: {
+function QuickPurchaseModal({ retail, suppliers, products, productsLoading, payTypes, initialProductId, initialQty, initialSupplierId, onSupplierAdded, onClose, onDone }: {
   retail: boolean;
   suppliers: Supplier[];
   products: Buyable[];
   productsLoading: boolean;
   payTypes: Lookup[];
   initialProductId: string | null;
+  initialQty?: number;
+  initialSupplierId?: string | null;
   onSupplierAdded: () => void;
   onClose: () => void;
   onDone: () => void;
@@ -391,11 +397,11 @@ function QuickPurchaseModal({ retail, suppliers, products, productsLoading, payT
   const noun = label(retail, 'material', 'product');
   const Noun = label(retail, 'Material', 'Product');
 
-  const [supplierId, setSupplierId] = useState('');
+  const [supplierId, setSupplierId] = useState(initialSupplierId ?? '');
   const [added, setAdded] = useState<Supplier[]>([]);
   const [showNewSupplier, setShowNewSupplier] = useState(false);
   const [date, setDate] = useState(today());
-  const [lines, setLines] = useState<Line[]>(() => [newLine(initialProductId ?? '')]);
+  const [lines, setLines] = useState<Line[]>(() => [newLine(initialProductId ?? '', initialQty ?? 1)]);
   const [payMode, setPayMode] = useState<PayMode>('full');
   const [partAmount, setPartAmount] = useState(0);
   const [payTypeId, setPayTypeId] = useState(() => defaultPayType(payTypes));

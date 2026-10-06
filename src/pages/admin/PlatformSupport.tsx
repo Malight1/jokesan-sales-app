@@ -6,6 +6,7 @@ import { useQuery } from '../../lib/hooks';
 import { Loading, ErrorState } from '../../components/DataStates';
 import PlatformGate from '../../components/PlatformGate';
 import { ago } from '../../components/SupportConversation';
+import { isPriority } from '../../lib/features';
 import '../Support.scss';
 
 const statusBadge: Record<string, string> = {
@@ -101,6 +102,7 @@ function SupportPanel() {
                 <span className="sp-row-main">
                   <span className="sp-row-top">
                     <span className="sp-row-subject">{t.subject}</span>
+                    {isPriority(t.tenant_plan) && <span className="sp-priority">Priority</span>}
                   </span>
                   <span className="sp-row-sub">
                     {t.tenant_name}

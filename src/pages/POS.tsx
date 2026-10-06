@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine,
-  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle,
+  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle,
 } from 'lucide-react';
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
@@ -16,6 +16,7 @@ import { generateInvoicePdf } from '../lib/invoice';
 import { whatsappLink } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
 import { enqueueSale } from '../lib/offlineQueue';
+import { HeldSale, listHeld, holdSale, removeHeld, restoreLines, heldAgo, heldByLabel } from '../lib/heldSales';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct, decrementAt } from '../lib/branchStock';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -110,7 +111,7 @@ function NumericKeypad({ value, onChange }: { value: number; onChange: (n: numbe
 
 export default function POS() {
   const toast = useToast();
-  const { tenant } = useAuth();
+  const { tenant, profile } = useAuth();
   const { multi, myBranchId, myBranchName } = useBranches();
   const till = useTillGate();
   const goodsQ = useQuery<FinishedGood[]>(() => goodsApi.list(), [], { cacheKey: 'pos-goods' });
@@ -191,6 +192,19 @@ export default function POS() {
   const [finding, setFinding] = useState(false);
   const [findError, setFindError] = useState<string | null>(null);
   const [returnSale, setReturnSale] = useState<SalesOrder | null>(null);
+
+  // Held sales: a customer steps away to fetch money, the cashier parks
+  // their basket and serves the next person. Kept on this device, per
+  // business and branch (see lib/heldSales).
+  const [held, setHeld] = useState<HeldSale[]>(() => listHeld(tenant?.id, myBranchId));
+  const [showHeld, setShowHeld] = useState(false);
+  const [armDiscard, setArmDiscard] = useState<string | null>(null);
+  useEffect(() => { setHeld(listHeld(tenant?.id, myBranchId)); }, [tenant?.id, myBranchId]);
+  useEffect(() => {
+    if (!armDiscard) return;
+    const t = setTimeout(() => setArmDiscard(null), 3000);
+    return () => clearTimeout(t);
+  }, [armDiscard]);
 
   const goods = useMemo(() => goodsQ.data ?? [], [goodsQ.data]);
   // What THIS branch can sell. The company total on the product row would
@@ -364,6 +378,68 @@ export default function POS() {
     return n && c.company_store ? `${n} (${c.company_store})` : n || c.company_store || 'Customer';
   };
   const customerNameOrNull = (id: string | null) => id ? customerName(id) : 'Walk-in';
+
+  const snapshotCurrent = () => ({
+    customerId,
+    label: customerId ? customerName(customerId) : 'Walk-in',
+    orderDiscount,
+    total,
+    ...(profile?.id ? { heldBy: { id: profile.id, name: profile.full_name?.trim() || profile.email || 'A colleague' } } : {}),
+    lines: cart.map(l => ({
+      goodId: l.good.id, name: l.good.name, qty: l.qty, unitPrice: l.unitPrice,
+      manual: l.manual, discountReason: l.discountReason,
+    })),
+  });
+
+  const holdCurrent = () => {
+    if (!tenant?.id || cart.length === 0) return;
+    setHeld(holdSale(tenant.id, myBranchId, snapshotCurrent()));
+    clearSale();
+    toast.success('Sale held. Serve the next customer, then tap Held to pick it up again.');
+    searchRef.current?.focus();
+  };
+
+  // Resuming while another sale is on the till holds that one first, so
+  // nothing is ever lost by switching between customers.
+  const resumeHeld = (h: HeldSale) => {
+    if (!tenant?.id) return;
+    let list = removeHeld(tenant.id, myBranchId, h.id);
+    const swapped = cart.length > 0;
+    if (swapped) list = holdSale(tenant.id, myBranchId, snapshotCurrent());
+    setHeld(list);
+
+    const restored = restoreLines(h.lines, goods, avail);
+    const custId = h.customerId && custQ.data && !custQ.data.some(c => c.id === h.customerId) ? '' : h.customerId;
+    const lines = restored.lines.map(l => ({
+      ...l,
+      unitPrice: l.manual ? l.unitPrice : resolvePriceLocal(l.good.id, l.qty, custId || null, priceCtx, l.good.selling_price),
+    }));
+    const restoredSubtotal = lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
+    setCart(lines);
+    setCustomerId(custId);
+    setOrderDiscount(Math.min(h.orderDiscount, restoredSubtotal));
+    setShowOrderDiscount(h.orderDiscount > 0);
+    setTendered(0); setPayMode('full'); setPayTypeId(defaultPayId);
+    setShowKeypad(false); setConfirmClear(false); setShowHeld(false);
+
+    const changes = [
+      restored.dropped.length ? `No longer in stock: ${restored.dropped.join(', ')}.` : '',
+      restored.reduced.length ? `Cut to what's left: ${restored.reduced.join(', ')}.` : '',
+    ].filter(Boolean).join(' ');
+    if (lines.length === 0) toast.error(`Nothing from ${h.label}'s sale is in stock any more.`);
+    else if (changes) toast.error(`Resumed ${h.label}'s sale. ${changes}`);
+    else {
+      const by = heldByLabel(h, profile?.id);
+      toast.success(`Resumed ${h.label}'s sale${by && by !== 'you' ? `, held by ${by}` : ''}.${swapped ? ' The one you were on is now held.' : ''}`);
+    }
+  };
+
+  const discardHeld = (id: string) => {
+    if (!tenant?.id) return;
+    if (armDiscard !== id) { setArmDiscard(id); return; }
+    setHeld(removeHeld(tenant.id, myBranchId, id));
+    setArmDiscard(null);
+  };
   const productName = (id: string) => goods.find(g => g.id === id)?.name ?? 'Unknown product';
   const returnInvoiceNo = (s: SalesOrder) => s.doc_no || 'INV-' + s.id.slice(0, 8).toUpperCase();
 
@@ -421,7 +497,7 @@ export default function POS() {
   keysRef.current = {
     charge: () => checkout(),
     canCharge: !blocker && !checkingOut,
-    busy: !!(done || showScanner || showFindReturn || returnSale || discountLine || needsApproval),
+    busy: !!(done || showScanner || showFindReturn || returnSale || discountLine || needsApproval || showHeld),
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -560,6 +636,13 @@ export default function POS() {
             <button className="pos-tool" onClick={() => { setFindDocNo(''); setFindError(null); setShowFindReturn(true); }} title="Return an item" aria-label="Return an item">
               <Undo2 size={18} aria-hidden="true" /> <span>Returns</span>
             </button>
+            {held.length > 0 && (
+              <button className="pos-tool pos-tool--held" onClick={() => setShowHeld(true)}
+                      title="Sales on hold" aria-label={`Held sales, ${held.length}`}>
+                <PauseCircle size={18} aria-hidden="true" /> <span>Held</span>
+                <b className="pos-tool__count" aria-hidden="true">{held.length}</b>
+              </button>
+            )}
           </div>
 
           <p className="pos-hint" aria-live="polite">
@@ -617,6 +700,12 @@ export default function POS() {
             <h2>Current sale{multi ? <small> · {myBranchName}</small> : null}</h2>
             {itemCount > 0 && <span className="cart-count">{itemCount} item{itemCount === 1 ? '' : 's'}</span>}
             {cart.length > 0 && (
+              <button type="button" className="cart-hold" onClick={holdCurrent}
+                      title="Hold this sale and serve the next customer" aria-label="Hold this sale">
+                <PauseCircle size={15} aria-hidden="true" /><span>Hold</span>
+              </button>
+            )}
+            {cart.length > 0 && (
               <button
                 type="button"
                 className={`cart-clear${confirmClear ? ' is-armed' : ''}`}
@@ -633,6 +722,11 @@ export default function POS() {
               <div className="cart-empty">
                 <ShoppingCart size={30} aria-hidden="true" />
                 <p>Tap a product, or scan a barcode, to start a sale.</p>
+                {held.length > 0 && (
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setShowHeld(true)}>
+                    <PauseCircle size={14} aria-hidden="true" /> {held.length} sale{held.length === 1 ? '' : 's'} on hold
+                  </button>
+                )}
               </div>
             ) : cart.map(l => {
               const list = resolvedPrice(l.good, l.qty);
@@ -861,6 +955,58 @@ export default function POS() {
               <button type="button" className="btn-primary" disabled={finding || !findDocNo.trim()} onClick={findReturn}>
                 {finding ? 'Looking…' : 'Find sale'}
               </button>
+            </div>
+          </Modal>
+        )}
+
+        {showHeld && (
+          <Modal onClose={() => setShowHeld(false)} maxWidth={560}>
+            <div className="modal-header">
+              <h2>Held sales</h2>
+              <button className="close-btn" onClick={() => setShowHeld(false)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <div className="modal-body">
+              {held.length === 0 ? (
+                <p className="held-empty">Nothing on hold. Tap Hold on a sale to park it while you serve someone else.</p>
+              ) : (
+                <ul className="held-list">
+                  {held.map(h => {
+                    const items = h.lines.reduce((sum, l) => sum + l.qty, 0);
+                    const preview = h.lines.slice(0, 2).map(l => `${l.qty} × ${l.name}`).join(', ')
+                      + (h.lines.length > 2 ? `, +${h.lines.length - 2} more` : '');
+                    const armed = armDiscard === h.id;
+                    return (
+                      <li key={h.id} className="held-row">
+                        <div className="held-info">
+                          <div className="held-top">
+                            <strong>{h.label}</strong>
+                            <span>{heldAgo(h.heldAt)}{heldByLabel(h, profile?.id) ? ` · held by ${heldByLabel(h, profile?.id)}` : ''}</span>
+                          </div>
+                          <div className="held-items" title={preview}>{preview}</div>
+                        </div>
+                        <div className="held-total">
+                          {fmt(h.total)}
+                          <small>{items} item{items === 1 ? '' : 's'}</small>
+                        </div>
+                        <div className="held-actions">
+                          <button type="button" className="btn-primary btn-sm" onClick={() => resumeHeld(h)}>
+                            <PlayCircle size={15} aria-hidden="true" /> Resume
+                          </button>
+                          <button type="button" className={`held-discard${armed ? ' is-armed' : ''}`} onClick={() => discardHeld(h.id)}
+                                  aria-label={armed ? `Tap again to discard ${h.label}'s sale` : `Discard ${h.label}'s sale`}>
+                            <Trash2 size={14} aria-hidden="true" />{armed && <span>Discard?</span>}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <p className="held-note">
+                Held sales are saved on this device, shared by everyone who signs in on it. They don’t reserve stock, so an item
+                can sell out before you resume. A resumed sale counts in the shift of whoever charges it.
+                {cart.length > 0 && ' Resuming one holds the sale you’re on now.'}
+              </p>
             </div>
           </Modal>
         )}

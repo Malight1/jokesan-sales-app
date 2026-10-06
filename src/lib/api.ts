@@ -805,15 +805,14 @@ export const batches = {
 };
 
 // ============================================================
-// DOCUMENT NUMBERING (0021)
+// DOCUMENT NUMBERING (0021, 0051)
+// Every document is numbered CODE-TYPE-000123 (MTS-INV-000123). The code
+// belongs to one business forever, so no two businesses on ProfixBook can
+// ever issue the same number.
 // ============================================================
 export const docs = {
-  prefix: async (docType: string): Promise<string | null> => {
-    const r = await supabase.from('doc_sequences').select('prefix').eq('doc_type', docType).maybeSingle();
-    if (r.error) throw new Error(r.error.message);
-    return (r.data as { prefix: string } | null)?.prefix ?? null;
-  },
-  setPrefix: (docType: string, prefix: string) => rpcVoid('set_doc_prefix', { p_type: docType, p_prefix: prefix }),
+  code: () => rpc<string>('my_doc_code'),
+  setCode: (code: string) => rpc<string>('set_doc_code', { p_code: code }),
 };
 
 // ============================================================
@@ -997,7 +996,9 @@ export const transfers = {
 // feasibility, is deliberately not built yet — see HANDOVER.md.
 // ============================================================
 export interface ReorderSuggestion {
-  product_kind: 'material';
+  // 'finished_good' rows are a shop's own products (0050), bought
+  // through Quick Purchase rather than a purchase order.
+  product_kind: 'material' | 'finished_good';
   product_id: string; name: string; unit: string | null; branch_id: string;
   daily_usage: number; daily_stddev: number; on_hand: number; on_order: number;
   lead_time_days: number; supplier_id: string | null; supplier_name: string | null;
@@ -1230,6 +1231,8 @@ export interface SupportTicket {
   tenant_unread?: boolean;
   // Admin queue only (platform_tickets).
   awaiting_reply?: boolean; unread?: boolean;
+  // The business's plan (0050): Business and Enterprise get priority support.
+  tenant_plan?: string;
   created_by?: string | null; created_by_name?: string | null; created_by_email?: string | null;
 }
 // A read-only look inside one business, for diagnosing a support issue
@@ -1400,31 +1403,55 @@ export const support = {
 // BILLING (Paystack) — public key in the browser, secret key in the
 // Edge Function. After Popup success we verify server-side.
 // ============================================================
-// Priced to sit close to the two direct local competitors (Bumpa: ₦5,000 /
-// ₦10,000 / ₦25,000; Moniepoint Moniebook: ₦6,000 / ₦8,500) rather than
-// above them — Starter now matches Moniebook's entry tier exactly. See
-// LANDING_PAGE_PLAN.md's pricing note for the full comparison this was
-// benchmarked against.
+// Launch prices (0050). The database holds the same list in
+// plan_list_price() and is what a payment is actually checked against;
+// these numbers are for display. Founding customers (the first 60 to pay)
+// keep plan_founding_price() for life, so a later price rise never
+// touches them.
 //
-// The feature split below is real, not just marketing copy — matches
-// FEATURE_LEVEL in features.ts and feature_level() in migration 0037,
-// which is what actually enforces it (plan_user_limit()/plan_branch_limit()
-// enforce the seat/branch counts the same way). Every bullet here is
-// checked against the database, not invented — Smart Insights, debtor
-// reminders and bank-alert matching were dropped from Growth/Business
-// because they were never actually restricted (same mistake "POS mode"
-// and "Bank reconciliation" were before this pass, now fixed).
+// The feature split below is real, not just marketing copy: it matches
+// FEATURE_LEVEL in features.ts and feature_level() in the database, and
+// plan_user_limit()/plan_branch_limit()/plan_assistant_limit() enforce
+// the counts. Business is sold on scale (branches, staff, priority
+// support), with the rest as extras.
 export const PLANS = [
-  { id: 'starter',  name: 'Starter',  price: 6000,  users: 1,  blurb: 'Solo owner', features: ['Full ERP + invoices', 'Point of sale', 'WhatsApp receipts & reminders', 'CSV import', 'VAT', '1 user, 1 branch'] },
-  { id: 'growth',   name: 'Growth',   price: 15000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', '5 users, up to 3 branches'] },
-  { id: 'business', name: 'Business',  price: 30000, users: 15, blurb: 'Multi-branch', features: ['Everything in Growth', 'Automatic payment confirmation', 'Ask ProfixBook (AI assistant)', 'Custom fields & e-invoicing readiness', 'Unlimited branches', '15 users, priority support'] },
+  { id: 'starter',  name: 'Starter',  price: 5000,  users: 2,  blurb: 'Owner plus one staff', features: ['Sales, stock & invoices', 'Point of sale that works offline', 'WhatsApp receipts & reminders', 'Import from Excel or CSV', 'VAT', '2 users, 1 branch'] },
+  { id: 'growth',   name: 'Growth',   price: 12000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', 'Ask ProfixBook: 20 questions a month', '5 users, up to 3 branches'] },
+  { id: 'business', name: 'Business', price: 25000, users: 15, blurb: 'Multiple branches', features: ['Everything in Growth', 'Unlimited branches', '15 staff accounts', 'Priority WhatsApp support', 'Ask ProfixBook: 100 questions a month', 'Automatic payment confirmation', 'Custom fields & e-invoicing readiness'] },
 ] as const;
 
+export type BillingInterval = 'monthly' | 'annual';
+/** Annual billing: pay for 10 months, get 12. Mirrors confirm_subscription_payment(). */
+export const ANNUAL_MONTHS_CHARGED = 10;
+export const FOUNDING_SPOTS = 60;
+
+export interface MyBilling {
+  founding_number: number | null;
+  founding_since: string | null;
+  spots_left: number;
+  prices: Record<'starter' | 'growth' | 'business', number>;
+}
+
 export const billing = {
-  verify: async (reference: string, plan: string): Promise<{ success?: boolean; error?: string; expires?: string }> => {
-    const { data, error } = await supabase.functions.invoke('paystack-verify', { body: { reference, plan } });
-    if (error) return { error: error.message };
+  verify: async (reference: string, plan: string, interval: BillingInterval): Promise<{ success?: boolean; error?: string; expires?: string; founding_number?: number | null }> => {
+    const { data, error } = await supabase.functions.invoke('paystack-verify', { body: { reference, plan, interval } });
+    if (error) {
+      // supabase-js hides the function's own message behind a generic one.
+      try { const body = await (error as any).context?.json?.(); if (body?.error) return { error: body.error }; } catch { /* fall through */ }
+      return { error: error.message };
+    }
     return data;
+  },
+  mine: async (): Promise<MyBilling> => {
+    const { data, error } = await supabase.rpc('my_billing');
+    if (error) throw error;
+    return data as MyBilling;
+  },
+  /** Public, works logged out: how many founding-price spots remain. */
+  spotsLeft: async (): Promise<number | null> => {
+    const { data, error } = await supabase.rpc('founding_spots_left');
+    if (error) return null;
+    return data as number;
   },
 };
 

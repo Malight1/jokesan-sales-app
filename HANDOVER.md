@@ -282,6 +282,25 @@ The plan's own words for this function: "plain SQL, so the numbers can be checke
 - **Frontend:** a new `/assistant` page ("Ask StockFlow" in the nav, under Overview — visible to **every role**, unlike Audit or E-Invoicing, since the underlying tool calls already gate by role on their own), a plain chat UI showing questions left this month, and an upsell card below the Business plan. The Edge Function returns the full running `messages` array (whichever provider's own message format is currently in use) back to the frontend each turn, which just resends it as `history` on the next question — no conversation state is persisted server-side, and no new table was needed for chat history. This round-trip shape is why the frontend needed zero changes when the provider switched from Anthropic to Groq.
 - **Deliberately not built:** an MCP server so owners can ask from an external client directly (the plan's own explicit "later" note) and the model-routing split mentioned above.
 
+### Launch pricing and billing (0050)
+
+- **Prices live in the database.** `plan_list_price()` is 5,000 / 12,000 / 25,000 a month. `plan_founding_price()` is the same launch list, frozen: never edit it. `PLANS` in `src/lib/api.ts` is display only. To raise prices later, change `plan_list_price()` and `PLANS` together. Founding customers keep their price automatically.
+- **Founding customers:** the first 60 businesses to pay get `tenants.founding_number` 1..60, assigned under an advisory lock inside `confirm_subscription_payment()`. They are never unassigned. `founding_spots_left()` is public (granted to anon) for the live count on the landing page.
+- **Payments:** `paystack-verify` checks the caller's JWT, verifies with Paystack, then calls `confirm_subscription_payment()` with the **service role**. That function is the only way a payment becomes a plan. It checks the amount against the business's own price (annual = 10 × monthly for 12 months), refuses a reused reference (also a unique index on `subscriptions.paystack_sub_code`), and extends from the current expiry when an unexpired paid plan is renewed early. `activate_subscription()` (0010) is revoked from every API role because any admin could call it from the browser with any plan and any expiry. Platform admins still change plans by hand with `platform_change_plan()`.
+- **Plan limits:** Starter allows 2 users. The assistant is on Growth (`feature_level('assistant') = 2`). The monthly question allowance comes from `plan_assistant_limit()` (Growth 20, Business 100, Enterprise 500, trial 20). `tenants.assistant_monthly_limit` is now NULL unless a platform admin sets an override.
+- **Priority support:** `platform_tickets()` returns `tenant_plan` and sorts Business and Enterprise tickets first among those waiting on support. The inbox shows a Priority badge.
+- **Reorder suggestions for shops:** a retail tenant also gets `finished_good` rows, worked out from SALE movements and `fg_batches` stock. The UI shows a Buy link that opens Quick Purchase via `/purchases?restock=<id>&qty=<n>&supplier=<id>`. Purchase orders are still materials only.
+
+### Document numbers unique across businesses (0051)
+
+- Every document is numbered `CODE-TYPE-000123` (e.g. `MTS-INV-000124`, `MTS-CN-000003`). The code lives in `doc_codes`, one current row per business; a code is never released, so a business that changes code keeps its old one reserved and printed numbers can't be reissued to anyone else. Only `claim_doc_code` / `set_doc_code` write it (RLS, no write policies), deliberately not a `tenants` column, because Settings saves business details with a direct `tenants` update.
+- Codes come from the business name's initials (Mama Tolu Stores → MTS, a clash becomes MTS2) the first time a document is numbered, or when Settings asks via `my_doc_code()`. Admins can pick their own 2–6 character code in Settings → Business. `set_doc_prefix` (0021) still works for the old frontend and maps `JKS-INV-` to code `JKS`.
+- Already-issued numbers never change. A business that had branded its invoices `XYZ-INV-` kept `XYZ`, so its numbering carries on unchanged. Old plain `INV-000123` numbers stay per-business; everything new is globally unique, also enforced by guarded partial unique indexes on `sales_orders.doc_no` and `sale_returns.doc_no`.
+
+### Held sales at the till (frontend only)
+
+- `src/lib/heldSales.ts`: baskets parked in localStorage per business + branch, shared by everyone who signs in on that device, each tagged with who held it. Not a sale: no stock reserved, no invoice number. Resume re-checks stock and trims or drops lines; the resumed sale counts in the shift of whoever charges it.
+
 ### Known gaps deferred so far (ask before building unless told to just do it)
 
 - Quantity breaks beyond the first aren't editable in the Settings → Pricing UI (the database fully supports them — `price_list_items.min_qty`).

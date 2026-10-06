@@ -265,6 +265,7 @@ $warn-text: #b45309;
 
   .sp-row-main { min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
   .sp-row-top { @include flex(baseline, flex-start, 0.5rem); min-width: 0; }
+  .sp-priority { flex-shrink: 0; }
   .sp-row-subject {
     font-size: $font-size-sm;
     font-weight: 600;
@@ -467,4 +468,19 @@ $warn-text: #b45309;
   .sp-row { grid-template-columns: 10px minmax(0, 1fr); }
   .sp-row .sp-row-side { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; }
   .sp-composer-hint { display: none; }
+}
+
+// Business and Enterprise tickets: answered first (0050 sorts them up).
+.sp-priority {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border-radius: $radius-full;
+  background: $warning-light;
+  color: #92400e;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }

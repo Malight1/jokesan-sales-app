@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
-  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, branches as branchesApi, docs,
+  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
   customFieldDefs, compliance, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
   CustomFieldDef, CustomFieldEntity, EinvoiceReadiness,
@@ -276,35 +276,68 @@ function BranchesTab() {
 // ============================================================
 declare global { interface Window { PaystackPop?: any; } }
 
+// Paystack's inline script used to load in index.html on every page,
+// render-blocking the landing page for a library only this tab needs.
+// Now it loads the first time someone opens Billing.
+function loadPaystack(): Promise<void> {
+  if (window.PaystackPop) return Promise.resolve();
+  const existing = document.querySelector<HTMLScriptElement>('script[data-paystack]');
+  if (existing) return new Promise(res => existing.addEventListener('load', () => res(), { once: true }));
+  return new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = 'https://js.paystack.co/v1/inline.js';
+    el.async = true;
+    el.dataset.paystack = '1';
+    el.onload = () => res();
+    el.onerror = () => rej(new Error('Could not load Paystack'));
+    document.head.appendChild(el);
+  });
+}
+
 function BillingTab() {
   const toast = useToast();
   const { tenant, profile, refresh } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
+  const [period, setPeriod] = useState<BillingInterval>('monthly');
+  const mine = useQuery<MyBilling>(() => billing.mine(), [tenant?.plan, tenant?.plan_expires_at]);
+  useEffect(() => { loadPaystack().catch(() => {}); }, []);
 
+  const pubKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+  const testMode = !!pubKey?.startsWith('pk_test');
   const currentPlan = tenant?.plan ?? 'trial';
   const trialEnds = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null;
   const planExpires = tenant?.plan_expires_at ? new Date(tenant.plan_expires_at) : null;
   const trialDaysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86400000)) : 0;
+  const paidAndCurrent = currentPlan !== 'trial' && !!planExpires && planExpires.getTime() > Date.now();
+  const founding = mine.data?.founding_number ?? null;
+  const spotsLeft = mine.data?.spots_left ?? null;
 
-  const subscribe = (planId: string, price: number) => {
-    const pubKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+  // What this business pays per month: its founding price if it has one,
+  // otherwise today's list price. The server checks the same thing.
+  const monthly = (planId: keyof MyBilling['prices'], fallback: number) => mine.data?.prices?.[planId] ?? fallback;
+  const charge = (m: number) => period === 'annual' ? m * ANNUAL_MONTHS_CHARGED : m;
+
+  const subscribe = (planId: string, amount: number) => {
     if (!pubKey) { toast.error('Paystack key not configured.'); return; }
-    if (!window.PaystackPop) { toast.error('Payment library still loading — try again in a second.'); return; }
+    if (!window.PaystackPop) { loadPaystack().catch(() => {}); toast.error('Payment is still loading. Try again in a second.'); return; }
     if (!profile?.email) { toast.error('No email on your account.'); return; }
 
     setBusy(planId);
     const handler = window.PaystackPop.setup({
       key: pubKey,
       email: profile.email,
-      amount: price * 100, // kobo
+      amount: amount * 100, // kobo
       currency: 'NGN',
-      ref: `SF-${planId}-${Date.now()}`,
-      metadata: { plan: planId, tenant: tenant?.id },
+      ref: `PFB-${planId}-${period}-${Date.now()}`,
+      // tenant_id lets the server refuse a reference paid by someone else.
+      metadata: { plan: planId, interval: period, tenant_id: tenant?.id },
       callback: (resp: any) => {
-        // verify server-side, then activate
-        billing.verify(resp.reference, planId).then(r => {
-          if (r.success) { toast.success('Subscription active! 🎉'); refresh(); }
-          else toast.error(r.error ?? 'Verification failed.');
+        billing.verify(resp.reference, planId, period).then(r => {
+          if (r.success) {
+            toast.success(r.expires ? `Paid. Your plan now runs until ${new Date(r.expires).toLocaleDateString('en-GB')}.` : 'Subscription active.');
+            refresh();
+            mine.refetch();
+          } else toast.error(r.error ?? 'We could not confirm that payment. If you were charged, contact support with the reference.');
           setBusy(null);
         });
       },
@@ -321,23 +354,56 @@ function BillingTab() {
           <span className="badge-primary" style={{ fontSize: '0.9rem', padding: '0.35rem 0.8rem', textTransform: 'capitalize' }}>{currentPlan}</span>
           {currentPlan === 'trial' && trialEnds && (
             <span style={{ fontSize: '0.875rem', color: trialDaysLeft <= 3 ? '#dc2626' : '#64748b' }}>
-              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired — subscribe to keep using ProfixBook'}
+              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired. Choose a plan to keep using ProfixBook.'}
             </span>
           )}
           {planExpires && currentPlan !== 'trial' && (
-            <span style={{ fontSize: '0.875rem', color: '#64748b' }}>Renews {planExpires.toLocaleDateString('en-GB')}</span>
+            <span style={{ fontSize: '0.875rem', color: planExpires.getTime() < Date.now() ? '#dc2626' : '#64748b' }}>
+              {planExpires.getTime() < Date.now() ? 'Expired' : 'Paid until'} {planExpires.toLocaleDateString('en-GB')}
+            </span>
           )}
         </div>
+        {founding !== null ? (
+          <p className="billing-founding" style={{ marginTop: '0.75rem' }}>
+            <Star size={14} aria-hidden="true" /> Founding customer #{founding}. Your price is locked in for life.
+          </p>
+        ) : spotsLeft !== null && spotsLeft > 0 ? (
+          <p className="billing-founding" style={{ marginTop: '0.75rem' }}>
+            <Star size={14} aria-hidden="true" /> {spotsLeft} of {FOUNDING_SPOTS} founding spots left. Pay now and keep today's price for life, even when prices go up.
+          </p>
+        ) : null}
+        {paidAndCurrent && (
+          <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.6rem' }}>
+            Paying again before {planExpires!.toLocaleDateString('en-GB')} adds the time on to the end, so you never lose days you've paid for.
+          </p>
+        )}
+      </div>
+
+      <div role="group" aria-label="Billing period" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem' }}>
+        <button type="button" aria-pressed={period === 'monthly'} className={`${period === 'monthly' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => setPeriod('monthly')}>Monthly</button>
+        <button type="button" aria-pressed={period === 'annual'} className={`${period === 'annual' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => setPeriod('annual')}>Yearly</button>
+        <span style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600 }}>Pay yearly and get 2 months free</span>
       </div>
 
       <div className="grid-3" style={{ alignItems: 'stretch' }}>
         {PLANS.map(p => {
           const active = currentPlan === p.id;
+          const m = monthly(p.id, p.price);
+          const amount = charge(m);
           return (
             <div key={p.id} className="card" style={{ display: 'flex', flexDirection: 'column', border: active ? '2px solid #2563eb' : undefined }}>
-              <h3 style={{ marginBottom: '0.15rem' }}>{p.name}</h3>
+              <h3 style={{ marginBottom: '0.15rem' }}>{p.name}{active && <span className="badge-primary" style={{ marginLeft: 8, fontSize: '0.7rem' }}>Your plan</span>}</h3>
               <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{p.blurb}</p>
-              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#0f172a' }}>₦{p.price.toLocaleString()}<span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#94a3b8' }}>/mo</span></div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#0f172a' }}>
+                ₦{amount.toLocaleString()}<span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#94a3b8' }}>{period === 'annual' ? '/year' : '/mo'}</span>
+              </div>
+              {period === 'annual' && (
+                <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>
+                  12 months for the price of {ANNUAL_MONTHS_CHARGED}. You save ₦{(m * 12 - amount).toLocaleString()}.
+                </p>
+              )}
               <ul style={{ listStyle: 'none', margin: '0.9rem 0', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
                 {p.features.map(f => (
                   <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: '0.82rem', color: '#475569' }}>
@@ -345,9 +411,9 @@ function BillingTab() {
                   </li>
                 ))}
               </ul>
-              <button className={active ? 'btn-secondary' : 'btn-primary'} disabled={active || busy !== null}
-                onClick={() => subscribe(p.id, p.price)}>
-                {active ? 'Current Plan' : busy === p.id ? 'Opening…' : `Subscribe ₦${p.price.toLocaleString()}`}
+              <button className={active ? 'btn-secondary' : 'btn-primary'} disabled={busy !== null}
+                onClick={() => subscribe(p.id, amount)}>
+                {busy === p.id ? 'Opening…' : `${active ? 'Renew' : paidAndCurrent ? 'Switch to ' + p.name : 'Subscribe'} ₦${amount.toLocaleString()}`}
               </button>
             </div>
           );
@@ -355,7 +421,8 @@ function BillingTab() {
       </div>
 
       <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: '1rem', textAlign: 'center' }}>
-        Secure payment by Paystack. You can cancel anytime. Test mode — use card 4084 0840 8408 4081, any future date, CVV 408.
+        Secure payment by Paystack. ProfixBook never sees your card details.
+        {testMode && ' Test mode: use card 4084 0840 8408 4081, any future date, CVV 408.'}
       </p>
     </div>
   );
@@ -492,9 +559,10 @@ function BusinessTab() {
   const [reorderZ, setReorderZ] = useState(tenant?.reorder_z ?? 1.65);
   const [reorderCoverDays, setReorderCoverDays] = useState(tenant?.reorder_cover_days ?? 14);
   const [reorderDefaultLead, setReorderDefaultLead] = useState(tenant?.reorder_default_lead_days ?? 7);
-  const prefixQ = useQuery<string | null>(() => docs.prefix('INV').catch(() => null), []);
-  const [invPrefix, setInvPrefix] = useState<string | null>(null);
-  const shownPrefix = invPrefix ?? prefixQ.data ?? 'INV-';
+  // The business code at the front of every document number (0051).
+  const codeQ = useQuery<string | null>(() => docs.code().catch(() => null), []);
+  const [docCode, setDocCode] = useState<string | null>(null);
+  const shownCode = docCode ?? codeQ.data ?? '';
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -547,12 +615,13 @@ function BusinessTab() {
       ...(hasEinvoiceFields ? { rc_number: rcNumber.trim() || null, address: bizAddress.trim() || null } : {}),
     });
     if (res === null) { toast.error(saveBiz.error ?? 'Update failed.'); return; }
-    if (invPrefix !== null && invPrefix.trim() !== (prefixQ.data ?? 'INV-')) {
+    if (docCode !== null && docCode.trim() && docCode.trim() !== codeQ.data) {
       try {
-        await docs.setPrefix('INV', invPrefix.trim());
-        prefixQ.refetch();
+        await docs.setCode(docCode.trim());
+        setDocCode(null);
+        codeQ.refetch();
       } catch (err: any) {
-        toast.error(`Business saved, but the invoice prefix wasn't: ${err?.message ?? 'unknown error'}`);
+        toast.error(`Business saved, but the business code wasn't: ${err?.message ?? 'unknown error'}`);
         refresh();
         return;
       }
@@ -651,15 +720,16 @@ function BusinessTab() {
             </div>
           )}
 
-          {!prefixQ.loading && (
+          {!codeQ.loading && codeQ.data && (
             <>
               <hr className="divider" />
               <div className="form-group">
-                <label htmlFor="inv-prefix">Invoice number prefix</label>
-                <input id="inv-prefix" value={shownPrefix} maxLength={12}
-                       onChange={e => setInvPrefix(e.target.value.replace(/[^A-Za-z0-9/_-]/g, '').toUpperCase())} />
+                <label htmlFor="doc-code">Business code on invoices and receipts</label>
+                <input id="doc-code" value={shownCode} maxLength={6}
+                       onChange={e => setDocCode(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase())} />
                 <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>
-                  Next invoice looks like {shownPrefix || 'INV-'}000123. The count carries on; numbers already issued never change.
+                  Next invoice looks like {shownCode || codeQ.data}-INV-000123. This code is yours alone on ProfixBook, so no other
+                  business can ever issue the same number. 2 to 6 letters or numbers. Numbers already issued never change.
                 </small>
               </div>
             </>

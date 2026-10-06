@@ -31,9 +31,9 @@ const FEATURE_LEVEL: Record<Feature, number> = {
   deliveries: 2,
   purchase_orders: 2,
   smart_reorder: 2,
+  assistant: 2,
   auto_payments: 3,
   einvoicing: 3,
-  assistant: 3,
   custom_fields: 3,
 };
 
@@ -45,4 +45,9 @@ export function hasFeature(plan: string | null | undefined, feature: Feature): b
 export function planFor(feature: Feature): 'Starter' | 'Growth' | 'Business' {
   const lvl = FEATURE_LEVEL[feature];
   return lvl >= 3 ? 'Business' : lvl === 2 ? 'Growth' : 'Starter';
+}
+
+/** Plans whose support tickets are answered first (platform_tickets() sorts them up). */
+export function isPriority(plan: string | null | undefined): boolean {
+  return plan === 'business' || plan === 'enterprise';
 }

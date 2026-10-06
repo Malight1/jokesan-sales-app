@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
-const DEFAULT_TITLE = 'ProfixBook: Inventory and Sales for African SMEs';
-const DEFAULT_DESCRIPTION = "ProfixBook: know your real profit, track stock, and chase debtors on WhatsApp. Inventory and sales for African manufacturing SMEs.";
+const DEFAULT_TITLE = 'ProfixBook: Inventory and Sales for Nigerian Businesses';
+const DEFAULT_DESCRIPTION = "Point of sale, stock, purchases and debtors in one place. Know your real profit. Built for Nigerian shops, supermarkets, pharmacies and manufacturers.";
 
 const setMetaTag = (name: string, content: string, attr: 'name' | 'property' = 'name') => {
   let tag = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${name}"]`);

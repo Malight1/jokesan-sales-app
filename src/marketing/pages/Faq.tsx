@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom';
 import useMeta from '../useMeta';
 
 const FAQS = [
+  { q: "I run a shop and don't make anything. Is ProfixBook for me?",
+    a: "Yes. When you sign up, choose \"I buy and resell stock\" and you get a shop version: a till-first dashboard, buying stock straight from suppliers, and no raw-material or production screens. Supermarkets, pharmacies, provision stores, boutiques and phone shops all use it this way." },
+  { q: 'Can I use it on my phone?',
+    a: 'Yes. It runs in the browser on any phone, tablet or laptop, and the till is designed to work one-handed on a phone. You can add it to your home screen like an app.' },
+  { q: 'Can my staff use it without seeing my costs and profit?',
+    a: 'Yes. Cashiers, storekeepers and accountants each get their own login and only see what their role needs. Cashiers never see what you paid for stock or your profit. The plan you choose sets how many people can log in.' },
+  { q: 'I sell drugs, food or cosmetics. Does it handle expiry dates?',
+    a: 'Yes. Turn on expiry tracking for a product and every delivery records its expiry date. The till can sell the earliest-expiring stock first, expired stock can be blocked from sale, and you get a list of what is about to expire so you can move it in time.' },
   { q: 'Does ProfixBook work with no internet?',
     a: 'Yes. Point of sale queues sales while you are offline and syncs for real the moment you are back online. The server is still the final word, so a real stock conflict is flagged for you to resolve rather than silently guessed at.' },
   { q: 'Can each branch have its own stock?',
@@ -22,7 +30,7 @@ const FAQS = [
 export default function Faq() {
   useMeta(
     'FAQ, ProfixBook',
-    'Answers to what people ask before they start: offline support, multi-branch stock, e-invoicing readiness, and more.'
+    'Answers to what people ask before they start: shops and manufacturers, phones, staff access, expiry dates, offline selling, branches and e-invoicing.'
   );
   return (
     <div className="mkt-faq-page">

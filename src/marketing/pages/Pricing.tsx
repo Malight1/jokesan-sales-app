@@ -1,14 +1,15 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { CheckCircle2 } from 'lucide-react';
-import { PLANS } from '../../lib/api';
+import { PLANS, FOUNDING_SPOTS } from '../../lib/api';
 import useMeta from '../useMeta';
+import PlanCards from '../PlanCards';
 
 const money = (n: number) => '₦' + n.toLocaleString();
 
 const BILLING_FAQ = [
   { q: 'Do I need a card to start?', a: 'No. Every plan starts with a 14-day free trial. You only add a card when you choose a plan to continue on.' },
-  { q: 'Can I switch plans later?', a: 'Yes, upgrade or downgrade any time from Settings. You are never locked into the plan you started on.' },
+  { q: 'Can I switch plans later?', a: 'Yes, upgrade or downgrade any time from Settings. If you pay before your current plan runs out, the new time is added on to the end, so you never lose days you have paid for.' },
+  { q: 'Can I pay yearly?', a: 'Yes. Pay for 10 months and get 12. You can choose monthly or yearly each time you pay.' },
+  { q: 'What is the founding price?', a: `The first ${FOUNDING_SPOTS} businesses to subscribe keep the price they paid on day one for life, even when our prices go up later.` },
   { q: 'What happens to my data if I stop paying?', a: 'Your account moves to read-only rather than being deleted, so nothing you have recorded is lost while you decide.' },
   { q: 'Is Paystack safe to pay through?', a: 'Yes. ProfixBook never sees or stores your card details. Paystack handles the payment directly.' },
 ];
@@ -19,32 +20,18 @@ export default function Pricing() {
   const cheapest = PLANS[0];
   useMeta(
     'Pricing, ProfixBook',
-    `Starter, Growth and Business plans from ${money(cheapest.price)}/month. Every plan starts with a 14-day free trial, no card required.`
+    `Starter, Growth and Business plans from ${money(cheapest.price)}/month, or 2 months free when you pay yearly. Every plan starts with a 14-day free trial, no card required.`
   );
   return (
     <div className="mkt-pricing-page">
       <section className="mkt-section mkt-section--intro">
         <span className="mkt-eyebrow">Pricing</span>
-        <h1>One plan for a solo owner, one for a growing team, one for multiple branches.</h1>
-        <p>Every plan includes the full FIFO engine, WhatsApp invoices, and a 14-day free trial. No card required to start.</p>
+        <h1>One plan for a small shop, one for a growing team, one for multiple branches.</h1>
+        <p>Every plan includes the till, stock, purchases, WhatsApp invoices and real profit, for shops and manufacturers alike. Start with a 14-day free trial, no card required.</p>
       </section>
 
       <section className="mkt-section">
-        <div className="mkt-pricing">
-          {PLANS.map(p => (
-            <div className={`mkt-plan ${p.id === 'growth' ? 'mkt-plan--popular' : ''}`} key={p.id}>
-              {p.id === 'growth' && <span className="mkt-plan__badge">Most popular</span>}
-              <h3>{p.name}</h3>
-              <div className="mkt-plan__price">{money(p.price)}<small>/month</small></div>
-              <p className="mkt-plan__blurb">{p.blurb} &middot; {p.users} user{p.users > 1 ? 's' : ''}</p>
-              <ul>
-                {p.features.map(f => <li key={f}><CheckCircle2 size={14} /> {f}</li>)}
-              </ul>
-              <Link to="/login?signup=1" className="btn-primary">Start free trial</Link>
-              <p className="mkt-plan__trial">14-day free trial, no card required</p>
-            </div>
-          ))}
-        </div>
+        <PlanCards showTrialNote />
       </section>
 
       <section className="mkt-section mkt-section--alt">

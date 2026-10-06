@@ -1,38 +1,57 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, TrendingUp, Truck, ShieldCheck } from 'lucide-react';
+import { ArrowRight, TrendingUp, ShieldCheck, Users, Sparkles, Store, Factory } from 'lucide-react';
 import ScreenshotFrame from '../ScreenshotFrame';
+import Reveal from '../Reveal';
 import useMeta from '../useMeta';
 
-// Everything here is checked against HANDOVER.md's migration table, nothing
-// aspirational, only what's actually shipped. Two full rows with real
-// screenshots, one compact card group for the rest, and the AI assistant
-// gets its own spotlight, rather than six identical image-and-text rows
-// in a line.
-const ROWS = [
+// Everything here is a shipped feature, nothing aspirational. Four full
+// rows with real screenshots (selling, shops, makers, the owner's view),
+// a compact card group for the rest, and the assistant last.
+const ROWS: { eyebrow: string; title: string; img: string; w: number; h: number; alt: string; items: string[]; icon?: typeof Store }[] = [
   {
-    title: 'Sell & get paid',
-    img: '/screenshots/pos.png',
+    eyebrow: 'Every business',
+    title: 'Sell and get paid',
+    img: '/screenshots/pos.webp', w: 1800, h: 1125,
+    alt: 'Point of sale with a basket of items, cash, transfer or credit',
     items: [
-      'Point of sale that works with no signal, queues offline, syncs for real',
-      'WhatsApp invoices and debtor reminders, no app for the customer',
-      'Quotes and proforma invoices, one click to a real sale',
-      'Price lists, quantity breaks, manager-PIN discount limits',
-      'Paystack pay links: a transfer confirms itself',
-      'Partial returns, credit notes, store credit',
-      'Shifts and cash-up, X and Z reports, blind close counts',
-      'Delivery notes and waybills, generated from a sale',
+      'A till that keeps selling with no network, then syncs when it’s back',
+      'Tap, scan a barcode or search to add an item. Keyboard shortcuts for busy counters',
+      'Cash, transfer or credit, part payments, change worked out for you',
+      'WhatsApp invoices and polite debtor reminders, no app needed by the customer',
+      'Quotes and proforma invoices that turn into a sale in one click',
+      'Price lists, quantity breaks, and manager-PIN limits on discounts',
+      'Paystack pay links that confirm themselves when the money lands',
+      'Returns, credit notes, shifts and end-of-day cash-up',
     ],
   },
   {
-    title: 'Run inventory & production',
-    img: '/screenshots/batches.png',
+    eyebrow: 'For shops',
+    icon: Store,
+    title: 'Buy and resell, with your margin in view',
+    img: '/screenshots/buy-stock.webp', w: 1800, h: 1125,
+    alt: 'Buying stock: last price paid, selling price and margin shown for each item',
     items: [
-      'Branches with separate stock, transfers that preserve cost',
-      'Batch numbers, expiry dates, NAFDAC-shaped labels, FEFO picking, recall trace',
-      'Units of measure: buy by the carton, sell by the piece',
-      'Barcode labels, printed in one click',
-      'Reorder suggestions from real usage statistics, every number checkable',
+      'A shop dashboard built around the till: today’s takings, the week, and who owes you',
+      'Buy stock from suppliers and see last price paid, selling price and margin before you save',
+      'Paid in full, part paid or on credit, and what you still owe each supplier',
+      'What’s running out, what hasn’t sold in 30 days, and the cash tied up in stock',
+      'Expiry dates for drugs, food and cosmetics, with earliest-expiry-first selling when you switch it on',
+      'Return goods to a supplier from the exact delivery they came in',
+    ],
+  },
+  {
+    eyebrow: 'For manufacturers',
+    icon: Factory,
+    title: 'Run production and raw materials',
+    img: '/screenshots/storekeeper.webp', w: 1600, h: 922,
+    alt: 'Storekeeper view: raw materials and products to reorder or produce, batches expiring',
+    items: [
+      'Recipes turn raw materials into finished goods, costed layer by layer',
+      'Batch numbers, expiry dates, NAFDAC-ready labels and a full recall trace',
+      'Order raw materials ahead and receive them in parts as they arrive',
+      'Reorder suggestions worked out from real usage and supplier lead times',
+      'Buy by the carton or drum, use and sell by the piece or litre',
     ],
   },
 ];
@@ -40,56 +59,63 @@ const ROWS = [
 const CARDS = [
   {
     icon: TrendingUp,
-    title: 'Know your real profit',
+    title: 'Real profit',
     items: [
-      'FIFO costing, tracked layer by layer to the sale',
-      'Product profitability and discount reports, costed from the actual batch',
-      'A dashboard shaped differently for cashier, storekeeper and owner',
+      'FIFO costing: every sale costed from the exact stock it came from',
+      'Profit by product, discounts given, returns, and profit after expenses',
+      'Stock valued at what you paid, not just what you’ll sell it for',
     ],
   },
   {
-    icon: Truck,
-    title: 'Purchasing',
+    icon: Users,
+    title: 'Branches and staff',
     items: [
-      'Quick purchase for a supplier who delivers on the spot',
-      'Real purchase orders: nothing owed until goods arrive',
-      'Supplier returns, drawn from the exact batch',
-      'Retail Mode: buy finished stock straight from a supplier and sell it, no production step',
+      'Separate stock per branch, transfers that keep the original cost',
+      'Cashier, storekeeper and accountant logins that only see their own work',
+      'Each branch side by side on the owner’s dashboard',
     ],
   },
   {
     icon: ShieldCheck,
-    title: 'Compliance & control',
+    title: 'Compliance and control',
     items: [
-      'VAT built in, e-invoicing readiness score with a fix-it checklist',
-      'Full audit log: who changed what, and what it was before',
-      'Four real roles, enforced by the database itself',
+      'VAT built in, and an e-invoicing readiness check with a fix-it list',
+      'A full audit log: who changed what, and what it was before',
+      'Import products and opening stock from Excel or CSV',
     ],
   },
+];
+
+const ASK_EXAMPLES = [
+  'What’s running low, and what should I reorder first?',
+  'How is my profit this month compared to last?',
+  'Which products did I give the most discount on?',
+  'Who owes me the most right now?',
 ];
 
 export default function Product() {
   useMeta(
     'Product, ProfixBook',
-    'Every feature ProfixBook actually ships: FIFO costing, offline POS, batch and expiry tracking, purchase orders, compliance tools, and an AI assistant.'
+    'Everything ProfixBook does: offline point of sale, shop and manufacturer modes, FIFO profit, batch and expiry tracking, purchases, branches, and a built-in assistant.'
   );
   return (
     <div className="mkt-product">
       <section className="mkt-section mkt-section--intro">
         <span className="mkt-eyebrow">The full tour</span>
-        <h1>Everything ProfixBook actually does.</h1>
-        <p>No feature here is aspirational. This is what is live in the product today.</p>
+        <h1>Everything ProfixBook does, for shops and for makers.</h1>
+        <p>Nothing on this page is “coming soon”. It’s all in the product today.</p>
       </section>
 
       {ROWS.map((r, i) => (
         <section key={r.title} className={`mkt-product-row ${i % 2 === 1 ? 'mkt-product-row--reverse' : ''}`}>
-          <div className="mkt-product-row__copy">
+          <Reveal className="mkt-product-row__copy">
+            <span className="mkt-eyebrow">{r.icon && <r.icon size={14} aria-hidden="true" />} {r.eyebrow}</span>
             <h2>{r.title}</h2>
             <ul>
               {r.items.map(it => <li key={it}>{it}</li>)}
             </ul>
-          </div>
-          <ScreenshotFrame src={r.img} alt={r.title} />
+          </Reveal>
+          <ScreenshotFrame src={r.img} alt={r.alt} width={r.w} height={r.h} />
         </section>
       ))}
 
@@ -100,7 +126,7 @@ export default function Product() {
         <div className="mkt-cardgrid">
           {CARDS.map(c => (
             <div className="mkt-productcard" key={c.title}>
-              <div className="mkt-productcard__icon"><c.icon size={20} /></div>
+              <div className="mkt-productcard__icon"><c.icon size={20} aria-hidden="true" /></div>
               <h3>{c.title}</h3>
               <ul>
                 {c.items.map(it => <li key={it}>{it}</li>)}
@@ -110,22 +136,27 @@ export default function Product() {
         </div>
       </section>
 
-      <section className="mkt-product-row mkt-product-row--spotlight">
-        <div className="mkt-product-row__copy">
-          <span className="mkt-eyebrow">The spotlight</span>
-          <h2>Ask ProfixBook</h2>
-          <ul>
-            <li>A chat built into the app that checks today's real numbers, stock and reorder suggestions for the person asking</li>
-            <li>Scoped to exactly what the asking person's role can see. The database is still the only real security boundary</li>
+      <section className="mkt-section">
+        <div className="mkt-ask">
+          <div className="mkt-ask__copy">
+            <span className="mkt-eyebrow"><Sparkles size={14} aria-hidden="true" /> Ask ProfixBook</span>
+            <h2>Ask your business a question in plain English.</h2>
+            <p>A chat built into the app that answers from your real numbers. It only sees what the person asking is allowed to see, so a cashier can’t ask their way into your profit.</p>
+          </div>
+          <ul className="mkt-ask__examples" aria-label="Example questions">
+            {ASK_EXAMPLES.map(q => <li key={q}>{q}</li>)}
           </ul>
         </div>
-        <ScreenshotFrame src="/screenshots/assistant.png" alt="Ask ProfixBook" />
       </section>
 
       <section className="mkt-final-cta">
         <h2>See it on your own numbers.</h2>
-        <p>Start free for 14 days. No card required.</p>
-        <Link to="/login?signup=1" className="btn-primary btn-lg">Start free trial <ArrowRight size={16} /></Link>
+        <p>Free for 14 days. No card required.</p>
+        <div className="mkt-final-cta__actions">
+          <Link to="/login?signup=1&type=retail" className="btn-primary btn-lg"><Store size={18} aria-hidden="true" /> Start as a shop</Link>
+          <Link to="/login?signup=1&type=manufacturing" className="btn-secondary btn-lg mkt-final-cta__alt"><Factory size={18} aria-hidden="true" /> Start as a manufacturer</Link>
+        </div>
+        <p className="mkt-final-cta__more"><Link to="/pricing">Compare plans <ArrowRight size={14} /></Link></p>
       </section>
     </div>
   );

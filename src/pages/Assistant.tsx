@@ -4,6 +4,8 @@ import { assistant as assistantApi, AssistantQuota } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { planFor } from '../lib/features';
 import { Loading } from '../components/DataStates';
+import MiniMarkdown from '../lib/miniMarkdown';
+import './Assistant.scss';
 
 interface ChatMessage { role: 'user' | 'assistant'; text: string; }
 
@@ -34,7 +36,7 @@ export default function Assistant() {
       setHistory(res.messages ?? []);
       refetchQuota();
     } catch (err: any) {
-      setMessages(m => [...m, { role: 'assistant', text: err.message ?? 'Something went wrong — try again.' }]);
+      setMessages(m => [...m, { role: 'assistant', text: err.message ?? 'Something went wrong. Try again.' }]);
     } finally {
       setAsking(false);
     }
@@ -48,8 +50,8 @@ export default function Assistant() {
         <Sparkles size={26} color="#2563eb" style={{ marginBottom: '0.5rem' }} />
         <h3 style={{ marginBottom: '0.35rem' }}>Ask ProfixBook</h3>
         <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
-          Ask plain questions about your own sales, stock, profit and reorder needs — answered from your real
-          data, on the {planFor('assistant')} plan and above.
+          Ask plain questions about your own sales, stock, profit and reorder needs, answered from your real
+          data. Included on the {planFor('assistant')} plan (20 questions a month) and Business (100).
         </p>
       </div>
     );
@@ -62,7 +64,7 @@ export default function Assistant() {
       <div className="page-header">
         <div className="page-title">
           <h1>Ask ProfixBook</h1>
-          <p>{quota ? `${quota.remaining} of ${quota.limit} questions left this month` : ' '}</p>
+          <p>{quota ? `${quota.remaining} of ${quota.limit} questions left this month${outOfQuestions && quota.limit < 100 ? '. Business includes 100.' : ''}` : ' '}</p>
         </div>
       </div>
 
@@ -80,16 +82,12 @@ export default function Assistant() {
               "What discounts have I given this month?" or "What should I reorder?"
             </div>
           )}
-          {messages.map((m, i) => (
-            <div key={i} style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '80%', padding: '0.6rem 0.9rem', borderRadius: 12,
-              background: m.role === 'user' ? '#2563eb' : '#f1f5f9',
-              color: m.role === 'user' ? '#fff' : '#1e293b',
-              whiteSpace: 'pre-wrap', fontSize: '0.9rem', lineHeight: 1.45,
-            }}>
-              {m.text}
-            </div>
+          {/* Answers come back as Markdown (bold, lists, tables); rendering
+              them is what stops customers seeing literal ** and | pipes. */}
+          {messages.map((m, i) => m.role === 'user' ? (
+            <div key={i} className="ask-msg is-user">{m.text}</div>
+          ) : (
+            <MiniMarkdown key={i} text={m.text} className="ask-msg is-answer" />
           ))}
           {asking && (
             <div style={{ alignSelf: 'flex-start', color: '#94a3b8', fontSize: '0.85rem', padding: '0.6rem 0.9rem' }}>

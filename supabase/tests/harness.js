@@ -58,10 +58,11 @@ $$;
 
 do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$;
 do $$ begin create role anon nologin;          exception when duplicate_object then null; end $$;
-grant usage on schema public, auth, storage to authenticated, anon;
+do $$ begin create role service_role nologin bypassrls; exception when duplicate_object then null; end $$;
+grant usage on schema public, auth, storage to authenticated, anon, service_role;
 -- Supabase's default privileges: API roles get table access, RLS decides rows.
-alter default privileges in schema public grant all on tables    to authenticated, anon;
-alter default privileges in schema public grant all on sequences to authenticated, anon;
+alter default privileges in schema public grant all on tables    to authenticated, anon, service_role;
+alter default privileges in schema public grant all on sequences to authenticated, anon, service_role;
 grant select, insert, update, delete on storage.objects to authenticated;
 `;
 

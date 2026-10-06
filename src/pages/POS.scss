@@ -320,6 +320,134 @@ $warn-text: #b45309;
   &.is-armed { background: $danger; color: $white; }
 }
 
+// Park the basket while a customer steps away (lib/heldSales).
+.cart-hold {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 36px;
+  padding: 0 0.7rem;
+  border: 1.5px solid $gray-300;
+  border-radius: $radius;
+  background: $white;
+  color: $gray-700;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s $ease, color 0.15s $ease;
+
+  &:hover { border-color: $primary; color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; border-color: $primary; }
+}
+
+.pos-tool--held {
+  border-color: $warning;
+  color: #92400e;
+  background: $warning-light;
+  &:hover { border-color: #b45309; color: #78350f; }
+}
+
+.pos-tool__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: $radius-full;
+  background: #b45309;
+  color: $white;
+  font-size: $font-size-xs;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.cart-empty .btn-sm { margin-top: 0.75rem; }
+
+.held-empty { color: $gray-500; font-size: $font-size-sm; margin: 0; }
+
+.held-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.held-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "info total" "actions actions";
+  gap: 0.6rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+}
+
+.held-info { grid-area: info; min-width: 0; }
+
+.held-top {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  strong { font-size: $font-size-base; color: $gray-900; }
+  span { font-size: $font-size-xs; color: $gray-500; white-space: nowrap; }
+}
+
+.held-items {
+  margin-top: 0.2rem;
+  font-size: $font-size-sm;
+  color: $gray-600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.held-total {
+  grid-area: total;
+  text-align: right;
+  font-weight: 800;
+  color: $gray-900;
+  font-variant-numeric: tabular-nums;
+  small { display: block; font-size: $font-size-xs; font-weight: 600; color: $gray-500; }
+}
+
+.held-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.held-discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 36px;
+  height: 34px;
+  padding: 0 0.6rem;
+  border: none;
+  border-radius: $radius;
+  background: none;
+  color: $gray-500;
+  font-family: inherit;
+  font-size: $font-size-xs;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover { background: $danger-light; color: $danger; }
+  &.is-armed { background: $danger; color: $white; }
+}
+
+.held-note {
+  margin: 0.9rem 0 0;
+  font-size: $font-size-xs;
+  color: $gray-500;
+  line-height: 1.5;
+}
+
 .cart-close { display: none; }
 
 // Who wins the height: the items. The list takes what it needs (up to

@@ -39,7 +39,10 @@ export default function Login() {
   // Only the platform admin can change this after signup (0045) — get it
   // right here. Drives a genuinely different dashboard and nav, not a label
   // swap: see src/retail.
-  const [businessType, setBusinessType] = useState<'manufacturing' | 'retail'>('manufacturing');
+  // The landing page's "I run a shop" / "I make products" choice arrives as
+  // ?type=retail|manufacturing, so the visitor doesn't have to say it twice.
+  const [businessType, setBusinessType] = useState<'manufacturing' | 'retail'>(
+    searchParams.get('type') === 'retail' ? 'retail' : 'manufacturing');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -28,4 +28,4 @@ yarn-debug.log*
 yarn-error.log*
 
 # brag output
-/brag-output
+/brag-output*
