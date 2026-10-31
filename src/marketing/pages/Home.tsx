@@ -161,18 +161,13 @@ export default function Home() {
     <>
       <section className="mkt-hero">
         <div className="mkt-hero__copy">
-          <span className="mkt-hero__kicker">For shops, supermarkets, pharmacies and manufacturers</span>
           <h1>Know your real profit, whether you make it or resell it.</h1>
-          <p>Sales, stock, purchases and debtors in one place. A till that keeps working when the network drops, and a dashboard that shows what you actually made.</p>
+          <p>For shops, supermarkets, pharmacies and manufacturers. Sales, stock, purchases and debtors in one place, a till that keeps selling when the network drops, and a dashboard that shows what you actually made.</p>
           <div className="mkt-hero__cta">
             <Link to="/login?signup=1" className="btn-primary btn-lg">Start free trial <ArrowRight size={16} /></Link>
-            <a href="#who-its-for" className="btn-secondary btn-lg">See it for your business</a>
+            <a href="#who-its-for" className="mkt-hero__more">See it for your business</a>
           </div>
-          <ul className="mkt-hero__trust">
-            <li><CheckCircle2 size={15} aria-hidden="true" /> 14-day free trial</li>
-            <li><CheckCircle2 size={15} aria-hidden="true" /> No card needed</li>
-            <li><CheckCircle2 size={15} aria-hidden="true" /> Phone, tablet or laptop</li>
-          </ul>
+          <p className="mkt-hero__trust">14-day free trial. No card needed. Works on a phone, tablet or laptop.</p>
         </div>
         <div className="mkt-hero__visual">
           <ScreenshotFrame src="/screenshots/pos.webp" alt="ProfixBook point of sale with a customer's basket" width={1800} height={1125} eager className="mkt-hero__shot" />

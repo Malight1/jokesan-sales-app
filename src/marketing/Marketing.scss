@@ -12,6 +12,7 @@
 }
 
 .mkt {
+  ::selection { background: $primary-100; color: $gray-900; }
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -141,59 +142,44 @@
 
 // ---------------------------------------------------------------- hero
 .mkt-hero {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 4.5rem 1rem 3.5rem;
+  --hero-pad: max(1rem, calc((100vw - 1280px) / 2 + 1rem));
+  padding: 4.5rem var(--hero-pad) 4rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   gap: 3.5rem;
   align-items: center;
 
-  &__kicker {
-    display: inline-block;
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: $primary;
-    background: $primary-light;
-    border: 1px solid $primary-100;
-    padding: 0.35rem 0.75rem;
-    border-radius: $radius-full;
-    margin-bottom: 1.2rem;
-  }
   &__copy h1 {
     font-size: clamp(2.2rem, 4.4vw, 3.4rem);
-    line-height: 1.08;
+    line-height: 1.06;
     letter-spacing: -0.03em;
+    text-wrap: balance;
     margin: 0 0 1.2rem;
     color: $gray-900;
   }
-  &__copy > p { color: $gray-600; font-size: 1.12rem; line-height: 1.65; margin: 0 0 1.8rem; max-width: 34rem; }
-  &__cta { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
-  &__cta .btn-primary, &__cta .btn-secondary { display: inline-flex; align-items: center; gap: 0.45rem; }
-  &__trust {
-    list-style: none; padding: 0; margin: 0;
-    display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem;
-    li { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; color: $gray-500; }
-    svg { color: $success; }
+  &__copy > p:not(.mkt-hero__trust) { color: $gray-600; font-size: 1.1rem; line-height: 1.65; margin: 0 0 2rem; max-width: 32rem; text-wrap: pretty; }
+  &__cta { display: flex; align-items: center; gap: 1.6rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  &__cta .btn-primary { display: inline-flex; align-items: center; gap: 0.45rem; }
+  &__more {
+    color: $gray-800;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: $gray-300;
+    text-underline-offset: 0.3em;
+    text-decoration-thickness: 1px;
+    transition: text-decoration-color 0.2s $ease, color 0.2s $ease;
+    &:hover { color: $primary; text-decoration-color: currentColor; }
   }
+  &__trust { margin: 0; font-size: 0.875rem; color: $gray-500; }
 
   // Desktop till with the phone till overlapping its corner: the same
   // product on both screens a shop owner actually has.
   &__visual {
     position: relative;
-    isolation: isolate; // keeps the glow below at z-index -1 inside this box
     padding: 0 0 2.5rem 3.5rem;
-
-    &::before {
-      content: '';
-      position: absolute;
-      inset: -6% -8% 0 4%;
-      background: radial-gradient(60% 60% at 60% 45%, rgba(37, 99, 235, 0.16), transparent 70%);
-      z-index: -1;
-    }
   }
-  &__shot { position: relative; }
-  &__phone {
+  &__shot { position: relative; box-shadow: $shadow-xl; }
+  &__phone.phone-frame {
     position: absolute;
     left: 0;
     bottom: 0;
@@ -207,19 +193,19 @@
   &__copy > *:nth-child(2) { animation-delay: 0.1s; }
   &__copy > *:nth-child(3) { animation-delay: 0.18s; }
   &__copy > *:nth-child(4) { animation-delay: 0.26s; }
-  &__copy > *:nth-child(5) { animation-delay: 0.34s; }
   &__visual { animation: mkt-hero-in 0.8s $ease 0.25s both; }
 
   @media (max-width: 960px) {
     grid-template-columns: minmax(0, 1fr);
     padding-top: 2.5rem;
+    padding-bottom: 2rem;
     gap: 2.5rem;
   }
   // On a phone, show the phone till on its own: it's what they'll use.
   @media (max-width: 600px) {
-    &__visual { padding: 0; display: flex; justify-content: center; }
+    &__visual { padding: 0 0 2.5rem; display: flex; justify-content: center; }
     &__shot { display: none; }
-    &__phone { position: static; width: 62%; max-width: 260px; }
+    &__phone.phone-frame { position: relative; width: 62%; max-width: 260px; }
   }
 }
 
@@ -230,7 +216,6 @@
 
 // ---------------------------------------------------------------- proof strip
 .mkt-proof {
-  border-top: 1px solid $gray-200;
   border-bottom: 1px solid $gray-200;
   background: $gray-50;
 
@@ -245,7 +230,17 @@
     gap: 0.6rem 2rem;
   }
   li { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.9rem; font-weight: 600; color: $gray-700; }
-  svg { color: $primary; }
+  svg { color: $primary; flex-shrink: 0; }
+
+  // Phone: a plain ruled list, one claim per line, nothing orphaned.
+  @media (max-width: 600px) {
+    ul { display: block; padding: 0.4rem 1rem; }
+    li {
+      display: flex;
+      padding: 0.7rem 0;
+      & + li { border-top: 1px solid $gray-200; }
+    }
+  }
 }
 
 // ---------------------------------------------------------------- screenshot frame
@@ -269,13 +264,84 @@
 }
 
 .phone-frame {
-  border: 7px solid $gray-900;
-  border-radius: 26px;
-  overflow: hidden;
-  background: $gray-900;
-  box-shadow: $shadow-xl;
+  position: relative;
+  container-type: inline-size;
+  aspect-ratio: 1 / 2.04;
+  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.35));
 
-  img { display: block; width: 100%; height: auto; border-radius: 19px; }
+  &__body {
+    position: absolute;
+    inset: 0;
+    padding: 2.6cqw;
+    border-radius: 15.5cqw;
+    background: #0c0e13;
+    box-shadow: 0 0 0 0.5cqw #4a5060, inset 0 0 0 0.35cqw #20242d;
+  }
+  &__screen {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 12.8cqw;
+    background: #f9fbfc;
+  }
+  &__status {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 14cqw;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.6cqw 8cqw 0;
+    z-index: 2;
+    color: #0f172a;
+    background: #f9fbfc;
+  }
+  &__time { font-size: 4.4cqw; font-weight: 700; letter-spacing: -0.01em; }
+  &__icons { width: 16cqw; height: auto; }
+  &__island {
+    position: absolute;
+    left: 50%;
+    top: 3.1cqw;
+    width: 29cqw;
+    height: 8.6cqw;
+    transform: translateX(-50%);
+    border-radius: 99px;
+    background: #000;
+  }
+  &__screen img {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 14cqw;
+  }
+  // Content scrolls under the home indicator, so it fades out there.
+  &__screen::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 14cqw;
+    background: linear-gradient(to bottom, rgba(249, 251, 252, 0), #f9fbfc 70%);
+  }
+  &__home {
+    position: absolute;
+    left: 50%;
+    bottom: 2.2cqw;
+    width: 33cqw;
+    height: 1.3cqw;
+    transform: translateX(-50%);
+    border-radius: 99px;
+    background: #0f172a;
+    z-index: 3;
+  }
+  &__btn {
+    position: absolute;
+    width: 1cqw;
+    background: #4a5060;
+    &--action { left: -0.6cqw; top: 19%; height: 3.5%; border-radius: 1cqw 0 0 1cqw; }
+    &--up { left: -0.6cqw; top: 26%; height: 6.5%; border-radius: 1cqw 0 0 1cqw; }
+    &--down { left: -0.6cqw; top: 34.5%; height: 6.5%; border-radius: 1cqw 0 0 1cqw; }
+    &--power { right: -0.6cqw; top: 29%; height: 10%; border-radius: 0 1cqw 1cqw 0; }
+  }
 }
 
 // ---------------------------------------------------------------- audience switcher
