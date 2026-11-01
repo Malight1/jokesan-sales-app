@@ -64,7 +64,7 @@ function TenantDetailPanel() {
   const [extending, setExtending] = useState(false);
   const [extendDays, setExtendDays] = useState(7);
   const [changingPlan, setChangingPlan] = useState(false);
-  const [newPlan, setNewPlan] = useState('starter');
+  const [newPlan, setNewPlan] = useState('growth');
   const [newExpiry, setNewExpiry] = useState('');
   const [changingBizType, setChangingBizType] = useState(false);
   const [newBizType, setNewBizType] = useState<'retail' | 'manufacturing'>('manufacturing');

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine,
-  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle,
+  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle, Printer,
 } from 'lucide-react';
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
@@ -13,6 +13,7 @@ import { useAuth } from '../lib/AuthContext';
 import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf } from '../lib/invoice';
+import { printReceipt, getReceiptWidth, setReceiptWidth, ReceiptWidth } from '../lib/receipt';
 import { whatsappLink } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
 import { enqueueSale } from '../lib/offlineQueue';
@@ -119,7 +120,7 @@ export default function POS() {
     { cacheKey: `pos-levels-${myBranchId ?? 'default'}` });
   const custQ = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'pos-customers' });
   const payQ = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
-  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const listsQ = useQuery<PriceList[]>(() => tiersEnabled ? pricing.lists() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-price-lists' });
   const priceItemsQ = useQuery<PriceListItem[]>(() => tiersEnabled ? pricing.allItems() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-price-items' });
   const custTypesQ = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-cust-types' });
@@ -143,6 +144,7 @@ export default function POS() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);          // the cart sheet, on phones only
   const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
+  const [paperWidth, setPaperWidth] = useState<ReceiptWidth>(getReceiptWidth);
   const [done, setDone] = useState<{
     total: number; paid: number; subtotal: number; vat: number; vatRate: number; change: number;
     offline?: boolean; docNo?: string | null;
@@ -563,6 +565,14 @@ export default function POS() {
         bankDetails: balance > 0 ? tenant?.bank_details : null,
       });
     };
+    const print = () => printReceipt({
+      companyName: tenant?.name ?? 'My Business', companyAddress: tenant?.address, tin: tenant?.tin,
+      invoiceNo: invNo, date: new Date(),
+      customerName: customerId ? customerName(customerId) : null,
+      items: receiptItems, subtotal: done.subtotal, vatAmount: done.vat, vatRate: done.vatRate,
+      total: done.total, paid: done.paid, change: done.change, balance, offline: done.offline,
+    }, paperWidth);
+    const changeWidth = (w: ReceiptWidth) => { setReceiptWidth(w); setPaperWidth(w); };
     return (
       <div className="pos-success">
         <div className={`ps-card${done.offline ? ' is-offline' : ''}`}>
@@ -586,8 +596,16 @@ export default function POS() {
           </dl>
 
           <div className="ps-actions">
+            <button className="btn-secondary" onClick={print}><Printer size={16} /> Print receipt</button>
             <button className="btn-secondary" onClick={dl}><FileText size={16} /> Invoice PDF</button>
             <button className="btn-secondary" onClick={sendWa}><MessageCircle size={16} /> WhatsApp receipt</button>
+          </div>
+          <div className="ps-paper" role="group" aria-label="Receipt paper width">
+            <span>Receipt paper</span>
+            {([58, 80] as ReceiptWidth[]).map(w => (
+              <button key={w} type="button" aria-pressed={paperWidth === w}
+                      className={paperWidth === w ? 'is-on' : ''} onClick={() => changeWidth(w)}>{w}mm</button>
+            ))}
           </div>
           <button className="btn-primary ps-next" autoFocus onClick={() => { setDone(null); clearSale(); }}>
             New sale <kbd>Enter</kbd>

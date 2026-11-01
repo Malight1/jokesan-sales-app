@@ -39,7 +39,7 @@ export default function Privacy() {
         <p>Your data is scoped to your own business by the database itself, not just by the app's screens. Even a direct request for another business's data is refused at the database level. Sensitive secrets, like a payment provider key you connect, are stored in a vault your own account can't read back, not as plain text.</p>
 
         <h2>5. What happens if you stop paying</h2>
-        <p>Your account moves to read-only. Nothing is deleted. You can export your data or choose a plan to start recording again at any time.</p>
+        <p>Your account moves to the Free plan. Nothing is deleted. You can export your data at any time, and choose a paid plan whenever you need more.</p>
 
         <h2>6. Your rights</h2>
         <p>Under Nigeria's Data Protection Act, you can ask what personal data we hold about you, ask us to correct it, or ask us to delete your account and its data entirely. Contact us to make any of these requests.</p>

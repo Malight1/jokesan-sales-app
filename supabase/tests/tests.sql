@@ -3176,8 +3176,22 @@ begin
   select tenant_id into v_tenant from profiles where id = v_owner;
 
   -- ---- A: the price list ----
-  perform t_rec('list prices are 5,000 / 12,000 / 25,000',
-    plan_list_price('starter') = 5000 and plan_list_price('growth') = 12000 and plan_list_price('business') = 25000);
+  perform t_rec('list prices are 5,500 / 16,500 and Starter is gone',
+    plan_list_price('starter') is null and plan_list_price('growth') = 5500 and plan_list_price('business') = 16500);
+  perform t_rec('Free is the owner only, 1 branch, 50 products, 100 sales a month (0052)',
+    plan_user_limit('free') = 1 and plan_branch_limit('free') = 1
+    and plan_product_limit('free') = 50 and plan_monthly_sales_limit('free') = 100
+    and plan_product_limit('growth') is null and plan_monthly_sales_limit('growth') is null);
+  perform t_rec('a new business is on its trial, not Free',
+    effective_plan(v_tenant) = 'trial');
+  update tenants set trial_ends_at = now() - interval '1 day' where id = v_tenant;
+  perform t_rec('an ended trial is Free, not read-only for the owner',
+    effective_plan(v_tenant) = 'free');
+  perform t_as(v_owner);
+  perform t_rec('...and the owner can still write', public.tenant_is_live());
+  perform t_rec('...but loses Growth features', not public.tenant_has_feature('batch_tracking'));
+  perform t_su();
+  update tenants set trial_ends_at = now() + interval '14 days' where id = v_tenant;
   perform t_rec('a new business has no assistant override, so its plan decides',
     (select assistant_monthly_limit is null from tenants where id = v_tenant));
 
@@ -3202,16 +3216,16 @@ begin
   -- ---- C: confirming payments (as the Edge Function) ----
   execute 'set role service_role';
   perform t_err('paying less than the plan price is refused',
-    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-LOW', 1199900),
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-LOW', 549900),
     'less than');
-  select public.confirm_subscription_payment(v_tenant, 'growth', 'monthly', 'PSK-1', 1200000) into v_res;
+  select public.confirm_subscription_payment(v_tenant, 'growth', 'monthly', 'PSK-1', 550000) into v_res;
   execute 'reset role';
   perform t_rec('a full monthly payment moves the business to Growth for a month from today',
     (select plan::text = 'growth' and is_active and plan_expires_at::date = (now() + interval '1 month')::date
        from tenants where id = v_tenant));
   perform t_rec('the payment is recorded with its reference and interval',
     exists (select 1 from subscriptions where tenant_id = v_tenant and paystack_sub_code = 'PSK-1'
-              and interval = 'monthly' and amount = 12000));
+              and interval = 'monthly' and amount = 5500));
   perform t_rec('the first payer becomes a founding customer',
     (v_res->>'founding_number') is not null
     and (select founding_number is not null and founding_since is not null from tenants where id = v_tenant));
@@ -3220,14 +3234,14 @@ begin
   select plan_expires_at into v_exp from tenants where id = v_tenant;
   execute 'set role service_role';
   perform t_err('the same Paystack reference cannot be used twice',
-    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-1', 1200000),
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'monthly', 'PSK-1', 550000),
     'already been used');
   perform t_err('an annual payment at the monthly price is refused',
-    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'annual', 'PSK-A0', 1200000),
+    format('select public.confirm_subscription_payment(%L::uuid, %L, %L, %L, %s)', v_tenant, 'growth', 'annual', 'PSK-A0', 550000),
     'less than');
   -- Annual = 10 months' price for 12 months, added on top of the month
   -- already paid for rather than starting again from today.
-  perform public.confirm_subscription_payment(v_tenant, 'growth', 'annual', 'PSK-A1', 12000000);
+  perform public.confirm_subscription_payment(v_tenant, 'growth', 'annual', 'PSK-A1', 5500000);
   execute 'reset role';
   perform t_rec('paying annually early adds 12 months to the current expiry, not to today',
     (select plan_expires_at = v_exp + interval '12 months' from tenants where id = v_tenant));
@@ -3238,7 +3252,7 @@ begin
   select public.my_billing() into v_res;
   perform t_su();
   perform t_rec('my_billing reports the founding number and this business''s own prices',
-    (v_res->>'founding_number') is not null and (v_res->'prices'->>'business')::numeric = 25000);
+    (v_res->>'founding_number') is not null and (v_res->'prices'->>'business')::numeric = 16500);
 
   -- ---- D: assistant allowance follows the plan ----
   perform t_as(v_owner);

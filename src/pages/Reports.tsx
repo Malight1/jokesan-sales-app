@@ -8,6 +8,7 @@ import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
 import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
+import { useToast } from '../lib/ToastContext';
 import { whatsappLink } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column } from '../components/DataTable';
@@ -32,8 +33,9 @@ const ALL_TABS: { id: Tab; label: string }[] = [
 
 export default function Reports() {
   const { tenant } = useAuth();
+  const toast = useToast();
   const retail = isRetail(tenant);
-  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const TABS = ALL_TABS.filter(t => t.id !== 'discounts' || tiersEnabled);
   const [tab, setTab] = useState<Tab>('pnl');
   const [from, setFrom] = useState('');
@@ -167,6 +169,10 @@ export default function Reports() {
   const productProfitTotal = productProfit.reduce((sum, r) => sum + Number(r.profit || 0), 0);
 
   const remindDebtor = async (d: { id: string | null; name: string; phone: string | null; balance: number }) => {
+    if (!hasFeature(tenant, 'debt_reminders')) {
+      toast.info('WhatsApp debt reminders are on the Growth plan and above. Upgrade under Settings → Billing.');
+      return;
+    }
     const lines = [
       `Dear ${d.name},`,
       ``,

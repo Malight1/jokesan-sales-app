@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import ScreenshotFrame, { PhoneFrame } from '../ScreenshotFrame';
 import PlanCards from '../PlanCards';
+import PlanGuide from '../PlanGuide';
 import Reveal from '../Reveal';
 import useMeta from '../useMeta';
 
@@ -80,7 +81,7 @@ const STEPS = [
 const MINI_FAQ = [
   { q: 'Does it work on my phone?', a: 'Yes. ProfixBook runs in the browser on any phone, tablet or laptop, and you can add it to your home screen like an app. Nothing to install.' },
   { q: 'Can my staff use it without seeing my profit?', a: 'Yes. Cashiers, storekeepers and accountants each get their own login and only see what their role needs. Costs and profit stay with you.' },
-  { q: 'What happens after the 14-day trial?', a: 'Choose a plan to keep going. If you don’t, your account becomes read-only. Nothing is deleted.' },
+  { q: 'What happens after the 14-day trial?', a: 'Choose a plan to keep going. If you don’t, you move to the Free plan: the owner keeps selling, with up to 50 products and 100 sales a month. Nothing is deleted.' },
 ];
 
 function AudienceSwitcher() {
@@ -239,6 +240,7 @@ export default function Home() {
           <h2>Simple plans. Start free, upgrade when you grow.</h2>
         </Reveal>
         <PlanCards />
+        <div className="mkt-home-fit"><PlanGuide compact /></div>
         <p className="mkt-pricing__note">Every plan starts with a 14-day free trial. Pay monthly or yearly. <Link to="/pricing">Compare plans <ArrowRight size={14} /></Link></p>
       </section>
 

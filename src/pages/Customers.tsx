@@ -20,7 +20,7 @@ const emptyForm = {
 export default function Customers() {
   const toast = useToast();
   const { tenant } = useAuth();
-  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'customers-list' });
   const { data: types } = useQuery(() => lookups.customerTypes(), []);
   const { data: priceLists } = useQuery<PriceList[]>(() => pricing.lists().catch(() => []), []);

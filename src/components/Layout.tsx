@@ -220,7 +220,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     ?? 'ProfixBook';
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  const acct = accountState(tenant);
+  const acct = accountState(tenant, role);
   // A platform admin's own account still has a tenant (every signup gets
   // one, even one created purely to be an admin) — but while they're
   // actually inside /platform/*, that tenant's own nav (POS, Production,
@@ -462,6 +462,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   Billing
                 </Link>
               )}
+            </div>
+          )}
+          {acct.live && acct.notice && canAccess(role, '/settings') && location.pathname !== '/settings' && (
+            <div className="alert alert-info" style={{ alignItems: 'flex-start', gap: 10, marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.85rem' }}>{acct.notice}</div>
+              <Link className="btn-primary btn-sm" to="/settings" style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                See plans
+              </Link>
             </div>
           )}
           {children}

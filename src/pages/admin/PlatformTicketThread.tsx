@@ -39,8 +39,8 @@ const QUICK_REPLIES: { label: string; text: string }[] = [
 
 const accessText: Record<string, string> = {
   suspended: 'This business is suspended. Nobody on the team can sign in.',
-  trial_expired: 'Their trial has ended, so the app is read-only. They can look but not save.',
-  plan_expired: 'Their plan has expired, so the app is read-only. They can look but not save.',
+  trial_expired: 'Their trial has ended, so they are on Free: only the owner can save, within Free’s limits.',
+  plan_expired: 'Their plan has expired, so they are on Free: only the owner can save, within Free’s limits.',
 };
 
 export default function PlatformTicketThread() {

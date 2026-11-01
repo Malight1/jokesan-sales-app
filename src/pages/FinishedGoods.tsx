@@ -43,7 +43,7 @@ export default function FinishedGoods() {
   const retail = isRetail(tenant);
   const isAdmin = profile?.role === 'admin';
   const canEditStock = isAdmin || profile?.role === 'inventory';
-  const tracking = hasFeature(tenant?.plan, 'batch_tracking');
+  const tracking = hasFeature(tenant, 'batch_tracking');
   const { multi, active: activeBranches, myBranchId, myBranchName } = useBranches();
   // A multi-branch company that has only opened its first branch would
   // otherwise get two identical quantity columns.

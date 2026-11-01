@@ -4,6 +4,7 @@ import { DashboardSummary, customers as customersApi } from '../../lib/api';
 import { naira, count } from '../../pages/Dashboard';
 import { useMutation } from '../../lib/hooks';
 import { useAuth } from '../../lib/AuthContext';
+import { hasFeature } from '../../lib/features';
 import { whatsappLink } from '../../lib/whatsapp';
 import { useToast } from '../../lib/ToastContext';
 
@@ -19,6 +20,10 @@ export default function DebtorsPanel({ d, onReminded }: { d: DashboardSummary; o
   const outstanding = d.outstanding ?? 0;
 
   const sendReminder = async (r: { id: string; name: string; phone: string | null; balance: number }) => {
+    if (!hasFeature(tenant, 'debt_reminders')) {
+      toast.info('WhatsApp debt reminders are on the Growth plan and above. Upgrade under Settings → Billing.');
+      return;
+    }
     const lines = [
       `Dear ${r.name},`, '',
       `This is a friendly payment reminder from *${tenant?.name ?? 'us'}*.`,

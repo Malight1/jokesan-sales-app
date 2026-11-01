@@ -1,18 +1,22 @@
 import { Tenant } from './AuthContext';
+import { effectivePlan } from './features';
 
-// Mirrors public.tenant_is_live() from migration 0017. The database is the
+// Mirrors public.tenant_is_live() from migration 0052. The database is the
 // authority — this exists so the UI can explain what's happening instead of
 // letting every save fail with a raw Postgres error.
 //
-// Suspended and expired accounts are deliberately READ-ONLY rather than
-// locked out: people can still see and export their own records, they just
-// can't add more. Locking a business out of its own books over a billing
-// lapse is how you earn a chargeback.
+// A suspended account is READ-ONLY rather than locked out: people can still
+// see and export their own records, they just can't add more. Locking a
+// business out of its own books is how you earn a chargeback.
+//
+// An ended trial or a lapsed plan is not read-only any more: the business
+// drops to Free and the owner keeps selling. Free is owner-only, so other
+// staff can look but not save until the business upgrades.
 export type AccountState =
-  | { live: true }
-  | { live: false; reason: 'suspended' | 'trial_expired' | 'plan_expired'; message: string };
+  | { live: true; notice?: string }
+  | { live: false; reason: 'suspended' | 'staff_on_free'; message: string };
 
-export function accountState(tenant: Tenant | null): AccountState {
+export function accountState(tenant: Tenant | null, role?: string | null): AccountState {
   if (!tenant) return { live: true }; // nothing loaded yet — don't cry wolf
 
   if (tenant.is_active === false) {
@@ -23,22 +27,18 @@ export function accountState(tenant: Tenant | null): AccountState {
     };
   }
 
-  const now = Date.now();
-  if (tenant.plan === 'trial' && tenant.trial_ends_at && new Date(tenant.trial_ends_at).getTime() <= now) {
+  if (effectivePlan(tenant) !== 'free') return { live: true };
+
+  if (role && role !== 'admin') {
     return {
       live: false,
-      reason: 'trial_expired',
-      message: 'Your free trial has ended. Your data is safe and still readable — choose a plan to start saving again.',
+      reason: 'staff_on_free',
+      message: 'This business is on the Free plan, which is for the owner only. You can look but not save until the owner upgrades.',
     };
   }
-
-  if (tenant.plan_expires_at && new Date(tenant.plan_expires_at).getTime() <= now) {
-    return {
-      live: false,
-      reason: 'plan_expired',
-      message: 'Your subscription has lapsed. Your data is safe and still readable — renew to start saving again.',
-    };
-  }
-
-  return { live: true };
+  const why = tenant.plan === 'trial' ? 'Your free trial has ended, so you' : tenant.plan === 'free' ? 'You' : 'Your subscription has lapsed, so you';
+  return {
+    live: true,
+    notice: `${why} are on the Free plan: the owner only, 1 branch, 50 products and 100 sales a month. Upgrade to Growth to add staff, debt reminders and expiry tracking.`,
+  };
 }

@@ -44,7 +44,9 @@ export default function PlanCards({ showTrialNote = false }: { showTrialNote?: b
             <div className={`mkt-plan ${p.id === 'growth' ? 'mkt-plan--popular' : ''}`} key={p.id}>
               {p.id === 'growth' && <span className="mkt-plan__badge">Most popular</span>}
               <h3>{p.name}</h3>
-              {period === 'monthly' ? (
+              {p.price === 0 ? (
+                <div className="mkt-plan__price">{money(0)}<small> for ever</small></div>
+              ) : period === 'monthly' ? (
                 <div className="mkt-plan__price">{money(p.price)}<small>/month</small></div>
               ) : (
                 <>
@@ -56,8 +58,8 @@ export default function PlanCards({ showTrialNote = false }: { showTrialNote?: b
               <ul>
                 {p.features.map(f => <li key={f}><CheckCircle2 size={14} aria-hidden="true" /> {f}</li>)}
               </ul>
-              <Link to="/login?signup=1" className={p.id === 'growth' ? 'btn-primary' : 'btn-secondary'}>Start free trial</Link>
-              {showTrialNote && <p className="mkt-plan__trial">14-day free trial, no card required</p>}
+              <Link to="/login?signup=1" className={p.id === 'growth' ? 'btn-primary' : 'btn-secondary'}>{p.price === 0 ? 'Start free' : 'Start free trial'}</Link>
+              {showTrialNote && <p className="mkt-plan__trial">{p.price === 0 ? 'Every feature free for the first 14 days' : '14-day free trial, no card required'}</p>}
             </div>
           );
         })}

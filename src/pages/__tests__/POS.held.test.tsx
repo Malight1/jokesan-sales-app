@@ -9,7 +9,7 @@ let mockProfile: any = { id: 'u-amaka', full_name: 'Amaka Obi', role: 'sales', b
 jest.mock('../../lib/supabase', () => ({ supabase: { rpc: jest.fn(), from: jest.fn() } }));
 jest.mock('../../lib/AuthContext', () => ({
   useAuth: () => ({
-    tenant: { id: 't1', name: 'Mama Tolu Stores', plan: 'starter', vat_enabled: false, vat_rate: 0, type: 'single' },
+    tenant: { id: 't1', name: 'Mama Tolu Stores', plan: 'free', vat_enabled: false, vat_rate: 0, type: 'single' },
     profile: mockProfile,
   }),
 }));

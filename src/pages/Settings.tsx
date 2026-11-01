@@ -2,14 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import {
-  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, branches as branchesApi, docs,
+  team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, PlanUsage, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
   customFieldDefs, compliance, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
   CustomFieldDef, CustomFieldEntity, EinvoiceReadiness,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
-import { hasFeature, planFor } from '../lib/features';
+import { hasFeature, planFor, effectivePlan } from '../lib/features';
 import { Loading, ErrorState, Empty } from '../components/DataStates';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
@@ -304,7 +304,11 @@ function BillingTab() {
 
   const pubKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
   const testMode = !!pubKey?.startsWith('pk_test');
+  // What they last paid for (or 'trial'), and what they're on right now:
+  // a trial that ended or a plan that lapsed is Free.
   const currentPlan = tenant?.plan ?? 'trial';
+  const onPlan = effectivePlan(tenant);
+  const usage = useQuery<PlanUsage>(() => billing.usage(), [onPlan]);
   const trialEnds = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null;
   const planExpires = tenant?.plan_expires_at ? new Date(tenant.plan_expires_at) : null;
   const trialDaysLeft = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86400000)) : 0;
@@ -314,7 +318,7 @@ function BillingTab() {
 
   // What this business pays per month: its founding price if it has one,
   // otherwise today's list price. The server checks the same thing.
-  const monthly = (planId: keyof MyBilling['prices'], fallback: number) => mine.data?.prices?.[planId] ?? fallback;
+  const monthly = (planId: string, fallback: number) => mine.data?.prices?.[planId as keyof MyBilling['prices']] ?? fallback;
   const charge = (m: number) => period === 'annual' ? m * ANNUAL_MONTHS_CHARGED : m;
 
   const subscribe = (planId: string, amount: number) => {
@@ -351,18 +355,27 @@ function BillingTab() {
       <div className="card" style={{ marginBottom: '1.25rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Current Plan</h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          <span className="badge-primary" style={{ fontSize: '0.9rem', padding: '0.35rem 0.8rem', textTransform: 'capitalize' }}>{currentPlan}</span>
-          {currentPlan === 'trial' && trialEnds && (
+          <span className="badge-primary" style={{ fontSize: '0.9rem', padding: '0.35rem 0.8rem', textTransform: 'capitalize' }}>{onPlan}</span>
+          {onPlan === 'trial' && trialEnds && (
             <span style={{ fontSize: '0.875rem', color: trialDaysLeft <= 3 ? '#dc2626' : '#64748b' }}>
-              {trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial` : 'Trial expired. Choose a plan to keep using ProfixBook.'}
+              {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial. After that you move to Free unless you choose a plan.
             </span>
           )}
-          {planExpires && currentPlan !== 'trial' && (
+          {onPlan === 'free' && currentPlan === 'trial' && (
+            <span style={{ fontSize: '0.875rem', color: '#64748b' }}>Your trial has ended.</span>
+          )}
+          {planExpires && currentPlan !== 'trial' && currentPlan !== 'free' && (
             <span style={{ fontSize: '0.875rem', color: planExpires.getTime() < Date.now() ? '#dc2626' : '#64748b' }}>
-              {planExpires.getTime() < Date.now() ? 'Expired' : 'Paid until'} {planExpires.toLocaleDateString('en-GB')}
+              {planExpires.getTime() < Date.now() ? `Your ${currentPlan} plan ended` : 'Paid until'} {planExpires.toLocaleDateString('en-GB')}
             </span>
           )}
         </div>
+        {onPlan === 'free' && usage.data && usage.data.product_limit !== null && usage.data.sales_limit !== null && (
+          <p style={{ fontSize: '0.85rem', color: '#475569', marginTop: '0.75rem' }}>
+            This month: {usage.data.sales_this_month} of {usage.data.sales_limit} sales. Products: {usage.data.products} of {usage.data.product_limit}
+            {usage.data.materials > 0 && <>, raw materials: {usage.data.materials} of {usage.data.product_limit}</>}.
+          </p>
+        )}
         {founding !== null ? (
           <p className="billing-founding" style={{ marginTop: '0.75rem' }}>
             <Star size={14} aria-hidden="true" /> Founding customer #{founding}. Your price is locked in for life.
@@ -389,7 +402,7 @@ function BillingTab() {
 
       <div className="grid-3" style={{ alignItems: 'stretch' }}>
         {PLANS.map(p => {
-          const active = currentPlan === p.id;
+          const active = onPlan === p.id;
           const m = monthly(p.id, p.price);
           const amount = charge(m);
           return (
@@ -397,9 +410,9 @@ function BillingTab() {
               <h3 style={{ marginBottom: '0.15rem' }}>{p.name}{active && <span className="badge-primary" style={{ marginLeft: 8, fontSize: '0.7rem' }}>Your plan</span>}</h3>
               <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.5rem' }}>{p.blurb}</p>
               <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#0f172a' }}>
-                ₦{amount.toLocaleString()}<span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#94a3b8' }}>{period === 'annual' ? '/year' : '/mo'}</span>
+                ₦{amount.toLocaleString()}<span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#94a3b8' }}>{p.price === 0 ? ' for ever' : period === 'annual' ? '/year' : '/mo'}</span>
               </div>
-              {period === 'annual' && (
+              {period === 'annual' && p.price > 0 && (
                 <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>
                   12 months for the price of {ANNUAL_MONTHS_CHARGED}. You save ₦{(m * 12 - amount).toLocaleString()}.
                 </p>
@@ -411,10 +424,16 @@ function BillingTab() {
                   </li>
                 ))}
               </ul>
-              <button className={active ? 'btn-secondary' : 'btn-primary'} disabled={busy !== null}
-                onClick={() => subscribe(p.id, amount)}>
-                {busy === p.id ? 'Opening…' : `${active ? 'Renew' : paidAndCurrent ? 'Switch to ' + p.name : 'Subscribe'} ₦${amount.toLocaleString()}`}
-              </button>
+              {p.price === 0 ? (
+                <p style={{ fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
+                  {active ? 'You are on Free.' : 'Where you land if a paid plan or trial ends. Nothing is deleted.'}
+                </p>
+              ) : (
+                <button className={active ? 'btn-secondary' : 'btn-primary'} disabled={busy !== null}
+                  onClick={() => subscribe(p.id, amount)}>
+                  {busy === p.id ? 'Opening…' : `${active ? 'Renew' : paidAndCurrent ? 'Switch to ' + p.name : 'Subscribe'} ₦${amount.toLocaleString()}`}
+                </button>
+              )}
             </div>
           );
         })}
@@ -1419,7 +1438,7 @@ function RecipesTab() {
 function PricingTab() {
   const toast = useToast();
   const { tenant } = useAuth();
-  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const tiersEnabled = hasFeature(tenant, 'price_tiers');
 
   const listsQ = useQuery<PriceList[]>(() => pricing.lists(), []);
   const itemsQ = useQuery<PriceListItem[]>(() => pricing.allItems(), []);
@@ -1691,7 +1710,7 @@ function CustomFieldsTab() {
   // are module-level constants with no tenant to ask.
   const entityOrder = retail ? ENTITY_ORDER.filter(e => e !== 'material') : ENTITY_ORDER;
   const entityLabel = (e: CustomFieldEntity) => e === 'finished_good' ? bizLabel(retail, 'Finished Goods', 'Products') : ENTITY_LABEL[e];
-  const enabled = hasFeature(tenant?.plan, 'custom_fields');
+  const enabled = hasFeature(tenant, 'custom_fields');
   const { data: defs, loading, refetch } = useQuery<CustomFieldDef[]>(() => customFieldDefs.list(), []);
   const createMut = useMutation(customFieldDefs.create);
   const removeMut = useMutation(customFieldDefs.remove);
@@ -1853,7 +1872,7 @@ function CustomFieldsTab() {
 function EinvoicingTab() {
   const { tenant } = useAuth();
   const retail = isRetail(tenant);
-  const enabled = hasFeature(tenant?.plan, 'einvoicing');
+  const enabled = hasFeature(tenant, 'einvoicing');
   const { data, loading, error, refetch } = useQuery<EinvoiceReadiness>(() => compliance.einvoiceReadiness(), []);
 
   if (!enabled) {

@@ -1403,22 +1403,25 @@ export const support = {
 // BILLING (Paystack) — public key in the browser, secret key in the
 // Edge Function. After Popup success we verify server-side.
 // ============================================================
-// Launch prices (0050). The database holds the same list in
-// plan_list_price() and is what a payment is actually checked against;
-// these numbers are for display. Founding customers (the first 60 to pay)
-// keep plan_founding_price() for life, so a later price rise never
-// touches them.
+// Prices (0052). The database holds the same list in plan_list_price()
+// and is what a payment is actually checked against; these numbers are
+// for display. Founding customers (the first 60 to pay) pay the lower of
+// plan_founding_price() and the list price for life.
 //
 // The feature split below is real, not just marketing copy: it matches
 // FEATURE_LEVEL in features.ts and feature_level() in the database, and
-// plan_user_limit()/plan_branch_limit()/plan_assistant_limit() enforce
-// the counts. Business is sold on scale (branches, staff, priority
-// support), with the rest as extras.
+// plan_user_limit()/plan_branch_limit()/plan_product_limit()/
+// plan_monthly_sales_limit()/plan_assistant_limit() enforce the counts.
+// Free is where a trial lands if nobody pays, so it has to be useful on
+// its own; Growth is the first paid step.
 export const PLANS = [
-  { id: 'starter',  name: 'Starter',  price: 5000,  users: 2,  blurb: 'Owner plus one staff', features: ['Sales, stock & invoices', 'Point of sale that works offline', 'WhatsApp receipts & reminders', 'Import from Excel or CSV', 'VAT', '2 users, 1 branch'] },
-  { id: 'growth',   name: 'Growth',   price: 12000, users: 5,  blurb: 'Small team', features: ['Everything in Starter', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', 'Ask ProfixBook: 20 questions a month', '5 users, up to 3 branches'] },
-  { id: 'business', name: 'Business', price: 25000, users: 15, blurb: 'Multiple branches', features: ['Everything in Growth', 'Unlimited branches', '15 staff accounts', 'Priority WhatsApp support', 'Ask ProfixBook: 100 questions a month', 'Automatic payment confirmation', 'Custom fields & e-invoicing readiness'] },
+  { id: 'free',     name: 'Free',     price: 0,     users: 1,  blurb: 'The owner, one shop', features: ['Point of sale that works offline', 'Stock and real profit', 'Invoices and WhatsApp receipts', 'Import from Excel or CSV', 'VAT', '50 products, 100 sales a month', 'Owner only, 1 branch'] },
+  { id: 'growth',   name: 'Growth',   price: 5500,  users: 5,  blurb: 'A growing team', features: ['Everything in Free, with no product or sales limits', 'WhatsApp debt reminders', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', 'Ask ProfixBook: 20 questions a month', '5 users, up to 3 branches'] },
+  { id: 'business', name: 'Business', price: 16500, users: 15, blurb: 'Multiple branches', features: ['Everything in Growth', 'Unlimited branches', '15 staff accounts', 'Priority WhatsApp support', 'Ask ProfixBook: 100 questions a month', 'Automatic payment confirmation', 'Custom fields & e-invoicing readiness'] },
 ] as const;
+
+/** The plans you pay for (Free has no checkout). */
+export const PAID_PLAN_IDS = ['growth', 'business'] as const;
 
 export type BillingInterval = 'monthly' | 'annual';
 /** Annual billing: pay for 10 months, get 12. Mirrors confirm_subscription_payment(). */
@@ -1429,7 +1432,16 @@ export interface MyBilling {
   founding_number: number | null;
   founding_since: string | null;
   spots_left: number;
-  prices: Record<'starter' | 'growth' | 'business', number>;
+  prices: Record<'growth' | 'business', number>;
+}
+
+export interface PlanUsage {
+  plan: string;
+  product_limit: number | null;
+  products: number;
+  materials: number;
+  sales_limit: number | null;
+  sales_this_month: number;
 }
 
 export const billing = {
@@ -1446,6 +1458,12 @@ export const billing = {
     const { data, error } = await supabase.rpc('my_billing');
     if (error) throw error;
     return data as MyBilling;
+  },
+  /** How much of Free's caps this business has used (limits are null off Free). */
+  usage: async (): Promise<PlanUsage> => {
+    const { data, error } = await supabase.rpc('my_plan_usage');
+    if (error) throw error;
+    return data as PlanUsage;
   },
   /** Public, works logged out: how many founding-price spots remain. */
   spotsLeft: async (): Promise<number | null> => {

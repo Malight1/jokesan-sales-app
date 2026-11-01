@@ -13,6 +13,7 @@ import {
 import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
 import { whatsappLink } from '../lib/whatsapp';
 import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
@@ -480,6 +481,10 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
   const nothingNeeded = reminders.length === 0 && lowTotal === 0 && expired + expiring + held === 0;
 
   const sendReminder = async (r: { id: string; name: string; phone: string | null; balance: number }) => {
+    if (!hasFeature(tenant, 'debt_reminders')) {
+      toast.info('WhatsApp debt reminders are on the Growth plan and above. Upgrade under Settings → Billing.');
+      return;
+    }
     const lines = [
       `Dear ${r.name},`, '',
       `This is a friendly payment reminder from *${tenant?.name ?? 'us'}*.`,

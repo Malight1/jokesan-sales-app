@@ -22,7 +22,7 @@ const FAQS = [
   { q: 'What happens with a fake bank-transfer alert now?',
     a: 'Connect your own Paystack account under Settings, and any invoice you send with a pay link confirms itself the moment the customer actually pays. No bank alert to read or trust. There is also a bank-alert matcher for payments outside a pay link.' },
   { q: 'What if I stop paying?',
-    a: 'Your account moves to read-only rather than being deleted, so nothing you have recorded is lost while you decide what to do next.' },
+    a: 'You move to the Free plan rather than losing anything. Nothing you have recorded is deleted, the owner can keep selling within Free’s limits, and staff can look but not save until you upgrade.' },
   { q: 'Do I need to install anything?',
     a: 'No. ProfixBook runs in the browser on any phone, tablet or computer. Nothing to install, and it works as an installable app on your phone\'s home screen if you want it there.' },
 ];

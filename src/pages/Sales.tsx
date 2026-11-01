@@ -47,7 +47,7 @@ export default function Sales() {
   // rather than letting staff click into a permission error.
   const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
-  const tiersEnabled = hasFeature(tenant?.plan, 'price_tiers');
+  const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
   const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
   const { data: goods, refetch: refetchGoods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);

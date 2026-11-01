@@ -1,10 +1,22 @@
-import { hasFeature, planFor, isPriority } from '../features';
+import { hasFeature, planFor, isPriority, effectivePlan } from '../features';
 
-// Must agree with plan_level()/feature_level() in migration 0021 — the
+// Must agree with plan_level()/feature_level() in migration 0052 — the
 // database refuses the write either way; this decides what the UI offers.
 describe('plan features', () => {
-  it('keeps batch and expiry tracking off Starter', () => {
-    expect(hasFeature('starter', 'batch_tracking')).toBe(false);
+  it('keeps batch and expiry tracking and debt reminders off Free', () => {
+    expect(hasFeature('free', 'batch_tracking')).toBe(false);
+    expect(hasFeature('free', 'debt_reminders')).toBe(false);
+    expect(hasFeature('growth', 'debt_reminders')).toBe(true);
+  });
+
+  it('treats an ended trial or a lapsed plan as Free', () => {
+    const past = new Date(Date.now() - 86400000).toISOString();
+    const future = new Date(Date.now() + 86400000).toISOString();
+    expect(effectivePlan({ plan: 'trial', trial_ends_at: past, plan_expires_at: null })).toBe('free');
+    expect(effectivePlan({ plan: 'trial', trial_ends_at: future, plan_expires_at: null })).toBe('trial');
+    expect(effectivePlan({ plan: 'growth', trial_ends_at: null, plan_expires_at: past })).toBe('free');
+    expect(effectivePlan({ plan: 'growth', trial_ends_at: null, plan_expires_at: future })).toBe('growth');
+    expect(hasFeature({ plan: 'growth', trial_ends_at: null, plan_expires_at: past }, 'batch_tracking')).toBe(false);
   });
 
   it('turns batch tracking on from Growth up', () => {
@@ -23,7 +35,7 @@ describe('plan features', () => {
     expect(hasFeature('business', 'auto_payments')).toBe(true);
   });
 
-  it('treats an unknown or missing plan as Starter', () => {
+  it('treats an unknown or missing plan as Free', () => {
     expect(hasFeature(undefined, 'batch_tracking')).toBe(false);
     expect(hasFeature('mystery', 'batch_tracking')).toBe(false);
   });
@@ -33,8 +45,8 @@ describe('plan features', () => {
     expect(planFor('einvoicing')).toBe('Business');
   });
 
-  it('puts the assistant on Growth and up, not Starter (0050)', () => {
-    expect(hasFeature('starter', 'assistant')).toBe(false);
+  it('puts the assistant on Growth and up, not Free (0050)', () => {
+    expect(hasFeature('free', 'assistant')).toBe(false);
     expect(hasFeature('growth', 'assistant')).toBe(true);
     expect(planFor('assistant')).toBe('Growth');
   });

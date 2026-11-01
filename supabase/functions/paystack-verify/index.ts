@@ -27,7 +27,7 @@
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const PLANS = ['starter', 'growth', 'business'];
+const PLANS = ['growth', 'business'];
 const INTERVALS = ['monthly', 'annual'];
 
 const cors = {

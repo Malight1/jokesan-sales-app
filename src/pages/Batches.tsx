@@ -43,7 +43,7 @@ export default function Batches() {
   const role = profile?.role;
   const isAdmin = role === 'admin';
   const canWriteOff = isAdmin || role === 'inventory';
-  const tracking = hasFeature(tenant?.plan, 'batch_tracking');
+  const tracking = hasFeature(tenant, 'batch_tracking');
   const warnDays = tenant?.expiry_warning_days ?? 60;
   const { multi, myBranchId, nameOf } = useBranches();
 

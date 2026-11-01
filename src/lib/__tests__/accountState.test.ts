@@ -24,24 +24,32 @@ describe('accountState', () => {
     if (!r.live) expect(r.reason).toBe('suspended');
   });
 
-  it('flags an expired trial', () => {
-    const r = accountState({ ...base, plan: 'trial', trial_ends_at: days(-1) });
+  it('moves the owner to Free when the trial ends, still able to save', () => {
+    const r = accountState({ ...base, plan: 'trial', trial_ends_at: days(-1) }, 'admin');
+    expect(r.live).toBe(true);
+    if (r.live) expect(r.notice).toMatch(/trial has ended/);
+  });
+
+  it('stops staff saving once the business is on Free', () => {
+    const r = accountState({ ...base, plan: 'trial', trial_ends_at: days(-1) }, 'sales');
     expect(r.live).toBe(false);
-    if (!r.live) expect(r.reason).toBe('trial_expired');
+    if (!r.live) expect(r.reason).toBe('staff_on_free');
   });
 
   it('leaves a trial that still has time on it alone', () => {
-    expect(accountState({ ...base, plan: 'trial', trial_ends_at: days(3) }).live).toBe(true);
+    const r = accountState({ ...base, plan: 'trial', trial_ends_at: days(3) }, 'sales');
+    expect(r.live).toBe(true);
+    if (r.live) expect(r.notice).toBeUndefined();
   });
 
-  it('flags a lapsed subscription', () => {
-    const r = accountState({ ...base, plan_expires_at: days(-1) });
-    expect(r.live).toBe(false);
-    if (!r.live) expect(r.reason).toBe('plan_expired');
+  it('moves a lapsed subscription to Free', () => {
+    const r = accountState({ ...base, plan_expires_at: days(-1) }, 'admin');
+    expect(r.live).toBe(true);
+    if (r.live) expect(r.notice).toMatch(/lapsed/);
   });
 
   it('leaves a subscription that renews later alone', () => {
-    expect(accountState({ ...base, plan_expires_at: days(20) }).live).toBe(true);
+    expect(accountState({ ...base, plan_expires_at: days(20) }, 'sales').live).toBe(true);
   });
 
   it('reports suspension ahead of expiry when both apply', () => {
