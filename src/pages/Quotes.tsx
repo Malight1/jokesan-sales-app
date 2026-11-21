@@ -442,6 +442,8 @@ function ConvertQuoteModal({ quote, payTypes, onClose, onDone }: {
   }
 
   const owing = Math.max(0, quote.total - (onCredit ? 0 : amountPaid));
+  // A debt with no name on it can never be collected.
+  const walkInDebt = owing > 0 && !quote.customer_id;
 
   return (
     <Modal onClose={onClose} maxWidth={420}>
@@ -458,7 +460,7 @@ function ConvertQuoteModal({ quote, payTypes, onClose, onDone }: {
           <label htmlFor="cv-type">How did they pay?</label>
           <select id="cv-type" value={paymentTypeId} onChange={e => pickType(e.target.value)}>
             {realTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            <option value="">Not paid yet (on credit)</option>
+            {quote.customer_id && <option value="">Not paid yet (on credit)</option>}
           </select>
         </div>
         {!onCredit && (
@@ -467,11 +469,13 @@ function ConvertQuoteModal({ quote, payTypes, onClose, onDone }: {
             <NumberInput id="cv-amount" value={amountPaid} max={quote.total} onChange={setAmountPaid} />
           </div>
         )}
-        {owing > 0 && <p className="q-note">The customer will owe {fmt(owing)}. You'll see it on their account under Customers.</p>}
+        {walkInDebt
+          ? <p className="q-note" role="alert">This quote is for a walk-in customer, so nothing can be left owing. Take the full {fmt(quote.total)}, or make a new quote with the customer's name.</p>
+          : owing > 0 && <p className="q-note">The customer will owe {fmt(owing)}. You'll see it on their account under Customers.</p>}
       </div>
       <div className="modal-footer">
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn-primary" disabled={pending} onClick={() => submit()}>
+        <button type="button" className="btn-primary" disabled={pending || walkInDebt} onClick={() => submit()}>
           {pending ? 'Working…' : 'Create sale'}
         </button>
       </div>

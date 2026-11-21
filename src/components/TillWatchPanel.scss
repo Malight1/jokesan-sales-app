@@ -1,0 +1,55 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.tw {
+  @include card;
+  margin-top: 1.25rem;
+
+  .tw-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.9rem;
+    h3 { display: flex; align-items: center; gap: 8px; font-size: $font-size-base; color: $gray-900; svg { color: $primary; } }
+    p { font-size: $font-size-xs; color: $gray-500; margin-top: 2px; }
+  }
+  .tw-figure {
+    text-align: right;
+    span { display: block; font-size: $font-size-xs; color: $gray-500; }
+    strong { font-size: $font-size-xl; color: $warning; font-variant-numeric: tabular-nums; }
+    small { display: block; font-size: $font-size-xs; color: $gray-500; }
+  }
+  .tw-empty { font-size: $font-size-sm; color: $gray-500; padding: 0.5rem 0; }
+  .tw-list {
+    list-style: none;
+    border-top: 1px solid $gray-100;
+    li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      padding: 0.65rem 0;
+      border-bottom: 1px solid $gray-100;
+      font-size: $font-size-sm;
+      color: $gray-700;
+      line-height: 1.45;
+    }
+  }
+  .tw-icon {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: $radius-full;
+    &.is-credit { background: $warning-light; color: $warning; }
+    &.is-return { background: $primary-light; color: $primary; }
+  }
+  .tw-body { flex: 1; min-width: 0; strong { color: $gray-900; } }
+  .tw-when { flex-shrink: 0; font-size: $font-size-xs; color: $gray-500; white-space: nowrap; }
+  .tw-foot { margin-top: 0.75rem; font-size: $font-size-xs; color: $gray-400; a { color: $primary; font-weight: 600; text-decoration: none; } }
+
+  @media (max-width: 560px) {
+    .tw-head { flex-direction: column; }
+    .tw-figure { text-align: left; }
+    .tw-list li { flex-wrap: wrap; }
+  }
+}

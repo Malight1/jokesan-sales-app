@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import { canAccess } from '../lib/permissions';
+import { canAccess, homeFor } from '../lib/permissions';
 import { Loader2 } from 'lucide-react';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -37,9 +37,9 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     );
   }
 
-  // Logged in but no role access to this path → bounce to dashboard
+  // Logged in but no role access to this path → their home (the till for a cashier)
   if (profile && !canAccess(profile.role, location.pathname)) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homeFor(profile.role)} replace />;
   }
 
   return <>{children}</>;

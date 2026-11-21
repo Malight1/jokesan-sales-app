@@ -4,12 +4,14 @@ import { profileApi } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
+import ApprovalPinCard from '../components/ApprovalPinCard';
 
 const ROLE_LABEL: Record<string, string> = {
   admin: 'Admin — full access',
   sales: 'Sales — the counter',
   inventory: 'Inventory — stock & production',
   accounts: 'Accounts — finance & reports',
+  cashier: 'Cashier — till only',
 };
 
 // Name and password used to live only on /settings, which is admin-only —
@@ -123,6 +125,9 @@ export default function Profile() {
             </button>
           </form>
         </div>
+
+        {/* Admins, sales leads and accounts approve cashier returns (0054). */}
+        {(profile?.role === 'admin' || profile?.role === 'sales' || profile?.role === 'accounts') && <ApprovalPinCard />}
 
       </div>
     </div>

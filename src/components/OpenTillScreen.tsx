@@ -1,3 +1,4 @@
+import { useAuth } from '../lib/AuthContext';
 import React, { useEffect, useState } from 'react';
 import { Wallet } from 'lucide-react';
 import { registers as registersApi, shifts as shiftsApi, Register } from '../lib/api';
@@ -11,6 +12,8 @@ import './TillPanels.scss';
 // Shown instead of the product grid once an admin has required a till for
 // selling and the signed-in person doesn't have one open yet.
 export default function OpenTillScreen({ onOpened }: { onOpened: () => void }) {
+  const { profile: tillUser } = useAuth();
+  const isCashier = tillUser?.role === 'cashier';
   const toast = useToast();
   const { myBranchId, myBranchName, multi } = useBranches();
   const regQ = useQuery<Register[]>(() => registersApi.list(), []);
@@ -48,7 +51,9 @@ export default function OpenTillScreen({ onOpened }: { onOpened: () => void }) {
     <div className="till-gate">
       <Wallet size={48} color="#2563eb" />
       <h1>Open your till</h1>
-      <p>This business requires an open till before you can sell{multi ? ` at ${myBranchName}` : ''}.</p>
+      <p>{isCashier
+        ? 'Count the cash in your drawer and open your till to start selling.'
+        : `This business requires an open till before you can sell${multi ? ` at ${myBranchName}` : ''}.`}</p>
       {error && <ErrorState message={error} />}
       {mine.length === 0 ? (
         <p className="till-gate-empty">No register is set up at your branch yet — ask an admin to add one under Settings.</p>

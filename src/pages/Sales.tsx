@@ -3,9 +3,12 @@ import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, L
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
   returns as returnsApi, storeCredit, payments as paymentsApi, deliveries as deliveriesApi, IntegrationStatus,
-  customFieldDefs, customFields as customFieldsApi,
-  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType, CustomFieldDef,
+  customFieldDefs, customFields as customFieldsApi, stock,
+  SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType, CustomFieldDef, StockLevel,
 } from '../lib/api';
+import { useBranches } from '../lib/useBranches';
+import { qtyByProduct } from '../lib/branchStock';
+import { todayIso } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -20,6 +23,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import OfflineBanner from '../components/OfflineBanner';
 import NumberInput from '../components/NumberInput';
 import ApprovalModal from '../components/ApprovalModal';
+import ReturnApprovalModal from '../components/ReturnApprovalModal';
 import CustomFieldsSection from '../components/CustomFieldsSection';
 import './Sales.scss';
 import Modal from '../components/Modal';
@@ -50,11 +54,23 @@ export default function Sales() {
   // Cost and profit are the owner's business, not the cashier's: only
   // admin and accounts see them.
   const seesProfit = isAdmin || profile?.role === 'accounts';
+  // Only the owner and accounts may date a sale on another day; the
+  // database refuses it for everyone else (0055).
+  const canPickDate = seesProfit;
   const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
   const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
   const { data: goods, refetch: refetchGoods } = useQuery<FinishedGood[]>(() => goodsApi.list(), []);
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
+  // "Credit" means nothing was received, so it can't be how a payment came in.
+  const moneyTypes = useMemo(() => (payTypes ?? []).filter(t => !/credit/i.test(t.name)), [payTypes]);
+  // The sale comes out of THIS branch's shelves, so that's the stock to check.
+  const { myBranchId } = useBranches();
+  const levelsQ = useQuery<StockLevel[]>(() => stock.levels(myBranchId), [myBranchId]);
+  const branchStock = useMemo(
+    () => qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), myBranchId, 'sellable'),
+    [levelsQ.data, myBranchId],
+  );
   const { data: priceLists } = useQuery<PriceList[]>(() => tiersEnabled ? pricing.lists() : Promise.resolve([]), [tiersEnabled]);
   const { data: priceItems } = useQuery<PriceListItem[]>(() => tiersEnabled ? pricing.allItems() : Promise.resolve([]), [tiersEnabled]);
   // Whether "Pay now" links are even available — no point showing the
@@ -83,8 +99,10 @@ export default function Sales() {
   const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const blankItem = (): LineItem => ({ finished_good_id: '', quantity: 1, unit_price: 0, discount_reason: '' });
-  const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0], customerId: '', paymentTypeId: '', amountPaid: 0,
+  // amountPaid null means "the full amount", so a forgotten field records
+  // a paid sale, not a silent debt.
+  const [form, setForm] = useState<{ date: string; customerId: string; paymentTypeId: string; amountPaid: number | null; items: LineItem[] }>({
+    date: todayIso(), customerId: '', paymentTypeId: '', amountPaid: null,
     items: [blankItem()],
   });
 
@@ -93,7 +111,7 @@ export default function Sales() {
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Walk-in' : '—';
   };
   const productName = (id: string) => goods?.find(g => g.id === id)?.name ?? '—';
-  const productStock = (id: string) => goods?.find(g => g.id === id)?.qty_balance ?? 0;
+  const productStock = (id: string) => branchStock.get(id) ?? 0;
 
   const priceCtx: PriceContext = useMemo(() => ({
     priceListItems: priceItems ?? [],
@@ -133,7 +151,7 @@ export default function Sales() {
     }));
 
   const resetForm = () => {
-    setForm({ date: new Date().toISOString().split('T')[0], customerId: '', paymentTypeId: '', amountPaid: 0, items: [blankItem()] });
+    setForm({ date: todayIso(), customerId: '', paymentTypeId: '', amountPaid: null, items: [blankItem()] });
     setOrderDiscount(0); setNeedsApproval(false); setApprovalError(null);
   };
 
@@ -146,16 +164,21 @@ export default function Sales() {
   const vatAmt = total * vatRate / 100;
   const grandTotal = total + vatAmt;
   const totalDiscount = validItems.reduce((s, i) => s + Math.max((listPriceFor(i.finished_good_id, i.quantity, form.customerId) - i.unit_price) * i.quantity, 0), 0) + orderDiscount;
-  const canSubmit = validItems.length > 0 && total > 0 && !stockError;
+  const paidNow = form.amountPaid ?? grandTotal;
+  const owingAfter = Math.max(0, grandTotal - paidNow);
+  // A debt with no name on it can never be collected (the till has the same rule).
+  const walkInDebt = owingAfter > 0.009 && !form.customerId;
+  const canSubmit = validItems.length > 0 && total > 0 && !stockError && !walkInDebt;
 
   const submitSale = async (approval?: { userId: string; pin: string }) => {
+    if (walkInDebt) { toast.error('Pick the customer who will owe the balance, or take the full amount.'); return; }
     if (!canSubmit) { toast.error('Check items — product, quantity, and available stock.'); return; }
     if (approval) { setApproving(true); setApprovalError(null); }
     const res = await createMut.mutate({
       customerId: form.customerId || null,
       date: form.date,
       paymentTypeId: form.paymentTypeId || null,
-      amountPaid: Number(form.amountPaid) || 0,
+      amountPaid: Number(paidNow) || 0,
       items: validItems.map(i => ({
         finished_good_id: i.finished_good_id, quantity: Number(i.quantity), unit_price: Number(i.unit_price),
         ...(i.discount_reason.trim() ? { discount_reason: i.discount_reason.trim() } : {}),
@@ -171,6 +194,7 @@ export default function Sales() {
       resetForm();
       refetch();
       refetchGoods();
+      levelsQ.refetch();
     } else if (!approval && createMut.error && NEEDS_APPROVAL.test(createMut.error)) {
       setNeedsApproval(true);
     } else if (approval) {
@@ -183,7 +207,7 @@ export default function Sales() {
   const openPay = (so: SalesOrder) => {
     setPayFor(so);
     setPayAmount(so.balance);
-    setPayType(payTypes?.[0]?.id ?? '');
+    setPayType(moneyTypes[0]?.id ?? '');
   };
 
   const submitPayment = async () => {
@@ -370,8 +394,10 @@ export default function Sales() {
                 {createMut.error && !needsApproval && <ErrorState message={createMut.error} />}
                 <div className="grid-2">
                   <div className="form-group">
-                    <label>Date</label>
-                    <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+                    <label htmlFor="ns-date">Date</label>
+                    <input id="ns-date" type="date" value={form.date} max={todayIso()} disabled={!canPickDate}
+                           title={canPickDate ? undefined : 'Only the owner or accounts can change a sale’s date'}
+                           onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
                   </div>
                   <div className="form-group">
                     <label>Customer</label>
@@ -397,8 +423,8 @@ export default function Sales() {
                           <select value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
                             <option value="">— select —</option>
                             {goods?.map(g => (
-                              <option key={g.id} value={g.id} disabled={g.qty_balance === 0}>
-                                {g.name}{g.qty_balance === 0 ? ' — OUT OF STOCK' : ` (${g.qty_balance} in stock)`}
+                              <option key={g.id} value={g.id} disabled={productStock(g.id) === 0}>
+                                {g.name}{productStock(g.id) === 0 ? ' — OUT OF STOCK' : ` (${productStock(g.id)} in stock)`}
                               </option>
                             ))}
                           </select>
@@ -463,9 +489,14 @@ export default function Sales() {
                   </div>
                   <div className="form-group">
                     <label>Amount Paid (₦)</label>
-                    <NumberInput value={form.amountPaid} onChange={v => setForm(f => ({ ...f, amountPaid: v }))} />
+                    <NumberInput value={paidNow} onChange={v => setForm(f => ({ ...f, amountPaid: v }))} />
                   </div>
                 </div>
+                {walkInDebt && (
+                  <p className="stock-error" role="alert" style={{ marginTop: 0 }}>
+                    {fmt(owingAfter)} would be left owing. Pick the customer who owes it, or take the full amount.
+                  </p>
+                )}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
@@ -540,7 +571,7 @@ export default function Sales() {
                 <label>Payment Type</label>
                 <select value={payType} onChange={e => setPayType(e.target.value)}>
                   <option value="">— select —</option>
-                  {payTypes?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {moneyTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
             </div>
@@ -597,6 +628,10 @@ export function ReturnModal({ sale, customerName, productName, companyName, invo
   onDone: () => void;
 }) {
   const toast = useToast();
+  const { profile: me } = useAuth();
+  // A till-only cashier's return needs a manager's PIN first (0054).
+  const needsApproval = me?.role === 'cashier';
+  const [askApproval, setAskApproval] = useState(false);
   const { data, loading, error } = useQuery<any>(() => salesApi.detail(sale.id), [sale.id]);
   const createMut = useMutation(returnsApi.sales.create);
   const [lines, setLines] = useState<ReturnLine[] | null>(null);
@@ -653,6 +688,7 @@ export function ReturnModal({ sale, customerName, productName, companyName, invo
   };
 
   return (
+    <>
     <Modal onClose={onClose} maxWidth={560}>
       <div className="modal-header">
         <h2>Return items — {invoiceNo}</h2>
@@ -729,11 +765,21 @@ export function ReturnModal({ sale, customerName, productName, companyName, invo
       </div>
       <div className="modal-footer">
         <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn-primary" disabled={createMut.pending || !canSubmit} onClick={submit}>
-          {createMut.pending ? 'Saving…' : 'Record Return'}
+        <button type="button" className="btn-primary" disabled={createMut.pending || !canSubmit}
+          onClick={() => (needsApproval ? setAskApproval(true) : submit())}>
+          {createMut.pending ? 'Saving…' : needsApproval ? 'Get approval and record' : 'Record Return'}
         </button>
       </div>
     </Modal>
+    {askApproval && (
+      <ReturnApprovalModal
+        saleId={sale.id}
+        invoiceNo={invoiceNo}
+        onCancel={() => setAskApproval(false)}
+        onApproved={() => { setAskApproval(false); submit(); }}
+      />
+    )}
+    </>
   );
 }
 

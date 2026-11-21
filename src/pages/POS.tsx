@@ -10,6 +10,7 @@ import {
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { todayIso } from '../lib/batches';
 import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf } from '../lib/invoice';
@@ -356,7 +357,9 @@ export default function POS() {
 
   const buildPayload = (approval?: { userId: string; pin: string }) => ({
     customerId: customerId || null,
-    date: new Date().toISOString().split('T')[0],
+    // The shop's own date, not UTC (which is a day behind for the first
+    // hour after midnight in Lagos).
+    date: todayIso(),
     paymentTypeId: payTypeId || null,
     amountPaid: paid,
     items: cart.map(l => ({
@@ -520,7 +523,12 @@ export default function POS() {
     setFindError(null);
     try {
       const sale = await salesApi.findByDocNo(findDocNo);
-      if (!sale) { setFindError(`No sale found for "${findDocNo.trim()}".`); return; }
+      if (!sale) {
+        setFindError(profile?.role === 'cashier'
+          ? `No sale of yours found for "${findDocNo.trim()}". You can only return sales you rang up.`
+          : `No sale found for "${findDocNo.trim()}".`);
+        return;
+      }
       if (sale.voided) { setFindError(`${returnInvoiceNo(sale)} was voided, so there's nothing left to return.`); return; }
       setShowFindReturn(false);
       setFindDocNo('');
@@ -922,6 +930,12 @@ export default function POS() {
                   <div className="tender-feedback is-balance">
                     Nothing paid today. <strong>{fmt(total)}</strong> goes on {customerId ? customerName(customerId) : 'the customer'}'s account.
                   </div>
+                )}
+
+                {payMode !== 'full' && profile?.role === 'cashier' && (
+                  <p className="tender-monitor">
+                    Credit is recorded under your name and reported to the owner.
+                  </p>
                 )}
               </div>
 

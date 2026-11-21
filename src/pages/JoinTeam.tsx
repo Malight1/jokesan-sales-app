@@ -11,6 +11,7 @@ const ROLE_LABEL: Record<string, string> = {
   sales: 'sales staff',
   inventory: 'inventory staff',
   accounts: 'accounts staff',
+  cashier: 'a cashier (till only)',
 };
 
 // Where a teammate lands from the invite link an admin shared on WhatsApp

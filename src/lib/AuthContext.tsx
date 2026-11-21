@@ -5,7 +5,8 @@ import { platform } from './api';
 import { clearAllCache } from './offlineCache';
 import { clearQueue } from './offlineQueue';
 
-export type Role = 'admin' | 'sales' | 'inventory' | 'accounts';
+// 'cashier' is till only (migration 0054): POS and their own profile, nothing else.
+export type Role = 'admin' | 'sales' | 'inventory' | 'accounts' | 'cashier';
 
 export interface Profile {
   id: string;

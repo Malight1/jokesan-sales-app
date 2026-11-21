@@ -156,6 +156,16 @@ async function rpc<T>(name: string, args?: Record<string, any>): Promise<T> {
   return res.data as T;
 }
 // Await an RPC/void write.
+// A manager's PIN is checked first, on its own (0055), so every wrong try
+// is recorded and five in a row lock the person asking out for a while.
+// The action that follows only accepts a PIN that passed this check.
+async function approvalArgs(approval?: { userId: string; pin: string } | null): Promise<Record<string, any>> {
+  if (!approval) return {};
+  const ok = await rpc<boolean>('check_approval_pin', { p_approver: approval.userId, p_pin: approval.pin });
+  if (!ok) throw new Error('That PIN isn’t right. Check it and try again.');
+  return { p_approval: { user_id: approval.userId, pin: approval.pin } };
+}
+
 async function rpcVoid(name: string, args?: Record<string, any>): Promise<void> {
   const res = await supabase.rpc(name, args);
   if (res.error) throw new Error(res.error.message);
@@ -410,15 +420,15 @@ export const sales = {
     orderDiscount?: number;
     // Needed only when the combined discount is over the cashier's limit.
     approval?: { userId: string; pin: string } | null;
-  }) =>
+  }) => approvalArgs(params.approval).then(approval =>
     rpc<string>('create_sale', {
       p_customer: params.customerId, p_date: params.date,
       p_payment_type: params.paymentTypeId, p_amount_paid: params.amountPaid, p_items: params.items,
       p_vat_rate: params.vatRate ?? 0,
       ...(params.branchId ? { p_branch: params.branchId } : {}),
       ...(params.orderDiscount ? { p_order_discount: params.orderDiscount } : {}),
-      ...(params.approval ? { p_approval: { user_id: params.approval.userId, pin: params.approval.pin } } : {}),
-    }),
+      ...approval,
+    })),
   addPayment: (saleId: string, amount: number, paymentTypeId: string | null, reference?: string, notes?: string) =>
     rpcVoid('record_sale_payment', {
       p_sale: saleId, p_amount: amount, p_payment_type: paymentTypeId,
@@ -620,7 +630,22 @@ export const returns = {
       p_from: from || null, p_to: to || null,
       ...(branchId ? { p_branch: branchId } : {}),
     }),
+  // Returns per day, by the RETURN's own date (0055), for netting off
+  // sales, cost and profit in Reports.
+  totalsByDay: (from?: string, to?: string, branchId?: string | null) =>
+    rpc<ReturnTotalsByDay[]>('report_return_totals', {
+      p_from: from || null, p_to: to || null,
+      ...(branchId ? { p_branch: branchId } : {}),
+    }),
 };
+
+export interface ReturnTotalsByDay {
+  return_date: string;
+  subtotal: number;      // before VAT
+  vat_amount: number;
+  total: number;
+  cogs_reversed: number; // cost of what went back on the shelf
+}
 
 // A named customer's earned-but-unspent refund. Spending it works like a
 // second payment on a later sale — record_sale_payment is untouched.
@@ -668,10 +693,9 @@ export const quotes = {
   setStatus: (id: string, status: Exclude<QuoteStatus, 'converted'>) =>
     rpcVoid('update_quote_status', { p_quote: id, p_status: status }),
   convert: (id: string, amountPaid: number, paymentTypeId: string | null, approval?: { userId: string; pin: string } | null) =>
-    rpc<string>('convert_quote', {
-      p_quote: id, p_amount_paid: amountPaid, p_payment_type: paymentTypeId,
-      ...(approval ? { p_approval: { user_id: approval.userId, pin: approval.pin } } : {}),
-    }),
+    approvalArgs(approval).then(args => rpc<string>('convert_quote', {
+      p_quote: id, p_amount_paid: amountPaid, p_payment_type: paymentTypeId, ...args,
+    })),
 };
 
 // ============================================================
@@ -863,7 +887,7 @@ export interface BranchSnapshot {
   month_profit: number; outstanding: number; low_stock: number;
 }
 export interface DashboardSummary {
-  role: 'admin' | 'sales' | 'inventory' | 'accounts';
+  role: 'admin' | 'sales' | 'inventory' | 'accounts' | 'cashier';
   business_type?: 'retail' | 'manufacturing';
   account_live: boolean;
   multi_branch?: boolean;
@@ -950,6 +974,11 @@ export const team = {
     const rows = (res.data ?? []) as InviteDetails[];
     return rows[0] ?? null;
   },
+  // Who can approve a cashier's return (admin, sales, accounts with a PIN).
+  returnApprovers: () => rpc<{ id: string; name: string; role: string }[]>('return_approvers'),
+  // The approver types their PIN on the cashier's screen. false = wrong PIN.
+  approveReturn: (saleId: string, approverId: string, pin: string) =>
+    rpc<boolean>('approve_cashier_return', { p_sale: saleId, p_approver: approverId, p_pin: pin }),
   // Emails the join link through invite-teammate (Resend). Returns the
   // real reason on failure so the screen never claims an email went out.
   emailInvite: async (inviteId: string): Promise<{ success?: boolean; to?: string; error?: string; code?: string }> => {
@@ -1138,10 +1167,9 @@ export const shifts = {
   myOpenShiftId: () => rpc<string | null>('current_open_shift'),
   open: (registerId: string, float: number) => rpc<string>('open_shift', { p_register: registerId, p_float: float }),
   addCashMovement: (kind: 'pay_in' | 'pay_out' | 'drop', amount: number, reason: string, approval?: { userId: string; pin: string } | null) =>
-    rpc<string>('add_cash_movement', {
-      p_kind: kind, p_amount: amount, p_reason: reason,
-      ...(approval ? { p_approval: { user_id: approval.userId, pin: approval.pin } } : {}),
-    }),
+    approvalArgs(approval).then(args => rpc<string>('add_cash_movement', {
+      p_kind: kind, p_amount: amount, p_reason: reason, ...args,
+    })),
   xReport: (shiftId?: string) => rpc<ShiftReport>('x_report', shiftId ? { p_shift: shiftId } : undefined),
   zReport: (shiftId: string) => rpc<ShiftReport>('z_report', { p_shift: shiftId }),
   close: (countedCash: number, breakdown?: Record<string, number> | null, notes?: string | null) =>
@@ -1171,6 +1199,24 @@ export interface AuditLogEntry {
   action: string; entity: string | null; entity_id: string | null;
   meta: Record<string, any> | null; created_at: string;
 }
+
+// What cashiers did at the till that the owner should see (migration
+// 0054): credit given, and returns a manager approved. Admin only, like
+// the audit log it reads from.
+export interface TillWatchEntry {
+  id: number | string; created_at: string; user_id: string | null; action: 'till_credit_sale' | 'till_return_approved';
+  entity_id: string | null; meta: Record<string, any> | null;
+}
+export const tillWatch = {
+  recent: (days = 7) => run<TillWatchEntry[]>(supabase.from('audit_logs')
+    .select('id, created_at, user_id, action, entity_id, meta')
+    .in('action', ['till_credit_sale', 'till_return_approved'])
+    .gte('created_at', new Date(Date.now() - days * 86_400_000).toISOString())
+    .order('created_at', { ascending: false }).limit(30)),
+  customerNames: (ids: string[]) => ids.length === 0 ? Promise.resolve([] as Pick<Customer, 'id' | 'first_name' | 'last_name' | 'company_store'>[])
+    : run<Pick<Customer, 'id' | 'first_name' | 'last_name' | 'company_store'>[]>(
+      supabase.from('customers').select('id, first_name, last_name, company_store').in('id', ids)),
+};
 
 export const auditLog = {
   list: (opts: { from?: string; to?: string } = {}) =>

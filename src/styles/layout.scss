@@ -377,3 +377,60 @@
   &:hover { background: $gray-100; }
   @media (max-width: 900px) { display: flex; }
 }
+
+// ---- Till-only shell for cashiers (migration 0054) ----
+.till-shell {
+  min-height: 100vh;
+  background: $gray-50;
+  display: flex;
+  flex-direction: column;
+}
+.till-topbar {
+  position: sticky;
+  top: 0;
+  z-index: $z-sticky;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1.25rem;
+  background: $sidebar-bg;
+  color: $white;
+
+  .till-brand { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+  .logo-icon {
+    width: 34px; height: 34px; border-radius: $radius;
+    display: flex; align-items: center; justify-content: center;
+    background: $primary; color: $white; font-weight: 800;
+  }
+  .till-logo { width: 34px; height: 34px; border-radius: $radius; object-fit: cover; background: $white; }
+  .till-business { font-weight: 700; font-size: $font-size-sm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .till-sub { font-size: $font-size-xs; color: rgba(255, 255, 255, 0.6); }
+  .till-topbar-right { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+}
+.till-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.4rem 0.75rem;
+  border-radius: $radius-full;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: $white;
+  font: 600 0.8rem/1.2 $font-family;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  svg { flex-shrink: 0; }
+  &:hover { background: rgba(255, 255, 255, 0.12); }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &.is-warn { background: $warning-light; color: $warning; border-color: transparent; }
+  &.is-bad { background: $danger-light; color: $danger; border-color: transparent; }
+}
+.till-content {
+  flex: 1;
+  padding: 1rem 1.25rem;
+  @media (max-width: 640px) { padding: 0.75rem; }
+}

@@ -59,12 +59,15 @@ export default function Reports() {
   // Netted by the return's OWN date (migration 0023), so this can differ
   // from what the Sales tab shows for the same range.
   const returnsQ = useQuery(() => returnsApi.byProduct(from, to, branch || null), [from, to, branch]);
+  // Returns are taken off on the day they happened (0055), like the
+  // dashboard, so a return in October doesn't rewrite September.
+  const returnTotalsQ = useQuery(() => returnsApi.totalsByDay(from, to, branch || null), [from, to, branch]);
   const discountsQ = useQuery(() => tiersEnabled ? pricing.discountReport(from, to, branch || null) : Promise.resolve([]), [from, to, branch, tiersEnabled]);
   // Per-branch quantities for the Stock tab when a branch is chosen.
   const levelsQ = useQuery(() => stock.levels(null), []);
 
-  const loading = salesQ.loading || expQ.loading || goodsQ.loading;
-  const error = salesQ.error || expQ.error || goodsQ.error;
+  const loading = salesQ.loading || expQ.loading || goodsQ.loading || returnTotalsQ.loading;
+  const error = salesQ.error || expQ.error || goodsQ.error || returnTotalsQ.error;
 
   const inRange = (d: string | null) => {
     if (!d) return true;
@@ -82,9 +85,19 @@ export default function Reports() {
   const branchQty = qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), branch);
   const goods = (goodsQ.data ?? []).map(g => branch ? { ...g, qty_balance: branchQty.get(g.id) ?? 0 } : g);
 
-  const totalSales = sales.reduce((s, t) => s + (t.total_amount || 0), 0);
-  const totalCogs = sales.reduce((s, t) => s + (t.cogs || 0), 0);
-  const grossProfit = sales.reduce((s, t) => s + (t.gross_profit || 0), 0);
+  // Revenue is before VAT: VAT is the government's money, and gross
+  // profit (which the engine already works out without VAT) has to equal
+  // revenue minus cost of goods on the P&L.
+  const returnDays = returnTotalsQ.data ?? [];
+  const exVat = (t: { total_amount: number; vat_amount?: number | null }) => (t.total_amount || 0) - (t.vat_amount || 0);
+  const grossSales = sales.reduce((s, t) => s + exVat(t), 0);
+  const returnsExVat = returnDays.reduce((s, r) => s + Number(r.subtotal || 0), 0);
+  const totalSales = grossSales - returnsExVat;
+  const totalCogs = sales.reduce((s, t) => s + (t.cogs || 0), 0)
+    - returnDays.reduce((s, r) => s + Number(r.cogs_reversed || 0), 0);
+  const grossProfit = totalSales - totalCogs;
+  const vatCollected = sales.reduce((s, t) => s + (t.vat_amount || 0), 0)
+    - returnDays.reduce((s, r) => s + Number(r.vat_amount || 0), 0);
   const totalOutstanding = sales.reduce((s, t) => s + (t.balance || 0), 0);
   const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
   const netProfit = grossProfit - totalExpenses;
@@ -111,7 +124,12 @@ export default function Reports() {
     if (!s.transaction_date) return;
     const { key, label } = periodBucket(s.transaction_date);
     periodMap[key] = periodMap[key] || { label, sales: 0, expenses: 0 };
-    periodMap[key].sales += s.total_amount || 0;
+    periodMap[key].sales += exVat(s);
+  });
+  returnDays.forEach(r => {
+    const { key, label } = periodBucket(r.return_date);
+    periodMap[key] = periodMap[key] || { label, sales: 0, expenses: 0 };
+    periodMap[key].sales -= Number(r.subtotal || 0);
   });
   expenses.forEach(e => {
     if (!e.expense_date) return;
@@ -279,11 +297,14 @@ export default function Reports() {
     if (tab === 'pnl') {
       cols = [{ header: 'Item', value: r => r.item }, { header: 'Amount (₦)', value: r => r.amount }];
       rows = [
+        { item: 'Sales (before VAT)', amount: grossSales },
+        { item: 'Less returns', amount: -returnsExVat },
         { item: 'Revenue', amount: totalSales },
         { item: 'Cost of Goods Sold (COGS)', amount: -totalCogs },
         { item: 'Gross Profit', amount: grossProfit },
         { item: 'Operating Expenses', amount: -totalExpenses },
         { item: 'Net Profit', amount: netProfit },
+        ...(vatCollected !== 0 ? [{ item: 'VAT collected (owed to the tax office, not income)', amount: vatCollected }] : []),
       ];
       name = 'profit-and-loss'; title = 'Profit & Loss' + rangeLabel;
     } else if (tab === 'sales') {
@@ -429,7 +450,11 @@ export default function Reports() {
         <div className="card" style={{ maxWidth: 560 }}>
           <h3 style={{ marginBottom: '1rem' }}>Profit &amp; Loss{rangeLabel}</h3>
           {[
-            { label: 'Revenue', value: totalSales },
+            ...(returnsExVat !== 0 ? [
+              { label: 'Sales (before VAT)', value: grossSales },
+              { label: 'Less returns', value: -returnsExVat },
+            ] : []),
+            { label: 'Revenue', value: totalSales, strong: returnsExVat !== 0 },
             { label: 'Cost of Goods Sold (COGS)', value: -totalCogs },
             { label: 'Gross Profit', value: grossProfit, strong: true },
             { label: 'Operating Expenses', value: -totalExpenses },
@@ -447,6 +472,11 @@ export default function Reports() {
               </span>
             </div>
           ))}
+          {vatCollected !== 0 && (
+            <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.75rem' }}>
+              VAT collected in this period: <strong>{fmt(vatCollected)}</strong>. It is owed to the tax office, so it isn't counted as revenue.
+            </p>
+          )}
         </div>
       )}
 

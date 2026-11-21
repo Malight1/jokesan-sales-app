@@ -1,3 +1,4 @@
+import TillWatchPanel from '../components/TillWatchPanel';
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -730,6 +731,7 @@ export default function Dashboard() {
         </div>
       )}
       <DashboardView d={data} onRefresh={refetch} expiry={expiryQ.data} />
+      {data.role === 'admin' && <TillWatchPanel />}
     </>
   );
 }

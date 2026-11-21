@@ -1147,6 +1147,8 @@ begin
       v_wbuyer, jsonb_build_array(jsonb_build_object('finished_good_id', v_pitem, 'quantity', 1, 'unit_price', 50, 'discount_reason', 'phase3-test'))::text,
       jsonb_build_object('user_id', v_admin, 'pin', '0000')::text),
     'manager''s PIN');
+  -- 0055: a PIN is checked (and the try recorded) before the sale uses it.
+  perform t_rec('check_approval_pin accepts the right PIN', public.check_approval_pin(v_admin, '1234'));
   execute format('select public.create_sale(p_customer := %L::uuid, p_date := current_date, p_payment_type := null, p_amount_paid := 0, p_items := %L::jsonb, p_approval := %L::jsonb)',
     v_wbuyer, jsonb_build_array(jsonb_build_object('finished_good_id', v_pitem, 'quantity', 1, 'unit_price', 50, 'discount_reason', 'phase3-test'))::text,
     jsonb_build_object('user_id', v_admin, 'pin', '1234')::text) into v_sale;
@@ -1314,6 +1316,7 @@ begin
   perform t_err('a pay-out over the limit needs a manager''s PIN',
     format('select public.add_cash_movement(%L, 6000, %L)', 'pay_out', 'rent top-up'), 'manager''s PIN');
   perform public.add_cash_movement('pay_out', 500, 'fuel for delivery bike');
+  perform public.check_approval_pin(v_admin, '1234');
   perform public.add_cash_movement('pay_out', 6000, 'rent top-up', jsonb_build_object('user_id', v_admin, 'pin', '1234'));
 
   -- ---- F: the X report reconciles what should be in the drawer ----
@@ -1569,6 +1572,7 @@ begin
   perform t_as(v_cashier);
   perform t_err('converting a quote whose discount is over the limit needs a manager''s PIN, same as a sale would',
     format('select public.convert_quote(%L::uuid, 0, null)', v_quote), 'manager''s PIN');
+  perform public.check_approval_pin(v_admin, '1234');
   execute format('select public.convert_quote(%L::uuid, 0, null, null, %L::jsonb)',
     v_quote, jsonb_build_object('user_id', v_admin, 'pin', '1234')::text) into v_sale;
   perform t_su();
@@ -3459,6 +3463,163 @@ begin
 
   perform t_rec('suppliers can hold bank details',
     exists (select 1 from information_schema.columns where table_name = 'suppliers' and column_name = 'account_number'));
+end $$;
+
+-- ---------- 22. the Cashier (till only) role (0054) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos');
+  v_reg uuid; v_soap uuid; v_cust uuid; v_sale uuid; v_credit uuid; v_item uuid; v_ok boolean; i int;
+begin
+  perform t_su();
+  insert into staff_invites (tenant_id, email, role, branch_id) values (v_t, 'till@jokesan.ng', 'cashier', v_lagos);
+  insert into auth.users (id, email, raw_user_meta_data) values ('00000000-0000-0000-0000-000000000031', 'till@jokesan.ng', '{"full_name":"Till Cashier"}');
+  perform t_rec('an invited cashier joins as a cashier at their branch',
+    (select role::text = 'cashier' and branch_id = v_lagos from profiles where id = '00000000-0000-0000-0000-000000000031'));
+  insert into registers (tenant_id, branch_id, name) values (v_t, v_lagos, 'Till 2') returning id into v_reg;
+  update tenants set shift_rules = jsonb_set(shift_rules, '{required_for}', '[]') where id = v_t;
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(v_lagos);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (v_t, 'Till Soap', 'pcs', 5, 100, 1.5) returning id into v_soap;
+  perform public.adjust_stock(v_lagos, 'finished_good', v_soap, 50, 40, 'Opening balance');
+  insert into customers (tenant_id, first_name, custom_fields) values (v_t, 'Credit Buyer', '{"cac_number":"RC123"}') returning id into v_cust;
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  perform t_rec('the engine reads a cashier as sales, the real role stays cashier',
+    public.current_role() = 'sales' and public.real_role() = 'cashier');
+  perform t_err('a cashier must open the till even when the business does not require it',
+    format('select public.create_sale(null, current_date, null, 200, %L::jsonb)', t_items(v_soap, 2, 100)), 'Open your till');
+  perform public.open_shift(v_reg, 1000);
+  execute format('select public.create_sale(null, current_date, null, 200, %L::jsonb)', t_items(v_soap, 2, 100)) into v_sale;
+  perform t_rec('with the till open, a cashier can sell', (select shift_id is not null from sales_orders where id = v_sale));
+  perform t_err('a cashier cannot give credit to a walk-in',
+    format('select public.create_sale(null, current_date, null, 50, %L::jsonb)', t_items(v_soap, 1, 100)), 'needs a customer');
+  execute format('select public.create_sale(%L::uuid, current_date, null, 40, %L::jsonb)', v_cust, t_items(v_soap, 1, 100)) into v_credit;
+  perform t_rec('credit to a named customer goes through', (select balance from sales_orders where id = v_credit) = 60);
+
+  perform t_rec('a cashier sees only their own sales',
+    not exists (select 1 from sales_orders where created_by is distinct from auth.uid())
+    and exists (select 1 from sales_orders where id = v_sale));
+  perform t_rec('a cashier cannot see another person''s sale lines',
+    not exists (select 1 from sale_items where sales_order_id = t_id('rsale1')));
+  perform t_rec('a cashier cannot see quotes or deliveries',
+    (select count(*) from quotes) = 0 and (select count(*) from deliveries) = 0);
+  perform t_err('a cashier cannot hold an approval PIN', $q$select public.set_approval_pin('1234')$q$, 'can''t have an approval PIN');
+
+  select id into v_item from sale_items where sales_order_id = v_sale;
+  perform t_err('a cashier''s return is refused without approval',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, %L)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 1))::text, 'no approval'),
+    'approve this return');
+  perform t_su();
+
+  perform t_rec('the credit sale is written to the audit log with the cashier',
+    exists (select 1 from audit_logs where action = 'till_credit_sale' and entity_id = v_credit::text and user_id = '00000000-0000-0000-0000-000000000031'));
+  perform t_rec('a full-payment sale is not flagged as credit',
+    not exists (select 1 from audit_logs where action = 'till_credit_sale' and entity_id = v_sale::text));
+
+  -- A sales lead sets a PIN (sales can now hold one, for approving returns).
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform public.set_approval_pin('4321');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  perform t_rec('the sales lead is offered as an approver',
+    exists (select 1 from public.return_approvers() where id = '00000000-0000-0000-0000-000000000002'));
+  select public.approve_cashier_return(v_sale, '00000000-0000-0000-0000-000000000002', '0000') into v_ok;
+  perform t_rec('a wrong PIN does not approve', not v_ok);
+  select public.approve_cashier_return(v_sale, '00000000-0000-0000-0000-000000000002', '4321') into v_ok;
+  perform t_rec('the right PIN approves', v_ok);
+  perform public.create_sale_return(v_sale, jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 1)), 'approved');
+  perform t_rec('the approved return goes through, stamped with who approved it',
+    exists (select 1 from sale_returns where sales_order_id = v_sale and approved_by = '00000000-0000-0000-0000-000000000002'));
+  perform t_err('one approval covers one return only',
+    format('select public.create_sale_return(%L::uuid, %L::jsonb, %L)', v_sale,
+      jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 1))::text, 'second'),
+    'approve this return');
+  for i in 1..4 loop
+    perform public.approve_cashier_return(v_sale, '00000000-0000-0000-0000-000000000002', '9999');
+  end loop;
+  perform t_err('five wrong PINs lock approvals for a while',
+    format('select public.approve_cashier_return(%L::uuid, %L::uuid, %L)', v_sale, '00000000-0000-0000-0000-000000000002', '4321'),
+    'Too many wrong PINs');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_rec('a sales lead still sees every sale at their branch',
+    exists (select 1 from sales_orders where created_by is distinct from auth.uid()));
+  perform t_su();
+  perform t_rec('a sales lead''s PIN still cannot approve discounts (admin only)',
+    not public.verify_approval_pin('00000000-0000-0000-0000-000000000002', '4321'));
+end $$;
+
+-- ---------- 23. money and fraud fixes (0055) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant');
+  v_soap uuid; v_sale uuid; v_appr jsonb; i int;
+  v_owner uuid := '00000000-0000-0000-0000-000000000001';
+  v_lead  uuid := '00000000-0000-0000-0000-000000000002';
+begin
+  perform t_su();
+  select id into v_soap from finished_goods where tenant_id = v_t and name = 'Till Soap';
+  perform t_as(v_owner);
+  perform public.set_approval_pin('2468');
+  -- The sales lead works at Abuja, so stock the soap there too.
+  perform public.adjust_stock(t_id('abuja'), 'finished_good', v_soap, 20, 40, 'Opening balance');
+  perform t_su();
+  v_appr := jsonb_build_object('user_id', v_owner, 'pin', '2468');
+
+  -- ---- sale dates ----
+  perform t_as(v_lead);
+  perform t_err('staff cannot date a sale in the future',
+    format('select public.create_sale(null, %L::date, null, 100, %L::jsonb)', public.shop_today() + 1, t_items(v_soap, 1, 100)),
+    'future');
+  perform t_err('staff cannot backdate a sale more than 3 days',
+    format('select public.create_sale(null, %L::date, null, 100, %L::jsonb)', public.shop_today() - 10, t_items(v_soap, 1, 100)),
+    'more than 3 days back');
+  perform t_ok('a sale from 2 days ago (an offline sale syncing late) still goes through',
+    format('select public.create_sale(null, %L::date, null, 100, %L::jsonb)', public.shop_today() - 2, t_items(v_soap, 1, 100)));
+  perform t_su();
+  perform t_rec('...and is written to the audit log as backdated',
+    exists (select 1 from audit_logs where tenant_id = v_t and action = 'backdated_sale'));
+  perform t_as(v_owner);
+  perform t_ok('the owner can still date a sale any day back',
+    format('select public.create_sale(null, %L::date, null, 100, %L::jsonb)', public.shop_today() - 30, t_items(v_soap, 1, 100)));
+  perform t_su();
+
+  -- ---- manager PIN tries ----
+  perform t_as(v_lead);
+  perform t_err('a PIN sent straight to create_sale, unchecked, is refused',
+    format('select public.create_sale(null, current_date, null, 50, %L::jsonb, 0, null, 0, %L::jsonb)', t_items(v_soap, 1, 50), v_appr::text),
+    'manager''s PIN');
+  perform t_rec('the right PIN passes the check', public.check_approval_pin(v_owner, '2468'));
+  execute format('select public.create_sale(null, current_date, null, 50, %L::jsonb, 0, null, 0, %L::jsonb)', t_items(v_soap, 1, 50), v_appr::text) into v_sale;
+  perform t_rec('...and then approves the discount, stamped with who approved it',
+    (select approved_by = v_owner from sales_orders where id = v_sale));
+  perform t_err('one check approves one discount only',
+    format('select public.create_sale(null, current_date, null, 50, %L::jsonb, 0, null, 0, %L::jsonb)', t_items(v_soap, 1, 50), v_appr::text),
+    'manager''s PIN');
+  for i in 1..5 loop
+    perform t_rec('wrong PIN ' || i || ' is turned down', not public.check_approval_pin(v_owner, '0000'));
+  end loop;
+  perform t_err('after five wrong PINs, even the right one is locked out for a while',
+    format('select public.check_approval_pin(%L::uuid, %L)', v_owner, '2468'), 'Too many wrong PINs');
+  perform t_su();
+  perform t_rec('every try is recorded, wrong ones included',
+    (select count(*) from approval_pin_attempts where tenant_id = v_t and requested_by = v_lead and not ok) = 5);
+
+  -- ---- returns in reports ----
+  perform t_as(v_owner);
+  perform t_rec('report_return_totals reports the returns made, before and after VAT',
+    (select coalesce(sum(total), 0) > 0 and coalesce(sum(subtotal), 0) <= coalesce(sum(total), 0) from public.report_return_totals()));
+  perform t_su();
+  perform t_as(v_lead);
+  perform t_err('a sales lead cannot read the returns totals', 'select * from public.report_return_totals()', 'Only admin and accounts');
+  perform t_su();
 end $$;
 
 select name, pass, detail from t_results order by n;

@@ -274,6 +274,60 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // A till-only cashier (migration 0054) gets the till and nothing else:
+  // no sidebar, no menu, no settings. Just who they are, sync status and
+  // sign out around the POS screen.
+  if (role === 'cashier') {
+    return (
+      <div className="till-shell">
+        <header className="till-topbar">
+          <div className="till-brand">
+            {tenant?.logo_url
+              ? <img src={tenant.logo_url} alt="" className="till-logo" />
+              : <div className="logo-icon">{initial}</div>}
+            <div>
+              <div className="till-business">{tenantName}</div>
+              <div className="till-sub">{multi ? `Till · ${myBranchName}` : 'Till'}</div>
+            </div>
+          </div>
+          <div className="till-topbar-right">
+            {(!online || pendingCount > 0 || failedCount > 0) && (
+              <button onClick={() => setShowSync(true)} className={`till-chip ${!online || failedCount > 0 ? 'is-bad' : 'is-warn'}`}>
+                {!online ? <WifiOff size={13} /> : <CloudOff size={13} />}
+                {!online ? 'Offline' : `${pendingCount + failedCount} pending sync`}
+              </button>
+            )}
+            <button className="till-chip" onClick={() => navigate(location.pathname === '/profile' ? '/pos' : '/profile')}
+              aria-label={location.pathname === '/profile' ? 'Back to the till' : 'My profile'}>
+              <UserCircle size={15} /> {location.pathname === '/profile' ? 'Back to till' : userName}
+            </button>
+            <button className="till-chip" onClick={handleSignOutClick}>Sign out</button>
+          </div>
+        </header>
+        <main className="till-content">
+          {!acct.live && (
+            <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+              <div><strong>Read-only right now.</strong> Ask your manager to sort out the account before selling.</div>
+            </div>
+          )}
+          {children}
+        </main>
+        {showSync && <PendingSyncPanel queue={queue} online={online} onClose={() => setShowSync(false)} />}
+        {confirmSignOut && (
+          <ConfirmDialog
+            title="Unsynced sales pending"
+            message={<>You have <strong>{pendingCount + failedCount}</strong> sale{pendingCount + failedCount !== 1 ? 's' : ''} not yet synced. Signing out now will <strong>discard them</strong>. Cancel, then tap the "pending sync" button to sync first.</>}
+            confirmLabel="Sign out anyway"
+            pending={false}
+            onConfirm={() => { setConfirmSignOut(false); signOut(); }}
+            onCancel={() => setConfirmSignOut(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <div className={`sidebar-scrim${drawerOpen ? ' show' : ''}`} onClick={() => setDrawerOpen(false)} />

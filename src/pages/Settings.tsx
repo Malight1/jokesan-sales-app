@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus, MessageCircle, Mail } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Landmark, Link2, ShieldCheck, ListPlus, MessageCircle, Mail } from 'lucide-react';
 import { whatsappLink } from '../lib/whatsapp';
+import ApprovalPinCard from '../components/ApprovalPinCard';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, PlanUsage, branches as branchesApi, docs,
@@ -44,6 +45,7 @@ const roleOptions = [
   { value: 'sales', label: 'Sales — orders & customers' },
   { value: 'inventory', label: 'Inventory — stock & production' },
   { value: 'accounts', label: 'Accounts — finance & reports' },
+  { value: 'cashier', label: 'Cashier — till only' },
 ];
 
 // z for a target service level — the database only ever stores and uses
@@ -914,7 +916,7 @@ function BusinessTab() {
 // ============================================================
 // Team — members, roles, invites
 // ============================================================
-const ROLE_NAME: Record<string, string> = { admin: 'Admin', sales: 'Sales', inventory: 'Inventory', accounts: 'Accounts' };
+const ROLE_NAME: Record<string, string> = { admin: 'Admin', sales: 'Sales', inventory: 'Inventory', accounts: 'Accounts', cashier: 'Cashier (till only)' };
 
 // What the admin sends on WhatsApp. The link does all the work: the
 // teammate opens it, picks a password and is inside the business. No
@@ -1127,6 +1129,11 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                   <select value={invRole} onChange={e => setInvRole(e.target.value)}>
                     {roleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
+                  {invRole === 'cashier' && (
+                    <small className="setting-hint">
+                      They only get the till. They must open the till before selling, credit they give is shown to you under Till watch on the dashboard, and every return needs your PIN (or a sales lead's or accounts').
+                    </small>
+                  )}
                 </div>
                 {isMultiBranch && (
                   <div className="form-group">
@@ -1741,46 +1748,6 @@ function PriceRow({ good, priceListId, current, onSaved }: {
                      onBlur={commit} placeholder="Same as selling price" />
       </td>
     </tr>
-  );
-}
-
-function ApprovalPinCard() {
-  const toast = useToast();
-  const hasPinQ = useQuery<boolean>(() => pricing.hasApprovalPin(), []);
-  const [pin, setPin] = useState('');
-  const [pin2, setPin2] = useState('');
-  const saveMut = useMutation(pricing.setApprovalPin);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!/^[0-9]{4,6}$/.test(pin)) { toast.error('Use a 4 to 6 digit PIN.'); return; }
-    if (pin !== pin2) { toast.error("The two PINs don't match."); return; }
-    const res = await saveMut.mutate(pin);
-    if (res !== null) { toast.success('Your approval PIN is set.'); setPin(''); setPin2(''); hasPinQ.refetch(); }
-    else toast.error(saveMut.error ?? 'Could not set the PIN.');
-  };
-
-  return (
-    <div className="card">
-      <h3 style={{ marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: 8 }}><Lock size={16} /> Your Approval PIN</h3>
-      <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
-        When a cashier tries to give a discount above their limit, they'll ask you for this PIN.
-        {hasPinQ.data && ' A PIN is already set — saving a new one replaces it.'}
-      </p>
-      <form onSubmit={submit} className="grid-2" style={{ maxWidth: 400 }}>
-        <div className="form-group">
-          <label>New PIN (4–6 digits)</label>
-          <input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} />
-        </div>
-        <div className="form-group">
-          <label>Confirm PIN</label>
-          <input type="password" inputMode="numeric" maxLength={6} value={pin2} onChange={e => setPin2(e.target.value.replace(/\D/g, ''))} />
-        </div>
-        <button className="btn-primary" type="submit" disabled={saveMut.pending} style={{ gridColumn: '1 / -1', justifySelf: 'start' }}>
-          {saveMut.pending ? 'Saving…' : 'Set PIN'}
-        </button>
-      </form>
-    </div>
   );
 }
 

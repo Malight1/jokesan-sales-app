@@ -9,8 +9,9 @@ import { shifts, ShiftReport } from './api';
 // sale itself still queues as normal and the server is the one that will
 // actually refuse it on sync if a till really was required.
 export function useTillGate() {
-  const { tenant } = useAuth();
-  const required = !!tenant?.shift_rules?.required_for?.includes('sales');
+  const { tenant, profile } = useAuth();
+  // A till-only cashier always opens the till first (migration 0054).
+  const required = profile?.role === 'cashier' || !!tenant?.shift_rules?.required_for?.includes('sales');
 
   const q = useQuery<ShiftReport | null>(async () => {
     const id = await shifts.myOpenShiftId();

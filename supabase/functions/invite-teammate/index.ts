@@ -29,7 +29,7 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const ROLE_NAME: Record<string, string> = { admin: 'Admin', sales: 'Sales', inventory: 'Inventory', accounts: 'Accounts' };
+const ROLE_NAME: Record<string, string> = { admin: 'Admin', sales: 'Sales', inventory: 'Inventory', accounts: 'Accounts', cashier: 'Cashier (till only)' };
 
 // Only ever link to ProfixBook itself (or a local dev server), whatever
 // origin the browser sent.
