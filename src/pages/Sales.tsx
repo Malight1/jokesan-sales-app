@@ -12,7 +12,7 @@ import { useAuth } from '../lib/AuthContext';
 import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf, generateCreditNotePdf } from '../lib/invoice';
-import { whatsappLink } from '../lib/whatsapp';
+import { whatsappLink, howToPayLines, paymentRequestMessage } from '../lib/whatsapp';
 import { enqueuePayment } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
@@ -47,6 +47,9 @@ export default function Sales() {
   // rather than letting staff click into a permission error.
   const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  // Cost and profit are the owner's business, not the cashier's: only
+  // admin and accounts see them.
+  const seesProfit = isAdmin || profile?.role === 'accounts';
   const tiersEnabled = hasFeature(tenant, 'price_tiers');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<SalesOrder[]>(() => salesApi.list(), [], { cacheKey: 'sales-list' });
   const { data: customers } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'sales-customers' });
@@ -257,8 +260,9 @@ export default function Sales() {
       `Date: ${s.transaction_date}`,
       `Total: ₦${s.total_amount.toLocaleString()}`,
       `Paid: ₦${s.amount_paid.toLocaleString()}`,
-      s.balance > 0 ? `Balance due: ₦${s.balance.toLocaleString()}` : `Status: PAID ✅`,
+      s.balance > 0 ? `Balance due: *₦${s.balance.toLocaleString()}*` : `Status: PAID ✅`,
       ``,
+      ...(s.balance > 0 ? howToPayLines(tenant?.bank_details) : []),
       `Thank you for your patronage!`,
     ];
     window.open(whatsappLink(cust?.phone, lines.join('\n')), '_blank');
@@ -273,12 +277,12 @@ export default function Sales() {
       const res = await paymentsApi.createLink(s.id);
       if (res.error || !res.url) { toast.error(res.error ?? 'Could not create a payment link.'); return; }
       const cust = customers?.find(c => c.id === s.customer_id);
-      const lines = [
-        `Hello ${customerName(s.customer_id)}! To pay for ${invoiceNo(s)} (₦${s.balance.toLocaleString()}):`,
-        ``,
-        res.url,
-      ];
-      window.open(whatsappLink(cust?.phone, lines.join('\n')), '_blank');
+      const message = paymentRequestMessage({
+        businessName: tenant?.name ?? 'us', customerName: customerName(s.customer_id), total: s.balance,
+        invoices: [{ docNo: invoiceNo(s), date: s.transaction_date, balance: s.balance }],
+        bank: tenant?.bank_details, payUrl: res.url, friendly: false,
+      });
+      window.open(whatsappLink(cust?.phone, message), '_blank');
       toast.success('Payment link created — the sale updates automatically once it\'s paid.');
     } catch (e: any) {
       toast.error(e.message ?? 'Could not create a payment link.');
@@ -309,7 +313,7 @@ export default function Sales() {
     { key: 'total_amount', header: 'Total', align: 'right', value: s => s.total_amount, render: s => fmt(s.total_amount) },
     { key: 'amount_paid', header: 'Paid', align: 'right', value: s => s.amount_paid, render: s => fmt(s.amount_paid) },
     { key: 'balance', header: 'Balance', align: 'right', value: s => s.balance, render: s => <span className={s.balance > 0 ? 'text-danger' : ''}>{fmt(s.balance)}</span> },
-    { key: 'gross_profit', header: 'Profit', align: 'right', value: s => s.gross_profit, render: s => <span style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</span> },
+    ...(seesProfit ? [{ key: 'gross_profit', header: 'Profit', align: 'right', value: (s: SalesOrder) => s.gross_profit, render: (s: SalesOrder) => <span style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</span> } as Column<SalesOrder>] : []),
     { key: 'payment_status', header: 'Status', value: s => s.voided ? 'Voided' : (statusMap[s.payment_status]?.label ?? s.payment_status),
       render: s => s.voided
         ? <span className="badge-gray" style={{ textDecoration: 'line-through' }}>Voided</span>
@@ -834,6 +838,8 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
   onVoidedReturn: () => void;
   customFieldDefs?: CustomFieldDef[] | null;
 }) {
+  const { profile: viewer } = useAuth();
+  const seesProfit = viewer?.role === 'admin' || viewer?.role === 'accounts';
   const { data, loading, error, refetch } = useQuery<any>(() => salesApi.detail(id), [id]);
   const { data: creditNotes, refetch: refetchReturns } = useQuery(() => returnsApi.sales.forSale(id), [id]);
   const { tenant } = useAuth();
@@ -909,8 +915,8 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
               <div className="view-meta">
                 <div><span>Date</span><strong>{data.transaction_date}</strong></div>
                 <div><span>Customer</span><strong>{customerName(data.customer_id)}</strong></div>
-                <div><span>COGS</span><strong>{fmt(data.cogs)}</strong></div>
-                <div><span>Gross Profit</span><strong style={{ color: '#16a34a' }}>{fmt(data.gross_profit)}</strong></div>
+                {seesProfit && <div><span>Cost of goods</span><strong>{fmt(data.cogs)}</strong></div>}
+                {seesProfit && <div><span>Gross profit</span><strong style={{ color: '#16a34a' }}>{fmt(data.gross_profit)}</strong></div>}
               </div>
               <table className="view-table">
                 <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead>

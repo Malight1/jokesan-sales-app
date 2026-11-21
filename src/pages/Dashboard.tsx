@@ -14,7 +14,7 @@ import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
 import { hasFeature } from '../lib/features';
-import { whatsappLink } from '../lib/whatsapp';
+import { whatsappLink, paymentRequestMessage } from '../lib/whatsapp';
 import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';
@@ -485,13 +485,10 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
       toast.info('WhatsApp debt reminders are on the Growth plan and above. Upgrade under Settings → Billing.');
       return;
     }
-    const lines = [
-      `Dear ${r.name},`, '',
-      `This is a friendly payment reminder from *${tenant?.name ?? 'us'}*.`,
-      `Your outstanding balance is *${naira(r.balance)}*.`,
-      '', 'Kindly settle at your earliest convenience. Thank you!',
-    ];
-    window.open(whatsappLink(r.phone, lines.join('\n')), '_blank');
+    const message = paymentRequestMessage({
+      businessName: tenant?.name ?? 'us', customerName: r.name, total: r.balance, bank: tenant?.bank_details,
+    });
+    window.open(whatsappLink(r.phone, message), '_blank');
     const res = await remindMut.mutate(r.id);
     if (res !== null) { toast.success(`Marked ${r.name} as reminded.`); onReminded(); }
   };

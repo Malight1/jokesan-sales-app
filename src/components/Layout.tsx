@@ -34,8 +34,15 @@ const navItems = [
       { to: '/sales', label: 'Sales Orders', icon: ShoppingCart },
       { to: '/quotes', label: 'Quotes', icon: Receipt },
       { to: '/deliveries', label: 'Deliveries', icon: Send },
-      { to: '/customers', label: 'Customers', icon: Users },
       { to: '/match-payment', label: 'Match Bank Payment', icon: Landmark },
+    ],
+  },
+  {
+    // Who owes you and who you owe, side by side.
+    section: 'People',
+    items: [
+      { to: '/customers', label: 'Customers', icon: Users },
+      { to: '/suppliers', label: 'Suppliers', icon: UserCheck },
     ],
   },
   {
@@ -45,6 +52,8 @@ const navItems = [
       { to: '/finished-goods', label: 'Finished Goods', icon: Package },
       { to: '/batches', label: 'Batches', icon: Layers },
       { to: '/transfers', label: 'Stock Transfers', icon: Repeat },
+      { to: '/stock-movement', label: 'Stock Movement', icon: ArrowLeftRight },
+      { to: '/stock-alerts', label: 'Stock Alerts', icon: Bell },
     ],
   },
   {
@@ -52,22 +61,14 @@ const navItems = [
     items: [
       { to: '/purchases', label: 'Purchases', icon: Truck },
       { to: '/inventory', label: 'Raw Materials', icon: Package },
-      { to: '/suppliers', label: 'Suppliers', icon: UserCheck },
     ],
   },
   {
     section: 'Finance',
     items: [
       { to: '/expenses', label: 'Expenses', icon: DollarSign },
-      { to: '/stock-movement', label: 'Stock Movement', icon: ArrowLeftRight },
       { to: '/reports', label: 'Reports', icon: BarChart2 },
       { to: '/insights', label: 'Smart Insights', icon: Lightbulb },
-    ],
-  },
-  {
-    section: 'Alerts',
-    items: [
-      { to: '/stock-alerts', label: 'Stock Alerts', icon: Bell },
     ],
   },
   {

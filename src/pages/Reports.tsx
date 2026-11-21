@@ -9,7 +9,7 @@ import { qtyByProduct } from '../lib/branchStock';
 import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
 import { useToast } from '../lib/ToastContext';
-import { whatsappLink } from '../lib/whatsapp';
+import { whatsappLink, paymentRequestMessage } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column } from '../components/DataTable';
 import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
@@ -173,15 +173,10 @@ export default function Reports() {
       toast.info('WhatsApp debt reminders are on the Growth plan and above. Upgrade under Settings → Billing.');
       return;
     }
-    const lines = [
-      `Dear ${d.name},`,
-      ``,
-      `This is a friendly payment reminder from *${tenant?.name ?? 'us'}*.`,
-      `Your outstanding balance is *₦${d.balance.toLocaleString()}*.`,
-      ``,
-      `Kindly settle at your earliest convenience. Thank you for your patronage! 🙏`,
-    ];
-    window.open(whatsappLink(d.phone, lines.join('\n')), '_blank');
+    const message = paymentRequestMessage({
+      businessName: tenant?.name ?? 'us', customerName: d.name, total: d.balance, bank: tenant?.bank_details,
+    });
+    window.open(whatsappLink(d.phone, message), '_blank');
     if (d.id) await customersApi.markReminded(d.id);
   };
 

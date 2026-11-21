@@ -93,6 +93,41 @@
       .link-btn { font-size: $font-size-xs; }
     }
 
+    .auth-hint {
+      margin: 0 0 1rem;
+      padding: 0.6rem 0.8rem;
+      border-radius: $radius-sm;
+      background: $primary-light;
+      color: $primary-darker;
+      font-size: $font-size-xs;
+      line-height: 1.5;
+    }
+
+    // Password field with a show/hide eye, so people typing on a phone can
+    // check what they typed before they get locked out by a typo.
+    .auth-password {
+      position: relative;
+      input { padding-right: 2.6rem; }
+      .auth-password-toggle {
+        position: absolute;
+        top: 50%;
+        right: 0.35rem;
+        transform: translateY(-50%);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border: none;
+        background: none;
+        color: $gray-500;
+        border-radius: $radius-sm;
+        cursor: pointer;
+        &:hover { color: $gray-800; background: $gray-100; }
+        &:focus-visible { outline: none; box-shadow: $ring; }
+      }
+    }
+
     .auth-alert-action {
       display: block;
       margin-top: 0.4rem;

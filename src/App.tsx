@@ -27,6 +27,7 @@ const Terms = lazy(() => import('./marketing/pages/Terms'));
 const Privacy = lazy(() => import('./marketing/pages/Privacy'));
 
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const JoinTeam = lazy(() => import('./pages/JoinTeam'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Sales = lazy(() => import('./pages/Sales'));
@@ -85,6 +86,7 @@ export default function App() {
             </Route>
             <Route path="/login" element={<Login />} />
             <Route path="/accept-invite" element={<AcceptInvite />} />
+            <Route path="/join/:inviteId" element={<JoinTeam />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             {DashboardPreview && <Route path="/__dev/dashboards" element={<DashboardPreview />} />}
             <Route

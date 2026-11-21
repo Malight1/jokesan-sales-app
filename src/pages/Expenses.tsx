@@ -30,7 +30,14 @@ export default function Expenses() {
   const [deleteRow, setDeleteRow] = useState<Expense | null>(null);
   const [form, setForm] = useState(blankForm());
 
-  const total = (rows ?? []).reduce((s, e) => s + e.amount, 0);
+  // Default to this month: an all-time total only ever grows and tells the
+  // owner nothing. "All time" is still one tap away.
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState<string>(thisMonth);
+  const months = Array.from(new Set([thisMonth, ...(rows ?? []).map(e => e.expense_date.slice(0, 7))])).sort().reverse();
+  const shown = month === 'all' ? rows : (rows ?? []).filter(e => e.expense_date.startsWith(month));
+  const shownTotal = (shown ?? []).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const monthLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const typeName = (id: string | null) => expTypes?.find(t => t.id === id)?.name ?? '—';
   const payName = (id: string | null) => payTypes?.find(t => t.id === id)?.name ?? '—';
 
@@ -92,14 +99,23 @@ export default function Expenses() {
   return (
     <div>
       <div className="page-header">
-        <div className="page-title"><h1>Expenses</h1><p>Total: {fmt(total)}</p></div>
+        <div className="page-title">
+          <h1>Expenses</h1>
+          <p>{month === 'all' ? `${fmt(shownTotal)} spent in total` : `${fmt(shownTotal)} spent in ${monthLabel(month)}`}</p>
+        </div>
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Log Expense</button>
       </div>
 
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={rows ? shown ?? [] : null}
         loading={loading}
+        toolbarExtra={
+          <select className="input-sm" value={month} onChange={e => setMonth(e.target.value)} aria-label="Show expenses for">
+            {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            <option value="all">All time</option>
+          </select>
+        }
         error={error}
         onRetry={refetch}
         getRowKey={e => e.id}
@@ -108,7 +124,9 @@ export default function Expenses() {
         exportName="expenses"
         exportTitle="Expenses"
         rowActions={rowActions}
-        emptyMessage="No expenses logged yet."
+        emptyMessage={month === 'all' || (rows ?? []).length === 0
+          ? 'No expenses yet. Log rent, fuel, salaries and other running costs here so your profit report shows what you really made.'
+          : `No expenses logged in ${monthLabel(month)}.`}
       />
 
       {showModal && (

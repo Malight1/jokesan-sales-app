@@ -8,7 +8,7 @@
 }
 
 @mixin card {
-  background: $white;
+  background-color: $white;
   border: 1px solid $gray-200;
   border-radius: $radius-lg;
   box-shadow: $shadow-sm;
@@ -69,7 +69,7 @@
   font-size: $font-size-sm;
   font-family: inherit;
   color: $gray-900;
-  background: $white;
+  background-color: $white;
   transition: $transition;
   outline: none;
   box-sizing: border-box;
@@ -81,7 +81,7 @@
     box-shadow: $ring;
   }
 
-  &:disabled { background: $gray-100; color: $gray-500; cursor: not-allowed; }
+  &:disabled { background-color: $gray-100; color: $gray-500; cursor: not-allowed; }
 
   &::placeholder { color: $gray-400; }
 }

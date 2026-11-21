@@ -753,7 +753,7 @@ function NewSupplierModal({ onClose, onCreated }: { onClose: () => void; onCreat
 }
 
 // ---- Pay some or all of what's owed on one purchase ----
-function PayModal({ purchase, supplierName, payTypes, onClose, onDone }: {
+export function PayModal({ purchase, supplierName, payTypes, onClose, onDone }: {
   purchase: PurchaseOrder; supplierName: string; payTypes: Lookup[]; onClose: () => void; onDone: () => void;
 }) {
   const toast = useToast();

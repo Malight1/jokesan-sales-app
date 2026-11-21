@@ -3,11 +3,28 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { platform } from '../lib/api';
 import { supabase } from '../lib/supabase';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 import BrandMark from '../components/BrandMark';
 import './Login.scss';
 
 type Mode = 'login' | 'signup' | 'forgot';
+
+// Supabase's own wording means nothing to a shop owner or a new cashier.
+function friendlyAuthError(msg: string, mode: Mode): string {
+  if (/invalid login credentials/i.test(msg)) {
+    return "That email and password don't match an account. Check for a typo, or tap \"Forgot password?\". "
+      + "If you were invited to join a business, open the invite link you were sent to set your password first.";
+  }
+  if (/already registered|already been registered/i.test(msg)) {
+    return mode === 'signup'
+      ? 'This email already has an account. Sign in instead, or tap "Forgot password?".'
+      : msg;
+  }
+  if (/rate limit|too many/i.test(msg)) return 'Too many attempts. Wait a few minutes and try again.';
+  if (/failed to fetch|network/i.test(msg)) return "We couldn't reach ProfixBook. Check your internet and try again.";
+  if (/error sending/i.test(msg)) return "We couldn't send the email just now. Try again in a few minutes, or contact support.";
+  return msg;
+}
 
 export default function Login() {
   const { signIn, signUp, session } = useAuth();
@@ -33,6 +50,7 @@ export default function Login() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [tenantType, setTenantType] = useState<'single' | 'multi_branch'>('single');
@@ -56,15 +74,15 @@ export default function Login() {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: `${window.location.origin}/reset-password`,
       });
-      if (error) setError(error.message);
+      if (error) setError(friendlyAuthError(error.message, mode));
       else setNotice(`If ${email.trim()} has an account, a link to set a new password is on its way. Check spam too.`);
     } else if (mode === 'login') {
-      const { error } = await signIn(email, password);
-      if (error) setError(error);
+      const { error } = await signIn(email.trim(), password);
+      if (error) setError(/confirm/i.test(error) ? error : friendlyAuthError(error, mode));
     } else {
-      const { error } = await signUp({ email, password, fullName, companyName, tenantType, businessType });
-      if (error) setError(error);
-      else setNotice('Account created! Check your email to confirm, then sign in.');
+      const { error } = await signUp({ email: email.trim(), password, fullName, companyName, tenantType, businessType });
+      if (error) setError(friendlyAuthError(error, mode));
+      else setNotice('Account created. Check your email for a confirmation link (look in spam too), then sign in.');
     }
     setLoading(false);
   };
@@ -117,13 +135,16 @@ export default function Login() {
         <form onSubmit={handleSubmit}>
           {mode === 'signup' && (
             <>
+              <p className="auth-hint">
+                This creates a new business. Joining someone else's business? Open the invite link they sent you instead.
+              </p>
               <div className="form-group">
                 <label>Your Full Name</label>
-                <input value={fullName} onChange={e => setFullName(e.target.value)} required placeholder="e.g. Wummy Oguntunde" />
+                <input value={fullName} onChange={e => setFullName(e.target.value)} required placeholder="e.g. Ada Okafor" />
               </div>
               <div className="form-group">
                 <label>Company Name</label>
-                <input value={companyName} onChange={e => setCompanyName(e.target.value)} required placeholder="e.g. Jokesan Ventures" />
+                <input value={companyName} onChange={e => setCompanyName(e.target.value)} required placeholder="e.g. Ada's Stores" />
               </div>
               <div className="form-group">
                 <label>What kind of business is this?</label>
@@ -144,7 +165,7 @@ export default function Login() {
 
           <div className="form-group">
             <label>Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" />
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@company.com" autoComplete="email" />
           </div>
           {mode !== 'forgot' && (
             <div className="form-group">
@@ -154,7 +175,14 @@ export default function Login() {
                   <button type="button" className="link-btn" onClick={() => switchMode('forgot')}>Forgot password?</button>
                 )}
               </div>
-              <input id="auth-password" type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} placeholder="••••••••" />
+              <div className="auth-password">
+                <input id="auth-password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                  required minLength={6} placeholder="••••••••" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+                <button type="button" className="auth-password-toggle" onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
           )}
 

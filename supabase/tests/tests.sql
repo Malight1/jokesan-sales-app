@@ -3408,4 +3408,57 @@ begin
        where m.qty_balance <> coalesce((select sum(quantity) from stock_movements s where s.product_id = m.id), 0)));
 end $$;
 
+-- ---------- 21. invite links that don't need email (0053) ----------
+do $$
+declare v_t uuid; v_inv uuid; v_orphan_inv uuid; v_other_inv uuid; v_state jsonb; v_row record;
+begin
+  v_t := t_id('tenant');
+  perform t_su();
+  insert into staff_invites (tenant_id, email, role) values (v_t, 'Newcashier@Jokesan.ng', 'sales') returning id into v_inv;
+
+  select * into v_row from public.invite_details(v_inv);
+  perform t_rec('the join page can name the business and role', v_row.company = 'Jokesan Multi' and v_row.role = 'sales' and v_row.status = 'pending');
+  perform t_rec('a made-up link finds nothing', not exists (select 1 from public.invite_details(gen_random_uuid())));
+  perform t_rec('a made-up link is refused by accept-invite',
+    public.invite_claim_existing(gen_random_uuid()) ->> 'state' = 'no_invite');
+
+  perform t_rec('a brand-new invitee gets an account created for them',
+    public.invite_claim_existing(v_inv) ->> 'state' = 'no_user');
+  -- What accept-invite's createUser does: the existing signup trigger attaches them.
+  insert into auth.users (id, email, raw_user_meta_data) values
+    ('00000000-0000-0000-0000-000000000021', 'newcashier@jokesan.ng', '{"full_name":"New Cashier"}');
+  perform t_rec('they land in the business with the invited role',
+    (select tenant_id = v_t and role = 'sales' from profiles where id = '00000000-0000-0000-0000-000000000021'));
+  perform t_rec('the link shows as used afterwards', (select status from public.invite_details(v_inv)) = 'accepted');
+  perform t_rec('an account that never signed in can still set its password',
+    public.invite_claim_existing(v_inv) ->> 'state' = 'same_tenant');
+  update auth.users set last_sign_in_at = now() where id = '00000000-0000-0000-0000-000000000021';
+  perform t_rec('once they have signed in, the link can never reset their password',
+    public.invite_claim_existing(v_inv) ->> 'state' = 'has_password');
+
+  -- An account that exists with no business at all gets attached.
+  insert into auth.users (id, email, raw_user_meta_data) values
+    ('00000000-0000-0000-0000-000000000022', 'orphan@jokesan.ng', '{"platform_admin":true}');
+  insert into staff_invites (tenant_id, email, role) values (v_t, 'orphan@jokesan.ng', 'inventory') returning id into v_orphan_inv;
+  v_state := public.invite_claim_existing(v_orphan_inv);
+  perform t_rec('an account with no business is attached to it', v_state ->> 'state' = 'attached'
+    and exists (select 1 from profiles where id = '00000000-0000-0000-0000-000000000022' and tenant_id = v_t and role = 'inventory'));
+
+  -- Someone who already runs another business is never moved.
+  insert into staff_invites (tenant_id, email, role) values (v_t, 'legacy@example.com', 'sales') returning id into v_other_inv;
+  perform t_rec('an email that belongs to another business is refused',
+    public.invite_claim_existing(v_other_inv) ->> 'state' = 'other_tenant');
+  perform t_rec('and stays in its own business',
+    (select tenant_id <> v_t from profiles where id = '00000000-0000-0000-0000-00000000000a'));
+
+  perform t_rec('anyone with the link can read it (they have no account yet)',
+    has_function_privilege('anon', 'public.invite_details(uuid)', 'execute'));
+  perform t_rec('only the server can claim an invite',
+    not has_function_privilege('anon', 'public.invite_claim_existing(uuid)', 'execute')
+    and not has_function_privilege('authenticated', 'public.invite_claim_existing(uuid)', 'execute'));
+
+  perform t_rec('suppliers can hold bank details',
+    exists (select 1 from information_schema.columns where table_name = 'suppliers' and column_name = 'account_number'));
+end $$;
+
 select name, pass, detail from t_results order by n;

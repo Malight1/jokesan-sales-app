@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Lock, Landmark, Link2, ShieldCheck, ListPlus, MessageCircle, Mail } from 'lucide-react';
+import { whatsappLink } from '../lib/whatsapp';
 import { useAuth } from '../lib/AuthContext';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, PlanUsage, branches as branchesApi, docs,
@@ -17,6 +18,11 @@ import './Settings.scss';
 import Modal from '../components/Modal';
 import DataTable, { Column } from '../components/DataTable';
 import { isRetail, label as bizLabel } from '../retail';
+
+// Where Paystack must send payment notifications for pay links to mark
+// invoices paid on their own. Each business pastes it into its own
+// Paystack dashboard once (Settings → Payments shows it with a copy button).
+const WEBHOOK_URL = `${process.env.REACT_APP_SUPABASE_URL ?? ''}/functions/v1/payments-webhook`;
 
 type Tab = 'business' | 'team' | 'branches' | 'billing' | 'payments' | 'types' | 'pricing' | 'recipes' | 'custom_fields' | 'einvoicing';
 
@@ -64,13 +70,10 @@ export default function Settings() {
         <div className="page-title"><h1>Settings</h1><p>Manage your business, team, and configuration</p></div>
       </div>
 
-      <div className="settings-tabs">
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0.6rem 1.1rem', background: 'none', border: 'none', cursor: 'pointer',
-              fontWeight: tab === t.id ? 700 : 400, color: tab === t.id ? '#2563eb' : '#64748b',
-              borderBottom: tab === t.id ? '2px solid #2563eb' : '2px solid transparent',
-              fontSize: '0.875rem', marginBottom: '-1px' }}>
+          <button key={t.id} onClick={() => setTab(t.id)} className={`settings-tab${tab === t.id ? ' is-active' : ''}`}
+            role="tab" aria-selected={tab === t.id}>
             {t.icon} {t.label}
           </button>
         ))}
@@ -481,6 +484,10 @@ function PaymentsTab() {
   if (statusQ.error) return <ErrorState message={statusQ.error} onRetry={statusQ.refetch} />;
 
   const connected = statusQ.data?.connected;
+  const copyWebhook = async () => {
+    try { await navigator.clipboard.writeText(WEBHOOK_URL); toast.success('Webhook URL copied.'); }
+    catch { toast.error('Could not copy. Press and hold the link to copy it.'); }
+  };
 
   return (
     <div className="grid-2" style={{ alignItems: 'start' }}>
@@ -489,7 +496,7 @@ function PaymentsTab() {
           <Landmark size={18} color="#2563eb" /> Paystack
         </h3>
         <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
-          Connect your OWN Paystack account so a customer's transfer confirms itself — no bank alert to read. Money is collected directly into your account; ProfixBook never holds it.
+          Connect your own Paystack account and customers can pay an invoice by card, transfer or USSD from a link. The money goes straight into your Paystack account. ProfixBook never holds it.
         </p>
 
         {connected ? (
@@ -511,7 +518,7 @@ function PaymentsTab() {
               <input value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk_live_… or pk_test_…" autoComplete="off" />
             </div>
             <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.75rem' }}>
-              Find these under your Paystack dashboard → Settings → API Keys & Webhooks. Your secret key is checked once here, then stored securely — nobody at ProfixBook can read it back.
+              Find these in your Paystack dashboard under Settings → API Keys &amp; Webhooks. Your secret key is checked once, then locked away. Nobody at ProfixBook can read it.
             </small>
             <button className="btn-primary" type="submit" disabled={connecting}>
               {connecting ? 'Connecting…' : 'Connect Paystack'}
@@ -524,17 +531,18 @@ function PaymentsTab() {
         <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Link2 size={18} color="#2563eb" /> How it works
         </h3>
-        <ol style={{ paddingLeft: '1.1rem', fontSize: '0.85rem', color: '#475569', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <li>Connect your Paystack account above (one-time).</li>
-          <li>On an unpaid sale, tap "Pay now" to generate a payment link.</li>
-          <li>Share it with the customer — WhatsApp, SMS, however you like.</li>
-          <li>The moment they pay, the sale updates on its own — no bank alert to paste or match.</li>
+        <ol className="pay-steps">
+          <li>Connect your Paystack account (one time).</li>
+          <li>
+            In your Paystack dashboard, open Settings → API Keys &amp; Webhooks and paste this as the <strong>Webhook URL</strong>. Without it, Paystack can't tell ProfixBook when a customer has paid.
+            <div className="invite-share-link" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+              <input readOnly value={WEBHOOK_URL} aria-label="Webhook URL" onFocus={e => e.currentTarget.select()} />
+              <button type="button" className="btn-secondary btn-sm" onClick={copyWebhook}><Copy size={14} /> Copy</button>
+            </div>
+          </li>
+          <li>On an unpaid invoice (Sales Orders, or a customer's account under Customers), tap <strong>Pay link</strong>. It opens WhatsApp with the link ready to send.</li>
+          <li>When the customer pays, the invoice marks itself paid. No bank alert to check.</li>
         </ol>
-        {connected && (
-          <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.75rem' }}>
-            If Paystack support ever asks for a webhook URL for this account, it's the payments-webhook Edge Function's URL from your Supabase project.
-          </p>
-        )}
       </div>
     </div>
   );
@@ -546,6 +554,7 @@ function PaymentsTab() {
 function BusinessTab() {
   const toast = useToast();
   const { tenant, profile, refresh } = useAuth();
+  const isMultiBranch = tenant?.type === 'multi_branch';
   const [name, setName] = useState(tenant?.name ?? '');
   const [currency, setCurrency] = useState(tenant?.currency ?? 'NGN');
   const [vatEnabled, setVatEnabled] = useState(tenant?.vat_enabled ?? false);
@@ -775,13 +784,13 @@ function BusinessTab() {
             <>
               <hr className="divider" />
               <div className="form-group">
-                <label htmlFor="cashier-returns">How far a cashier may go with a return</label>
+                <label htmlFor="cashier-returns">Can cashiers take back goods and refund customers?</label>
                 <select id="cashier-returns" value={cashierReturns} onChange={e => setCashierReturns(e.target.value as typeof cashierReturns)}>
-                  <option value="same_day_own">Their own sales, same day only (default)</option>
-                  <option value="any">Any sale, any time</option>
-                  <option value="none">Not at all — admin or accounts only</option>
+                  <option value="same_day_own">Only their own sales, on the same day (recommended)</option>
+                  <option value="any">Yes, any sale from any day</option>
+                  <option value="none">No, only an admin or accounts can refund</option>
                 </select>
-                <small style={{ color: '#94a3b8', fontSize: '0.72rem' }}>An admin or accounts can always process a return, whatever this is set to.</small>
+                <small className="setting-hint">A return puts the goods back in stock and gives the customer their money or store credit. Admins and accounts can always do returns.</small>
               </div>
             </>
           )}
@@ -792,9 +801,10 @@ function BusinessTab() {
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginBottom: '0.75rem' }}>
                 <input type="checkbox" checked={tillRequired} onChange={e => setTillRequired(e.target.checked)} style={{ width: 'auto', marginTop: 3 }} />
                 <span>
-                  Require an open till before selling
-                  <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem' }}>
-                    Turn this on once registers are set up under Branches — everyone, including admins, will need to open a till before ringing up a sale.
+                  Make staff open the till before selling
+                  <small className="setting-hint">
+                    The till is your cash drawer. Opening it means counting the cash in the drawer when a shift starts; closing it means counting again at the end, and ProfixBook shows whether any money is short. When this is on, nobody (admins included) can sell until they open the till.
+                    {isMultiBranch ? ' Add a till for each branch under the Branches tab first.' : ' Your shop already has one till ready.'}
                   </small>
                 </span>
               </label>
@@ -817,12 +827,13 @@ function BusinessTab() {
             <>
               <hr className="divider" />
               <div className="form-group">
-                <label>Bank details (printed on a proforma invoice only)</label>
+                <label htmlFor="biz-bank">Bank account customers pay into</label>
+                <small className="setting-hint" style={{ marginTop: 0 }}>Shown on invoices that still have a balance, on quotes and proformas, and in every WhatsApp payment request.</small>
                 <div className="grid-2">
-                  <input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Bank name" />
-                  <input value={bankAccountName} onChange={e => setBankAccountName(e.target.value)} placeholder="Account name" />
+                  <input id="biz-bank" value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Bank, e.g. Access Bank" aria-label="Bank name" />
+                  <input value={bankAccountNumber} inputMode="numeric" maxLength={14} onChange={e => setBankAccountNumber(e.target.value)} placeholder="Account number" aria-label="Account number" />
                 </div>
-                <input value={bankAccountNumber} onChange={e => setBankAccountNumber(e.target.value)} placeholder="Account number" style={{ marginTop: '0.5rem' }} />
+                <input value={bankAccountName} onChange={e => setBankAccountName(e.target.value)} placeholder="Account name" aria-label="Account name" style={{ marginTop: '0.5rem' }} />
               </div>
             </>
           )}
@@ -903,11 +914,15 @@ function BusinessTab() {
 // ============================================================
 // Team — members, roles, invites
 // ============================================================
-function inviteMessage(email: string, role: string, tenantName: string): string {
-  const appUrl = window.location.origin;
-  return `You've been invited to join ${tenantName} on ProfixBook as ${role}.\n\n` +
-    `Sign up here with this exact email (${email}):\n${appUrl}\n\n` +
-    `Once you sign up, you'll land straight in the company — no extra setup needed.`;
+const ROLE_NAME: Record<string, string> = { admin: 'Admin', sales: 'Sales', inventory: 'Inventory', accounts: 'Accounts' };
+
+// What the admin sends on WhatsApp. The link does all the work: the
+// teammate opens it, picks a password and is inside the business. No
+// email has to arrive, and no "Create Account" form to get wrong (0053).
+function inviteMessage(link: string, role: string, tenantName: string): string {
+  return `Hello! You've been added to *${tenantName}* on ProfixBook as ${ROLE_NAME[role] ?? role}.\n\n` +
+    `Tap this link to set your password and join:\n${link}\n\n` +
+    `Please don't use "Create Account" on the sign-in page, that makes a separate business.`;
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -933,6 +948,10 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
   const [invBranch, setInvBranch] = useState('');
   const [deactivating, setDeactivating] = useState<TeamMember | null>(null);
   const [revoking, setRevoking] = useState<StaffInvite | null>(null);
+  const [sharing, setSharing] = useState<StaffInvite | null>(null);
+  // A freshly created invite is emailed straight away; re-sharing an old
+  // one from Pending Invites only emails if the admin taps "Send email".
+  const [sharingFresh, setSharingFresh] = useState(false);
 
   const branchName = (id: string | null) => branchesQ.data?.find(b => b.id === id)?.name ?? '—';
 
@@ -970,36 +989,27 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
     const alreadyMember = membersQ.data?.some(m => (m.email ?? '').toLowerCase() === email);
     if (alreadyMember) { toast.error('That email already belongs to someone on your team.'); return; }
 
-    const alreadyInvited = invitesQ.data?.some(i => i.email.toLowerCase() === email);
-    if (alreadyInvited) { toast.error('There is already a pending invite for that email.'); return; }
+    // Inviting the same person again means "send it again", not an error.
+    const existing = invitesQ.data?.find(i => i.email.toLowerCase() === email);
+    if (existing) {
+      setShowInvite(false); setInvEmail('');
+      toast.info(`${email} was already invited. Sending their join link again.`);
+      setSharingFresh(true);
+      setSharing(existing);
+      return;
+    }
 
     const res = await inviteMut.mutate(email, invRole, invBranch || null);
-    if (res !== null) {
+    if (res) {
       setShowInvite(false); setInvEmail(''); setInvRole('sales'); setInvBranch('');
       invitesQ.refetch();
-
-      const copied = await copyToClipboard(inviteMessage(email, invRole, tenant?.name ?? 'your company'));
-
-      // Best-effort real email — the invite row already exists either way,
-      // so a failure here (rate limit, etc.) never loses the invite.
-      const emailRes = await team.sendInviteEmail(email, `${window.location.origin}/accept-invite`, invRole, tenant?.name ?? 'your company');
-      if (emailRes.ok) {
-        toast.success(`Invite email sent to ${email}.${copied ? ' A backup message was also copied to your clipboard.' : ''}`);
-      } else {
-        toast.info(copied
-          ? `Couldn't send an email automatically — an invite message was copied to your clipboard instead. Paste it to them on WhatsApp/SMS.`
-          : `Invite created for ${email}. Ask them to sign up with that exact email.`);
-      }
+      setSharingFresh(true);
+      setSharing(res);
     } else {
       const msg = inviteMut.error ?? '';
       toast.error(msg.includes('duplicate key') || msg.includes('idx_invites_unique_pending')
         ? 'There is already a pending invite for that email.' : msg || 'Invite failed.');
     }
-  };
-
-  const copyInvite = async (inv: StaffInvite) => {
-    const ok = await copyToClipboard(inviteMessage(inv.email, inv.role, tenant?.name ?? 'your company'));
-    toast[ok ? 'success' : 'error'](ok ? 'Invite message copied — paste it to them.' : 'Could not access clipboard.');
   };
 
   const confirmRevoke = async () => {
@@ -1010,28 +1020,28 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
     setRevoking(null);
   };
 
-  const selectStyle = { padding: '0.3rem 0.5rem', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: '0.82rem' };
-
   const memberCols: Column<TeamMember>[] = [
     { key: 'full_name', header: 'Name', value: m => m.full_name ?? '',
       render: m => (
         <>
-          <strong>{m.full_name ?? '—'}</strong>
+          <strong>{m.full_name || m.email || 'Team member'}</strong>
           {m.id === profile?.id && <span className="badge-primary" style={{ marginLeft: 8 }}>You</span>}
         </>
       ) },
     { key: 'email', header: 'Email', value: m => m.email ?? '—' },
     { key: 'role', header: 'Role', value: m => m.role,
       render: m => (
-        <select value={m.role} disabled={m.id === profile?.id} onChange={e => changeRole(m, e.target.value)} style={selectStyle}>
-          {roleOptions.map(r => <option key={r.value} value={r.value}>{r.value}</option>)}
+        <select className="input-sm" value={m.role} disabled={m.id === profile?.id} onChange={e => changeRole(m, e.target.value)}
+          aria-label={`Role for ${m.full_name || m.email || 'team member'}`}>
+          {roleOptions.map(r => <option key={r.value} value={r.value}>{ROLE_NAME[r.value]}</option>)}
         </select>
       ) },
     ...(isMultiBranch ? [{
       key: 'branch_id', header: 'Branch',
       value: (m: TeamMember) => branchesQ.data?.find(b => b.id === m.branch_id)?.name ?? '',
       render: (m: TeamMember) => (
-        <select value={m.branch_id ?? ''} onChange={e => e.target.value && changeBranch(m, e.target.value)} style={selectStyle}>
+        <select className="input-sm" value={m.branch_id ?? ''} onChange={e => e.target.value && changeBranch(m, e.target.value)}
+          aria-label={`Branch for ${m.full_name || m.email || 'team member'}`}>
           {/* No "none": since 0020 a cashier or storekeeper without a branch can't record anything. */}
           {!m.branch_id && <option value="">Choose a branch…</option>}
           {branchesQ.data?.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -1048,13 +1058,13 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
 
   const inviteCols: Column<StaffInvite>[] = [
     { key: 'email', header: 'Email', value: inv => inv.email, render: inv => <strong>{inv.email}</strong> },
-    { key: 'role', header: 'Role', value: inv => inv.role, render: inv => <span className="badge-gray">{inv.role}</span> },
+    { key: 'role', header: 'Role', value: inv => inv.role, render: inv => <span className="badge-gray">{ROLE_NAME[inv.role] ?? inv.role}</span> },
     { key: 'created_at', header: 'Invited', value: inv => inv.created_at,
       render: inv => new Date(inv.created_at).toLocaleDateString('en-GB') },
     { key: 'actions', header: '', sortable: false, align: 'right', value: () => '',
       render: inv => (
         <>
-          <button className="btn-ghost btn-sm" onClick={() => copyInvite(inv)} title="Copy invite message"><Copy size={13} /> Copy</button>{' '}
+          <button className="btn-secondary btn-sm" onClick={() => { setSharingFresh(false); setSharing(inv); }}><Send size={13} /> Share link</button>{' '}
           <button className="btn-ghost btn-sm" style={{ color: '#dc2626' }} onClick={() => setRevoking(inv)}><Trash2 size={14} /> Revoke</button>
         </>
       ) },
@@ -1085,7 +1095,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
 
       <h3 style={{ marginBottom: '0.75rem' }}>Pending Invites</h3>
       {(invitesQ.data?.length ?? 0) === 0 ? (
-        <Empty message="No pending invites. Invite a teammate — they sign up with that email and land inside your company automatically." />
+        <Empty message="No pending invites. Tap Invite User, then send the join link to your teammate on WhatsApp." />
       ) : (
         <div>
           <DataTable
@@ -1128,17 +1138,21 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
                   </div>
                 )}
                 <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
-                  Share the app link with them. When they <strong>sign up using this exact email</strong>, they'll automatically join your company with this role — no new company gets created.
+                  We'll email them a join link and give you the same link to send on WhatsApp. They open it, choose a password, and they're in with this role.
                 </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowInvite(false)}>Cancel</button>
                 <button type="submit" className="btn-primary" disabled={inviteMut.pending}>
-                  <Send size={14} /> {inviteMut.pending ? 'Creating…' : 'Create Invite'}
+                  <Send size={14} /> {inviteMut.pending ? 'Creating…' : 'Create invite link'}
                 </button>
               </div>
             </form>
         </Modal>
+      )}
+
+      {sharing && (
+        <InviteShareModal invite={sharing} tenantName={tenant?.name ?? 'our business'} autoEmail={sharingFresh} onClose={() => setSharing(null)} />
       )}
 
       {deactivating && (
@@ -1155,7 +1169,7 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
       {revoking && (
         <ConfirmDialog
           title="Revoke Invite"
-          message={<>Revoke the invite for <strong>{revoking.email}</strong>? They won't be able to sign up with that email into your company unless you invite them again.</>}
+          message={<>Cancel the invite for <strong>{revoking.email}</strong>? Their join link will stop working. You can invite them again later.</>}
           confirmLabel="Revoke"
           pending={revokeMut.pending}
           onConfirm={confirmRevoke}
@@ -1163,6 +1177,79 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
         />
       )}
     </div>
+  );
+}
+
+// After an invite is created (or from a pending invite's "Share link"):
+// the one link the teammate needs, with WhatsApp first because that's how
+// staff are reached in practice.
+function InviteShareModal({ invite, tenantName, autoEmail, onClose }: {
+  invite: StaffInvite; tenantName: string; autoEmail: boolean; onClose: () => void;
+}) {
+  const toast = useToast();
+  const link = team.inviteLink(invite.id);
+  const message = inviteMessage(link, invite.role, tenantName);
+  // What actually happened to the email, never assumed.
+  const [email, setEmail] = useState<{ state: 'idle' | 'sending' | 'sent' | 'failed'; error?: string }>({ state: autoEmail ? 'sending' : 'idle' });
+
+  const sendEmail = React.useCallback(async () => {
+    setEmail({ state: 'sending' });
+    const res = await team.emailInvite(invite.id);
+    if (res.success) setEmail({ state: 'sent' });
+    else setEmail({ state: 'failed', error: res.error });
+  }, [invite.id]);
+
+  useEffect(() => { if (autoEmail) sendEmail(); }, [autoEmail, sendEmail]);
+
+  const copy = async (text: string, what: string) => {
+    const ok = await copyToClipboard(text);
+    toast[ok ? 'success' : 'error'](ok ? `${what} copied.` : 'Could not copy. Press and hold the link to copy it.');
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={460}>
+      <div className="modal-header">
+        <h2>Send the join link</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <div className="modal-body">
+        <p className="invite-share-lead">
+          For <strong>{invite.email}</strong>. When they open the link, they choose a password and join as {ROLE_NAME[invite.role] ?? invite.role}.
+        </p>
+
+        <div className={`invite-email-status is-${email.state}`} role="status" aria-live="polite">
+          <Mail size={16} aria-hidden="true" />
+          <div>
+            {email.state === 'idle' && <span>Email the link to {invite.email}, or send it on WhatsApp below.</span>}
+            {email.state === 'sending' && <span>Sending the email to {invite.email}…</span>}
+            {email.state === 'sent' && <span><strong>Email sent</strong> to {invite.email}. Ask them to check spam if it isn't in their inbox in a few minutes.</span>}
+            {email.state === 'failed' && <span><strong>The email did not send.</strong> {email.error} Send the link on WhatsApp instead.</span>}
+          </div>
+          {(email.state === 'idle' || email.state === 'failed') && (
+            <button type="button" className="btn-secondary btn-sm" onClick={sendEmail}>{email.state === 'failed' ? 'Try again' : 'Send email'}</button>
+          )}
+        </div>
+
+        <div className="invite-share-actions">
+          <a className="btn-primary" href={whatsappLink(null, message)} target="_blank" rel="noreferrer">
+            <MessageCircle size={16} /> Send on WhatsApp
+          </a>
+        </div>
+        <p className="invite-share-note" style={{ marginTop: '0.4rem', marginBottom: '1rem' }}>
+          Opens WhatsApp with the message written for you. Pick your staff member and tap send.
+        </p>
+
+        <div className="invite-share-link">
+          <input readOnly value={link} aria-label="Join link" onFocus={e => e.currentTarget.select()} />
+          <button type="button" className="btn-secondary btn-sm" onClick={() => copy(link, 'Link')}><Copy size={14} /> Copy link</button>
+        </div>
+        <button type="button" className="btn-ghost btn-sm" onClick={() => copy(message, 'Message')}><Copy size={14} /> Copy full message (for SMS)</button>
+        <p className="invite-share-note">The link works once. If they lose it, open Pending Invites and tap Share link again.</p>
+      </div>
+      <div className="modal-footer">
+        <button type="button" className="btn-secondary" onClick={onClose}>Done</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1492,7 +1579,7 @@ function PricingTab() {
 
   const setTypeList = async (typeId: string, priceListId: string) => {
     await pricing.setCustomerTypeList(typeId, priceListId || null);
-    toast.success('Updated.');
+    toast.success('Saved.');
     typesQ.refetch();
   };
 
@@ -1511,16 +1598,19 @@ function PricingTab() {
 
   return (
     <div>
-      <div className="card" style={{ marginBottom: '1.25rem' }}>
-        <h3 style={{ marginBottom: '0.25rem' }}>Price Lists</h3>
-        <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
-          A customer with no list of their own uses the default. Quantity breaks (e.g. 12+ at a lower
-          price) can be set per product in the database already — this screen sets one flat price per list for now.
-        </p>
+      <div className="card lookup-card" style={{ marginBottom: '1.25rem' }}>
+        <div className="lookup-head">
+          <div className="lookup-icon"><Tag size={17} /></div>
+          <div className="lookup-heading">
+            <h3>Price lists</h3>
+            <p>Different prices for different buyers, e.g. Retail, Wholesale, Distributor. A customer with no list of their own pays the default list (marked with a star), or your normal selling price if there is no default.</p>
+          </div>
+          {lists.length > 0 && <span className="lookup-count">{lists.length}</span>}
+        </div>
         {listsQ.loading ? <Loading /> : lists.length === 0 ? (
-          <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '1rem' }}>No price lists yet — add your first below.</p>
+          <p className="lookup-empty">No price lists yet. Type a name below, e.g. Wholesale, and tap Add.</p>
         ) : (
-          <div className="lookup-list" style={{ marginBottom: '1rem' }}>
+          <div className="lookup-list">
             {lists.map(l => (
               <div key={l.id} className="lookup-row" style={{ opacity: l.is_active ? 1 : 0.55 }}>
                 <button type="button" onClick={() => setSelectedList(l.id)}
@@ -1547,22 +1637,23 @@ function PricingTab() {
           </div>
         )}
         <form onSubmit={addList} className="lookup-add">
-          <input value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="e.g. Wholesale, Distributor…" />
-          <button className="btn-primary" type="submit" disabled={createMut.pending || !newListName.trim()} aria-label="Add price list">
-            <Plus size={15} />
+          <input value={newListName} onChange={e => setNewListName(e.target.value)} placeholder="New list name, e.g. Wholesale" aria-label="New price list name" />
+          <button className="btn-primary lookup-add-wide" type="submit" disabled={createMut.pending || !newListName.trim()}>
+            <Plus size={15} /> Add
           </button>
         </form>
       </div>
 
       {selectedList && (
         <div className="card" style={{ marginBottom: '1.25rem' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Prices — {lists.find(l => l.id === selectedList)?.name}</h3>
+          <h3 style={{ marginBottom: '0.25rem' }}>Prices on {lists.find(l => l.id === selectedList)?.name}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>Type a price and tap away to save. Leave it empty to charge the normal selling price.</p>
           {goodsQ.loading ? <Loading /> : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: '#64748b' }}>
-                    <th style={{ padding: '0.4rem 0' }}>Product</th><th>Selling Price</th><th>Price on this list</th>
+                    <th style={{ padding: '0.4rem 0' }}>Product</th><th>Normal price</th><th>Price on this list</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1579,19 +1670,19 @@ function PricingTab() {
       )}
 
       <div className="card" style={{ marginBottom: '1.25rem' }}>
-        <h3 style={{ marginBottom: '0.25rem' }}>Customer Types</h3>
+        <h3 style={{ marginBottom: '0.25rem' }}>Which list each customer type pays</h3>
         <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '1rem' }}>
-          Everyone in a customer type gets that list's prices, unless the customer has their own list set on their own record.
+          Everyone in a customer type gets that list's prices. You can still give one customer their own list on their record under Customers.
         </p>
         {(typesQ.data ?? []).length === 0 ? (
-          <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No customer types yet — add some under Settings → Types.</p>
+          <p className="lookup-empty">No customer types yet. Add some, e.g. Corporate and Private, under the Types tab.</p>
         ) : (
-          <div style={{ display: 'grid', gap: '0.6rem' }}>
+          <div className="type-list-rows">
             {(typesQ.data ?? []).map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-                <span style={{ fontSize: '0.88rem' }}>{t.name}</span>
-                <select value={t.price_list_id ?? ''} onChange={e => setTypeList(t.id, e.target.value)} style={{ maxWidth: 220 }}>
-                  <option value="">Default list</option>
+              <div key={t.id} className="type-list-row">
+                <span>{t.name}</span>
+                <select value={t.price_list_id ?? ''} onChange={e => setTypeList(t.id, e.target.value)} aria-label={`Price list for ${t.name}`}>
+                  <option value="">{lists.find(l => l.is_default) ? `Default (${lists.find(l => l.is_default)?.name})` : 'Normal selling price'}</option>
                   {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </div>

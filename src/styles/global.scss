@@ -127,6 +127,30 @@ h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; letter-spacin
 }
 
 // Form elements
+// Baseline for EVERY text field, select and textarea, wherever it sits.
+// Before this, a field outside a .form-group (a price-list name box, a
+// table-row select) fell back to the browser's raw grey box. :where()
+// keeps specificity at zero, so any component's own rule still wins.
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='hidden']), select, textarea) {
+  @include input-base;
+}
+:where(select) {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  cursor: pointer;
+}
+// Compact control for inside table rows (a member's role, a list's price).
+.input-sm, select.input-sm, input.input-sm {
+  width: auto;
+  min-width: 120px;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+  font-size: 0.82rem;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -141,6 +165,39 @@ h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; letter-spacin
 
   input, select, textarea { @include input-base; }
   textarea { resize: vertical; min-height: 80px; }
+}
+
+// Form section heading and order total, shared by every document form
+// (Sales, Quotes, Suppliers). These used to live only inside .sales-page,
+// so the same markup on other pages rendered unstyled.
+.section-title {
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $gray-600;
+  margin: 1rem 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid $gray-200;
+}
+.total-row {
+  text-align: right;
+  font-size: $font-size-base;
+  padding: 0.75rem 0;
+  border-top: 2px solid $gray-200;
+  margin-bottom: 1rem;
+  color: $gray-800;
+}
+.remove-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: $danger;
+  padding: 0.5rem;
+  border-radius: $radius;
+  &:hover { background: $danger-light; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
 }
 
 // Card
@@ -493,4 +550,56 @@ h3 { font-size: $font-size-lg; font-weight: 600; color: $gray-800; letter-spacin
     border: none; outline: none; padding: 0.5rem 0; font-size: $font-size-sm;
     width: 100%; color: $gray-800; background: transparent;
   }
+}
+
+// The business bank account block (BankAccountCard): on quotes, payment
+// requests and anywhere else that asks a customer for money.
+.bank-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  background: $gray-50;
+
+  .bank-card-lines { display: flex; flex-direction: column; gap: 1px; font-size: $font-size-sm; color: $gray-600; min-width: 0; }
+  .bank-card-label { font-size: $font-size-xs; color: $gray-500; }
+  strong { font-size: $font-size-lg; color: $gray-900; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+  .bank-card-actions { display: flex; gap: 0.4rem; justify-content: flex-end; flex-shrink: 0; }
+
+  &.is-missing {
+    justify-content: flex-start;
+    background: $warning-light;
+    border-color: lighten($warning, 35%);
+    color: darken($warning, 14%);
+    font-size: $font-size-sm;
+    line-height: 1.5;
+    svg { flex-shrink: 0; }
+  }
+
+  &.is-editing {
+    display: block;
+    background: $white;
+    .bank-card-head {
+      display: flex; align-items: center; gap: 0.45rem;
+      font-size: $font-size-sm; font-weight: 600; color: $gray-800;
+      margin-bottom: 0.75rem;
+      svg { color: $primary; }
+    }
+    .form-group { margin-bottom: 0.75rem; }
+  }
+}
+
+.link-inline {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
 }

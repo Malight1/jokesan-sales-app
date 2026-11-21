@@ -33,6 +33,8 @@ export interface Supplier {
   id: string; first_name: string | null; last_name: string | null;
   company_store: string | null; address: string | null; email: string | null; phone: string | null;
   custom_fields?: Record<string, any>;
+  // Where you send their money (migration 0053). Optional until it runs.
+  bank_name?: string | null; account_name?: string | null; account_number?: string | null;
 }
 export interface Material {
   id: string; name: string; unit: string | null; type_of_material: string;
@@ -366,8 +368,16 @@ export const boms = {
 // ============================================================
 // SALES  (writes go through the create_sale RPC engine)
 // ============================================================
+export interface SaleBalance {
+  id: string; customer_id: string | null; doc_no?: string | null; transaction_date: string;
+  total_amount: number; amount_paid: number; balance: number; voided: boolean; created_at: string;
+}
 export const sales = {
   list: () => runAll<SalesOrder>((f, t) => supabase.from('sales_orders').select('*').order('transaction_date', { ascending: false }).range(f, t)),
+  // Just the money columns, for customer balances and statements.
+  balances: () => runAll<SaleBalance>((f, t) => supabase.from('sales_orders')
+    .select('id, customer_id, doc_no, transaction_date, total_amount, amount_paid, balance, voided, created_at')
+    .order('transaction_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('sales_orders').select('*, sale_items(*), sale_payments(*)').eq('id', id).single()),
   // Look a sale up by its invoice number, for the POS "Returns" counter.
   // RLS already limits a cashier to their own branch's sales.
@@ -926,17 +936,38 @@ export const team = {
   setBranch: (id: string, branch_id: string | null) => del(supabase.from('profiles').update({ branch_id }).eq('id', id)),
   invites: () => run<StaffInvite[]>(supabase.from('staff_invites').select('id, email, role, status, created_at, branch_id').eq('status', 'pending').order('created_at', { ascending: false })),
   invite: (email: string, role: string, branch_id?: string | null) =>
-    del(supabase.from('staff_invites').insert({ email: email.trim().toLowerCase(), role, branch_id: branch_id ?? null })),
+    run<StaffInvite>(supabase.from('staff_invites')
+      .insert({ email: email.trim().toLowerCase(), role, branch_id: branch_id ?? null })
+      .select('id, email, role, status, created_at, branch_id').single()),
   revokeInvite: (id: string) => del(supabase.from('staff_invites').delete().eq('id', id)),
-  // Best-effort real invite email via the invite-teammate Edge Function.
-  // Never throws — the caller falls back to "Copy Invite Message" on failure.
-  sendInviteEmail: async (email: string, redirectTo: string, role: string, tenantName: string): Promise<{ ok: boolean; error?: string }> => {
-    const { data, error } = await supabase.functions.invoke('invite-teammate', { body: { email, redirectTo, role, tenantName } });
-    if (error) return { ok: false, error: error.message };
-    if (data?.error) return { ok: false, error: data.error };
-    return { ok: true };
+  // The link a teammate opens to join (migration 0053). Shared on WhatsApp,
+  // so joining never depends on an email being delivered.
+  inviteLink: (id: string) => `${window.location.origin}/join/${id}`,
+  // Read by the public /join page, before the invitee has an account.
+  inviteDetails: async (id: string): Promise<InviteDetails | null> => {
+    const res = await supabase.rpc('invite_details', { p_invite: id });
+    if (res.error) throw new Error(res.error.message);
+    const rows = (res.data ?? []) as InviteDetails[];
+    return rows[0] ?? null;
+  },
+  // Emails the join link through invite-teammate (Resend). Returns the
+  // real reason on failure so the screen never claims an email went out.
+  emailInvite: async (inviteId: string): Promise<{ success?: boolean; to?: string; error?: string; code?: string }> => {
+    const { data, error } = await supabase.functions.invoke('invite-teammate', { body: { inviteId, appUrl: window.location.origin } });
+    // A non-2xx here means the email function on the server is an older
+    // version (or not reachable): the new one always answers 200.
+    if (error) return { error: "The email couldn't be sent from here yet.", code: 'unreachable' };
+    return data ?? { error: 'No answer from the email service.' };
+  },
+  // Creates the invitee's account, already confirmed (accept-invite).
+  acceptInvite: async (inviteId: string, fullName: string, password: string): Promise<{ success?: boolean; email?: string; error?: string; code?: string }> => {
+    const { data, error } = await supabase.functions.invoke('accept-invite', { body: { inviteId, fullName, password } });
+    if (error) return { error: "We couldn't reach ProfixBook. Check your internet and try again." };
+    return data ?? { error: 'Something went wrong. Please try again.' };
   },
 };
+
+export interface InviteDetails { email: string; role: string; company: string; status: string; }
 
 export const tenantApi = {
   update: (id: string, patch: {
@@ -944,7 +975,8 @@ export const tenantApi = {
     expiry_warning_days?: number; allow_expired_sale?: boolean;
     cashier_returns?: 'none' | 'same_day_own' | 'any';
     shift_rules?: Partial<ShiftRules>;
-    // Printed on a proforma invoice only (migration 0028) — a plain quote doesn't need it.
+    // The account customers pay into: printed on invoices with a balance,
+    // quotes, proformas and every payment request (migration 0028).
     bank_details?: { bank_name?: string; account_name?: string; account_number?: string };
     // Smart reorder suggestions (migration 0034).
     reorder_z?: number; reorder_cover_days?: number; reorder_default_lead_days?: number;

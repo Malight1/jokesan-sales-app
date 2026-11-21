@@ -311,8 +311,8 @@ export async function generateCreditNotePdf(d: CreditNoteData) {
 // ============================================================
 // QUOTE / PROFORMA INVOICE — a price estimate that hasn't touched stock
 // or money yet (migration 0028). Same document, two titles: 'proforma'
-// is what a buyer's finance team asks for before wiring money, so it
-// also prints the seller's bank details; a plain 'quote' doesn't.
+// is what a buyer's finance team asks for before wiring money. Both print
+// the seller's bank details when they're saved.
 // ============================================================
 export interface QuoteData {
   companyName: string;
@@ -439,9 +439,9 @@ export async function generateQuotePdf(d: QuoteData) {
     ty += 5 + doc.splitTextToSize(d.notes, pageW - 28).length * 4.5 + 4;
   }
 
-  // A proforma is what a buyer's finance team asks for before wiring
-  // money — a plain quote doesn't need this.
-  if (d.kind === 'proforma' && d.bankDetails && (d.bankDetails.account_number || d.bankDetails.bank_name)) {
+  // Where to pay. Printed on both a quote and a proforma: a customer who
+  // accepts a quote should never have to ask for the account number.
+  if (d.bankDetails && (d.bankDetails.account_number || d.bankDetails.bank_name)) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(100, 116, 139);

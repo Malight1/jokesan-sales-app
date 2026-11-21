@@ -14,7 +14,7 @@ import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf } from '../lib/invoice';
 import { printReceipt, getReceiptWidth, setReceiptWidth, ReceiptWidth } from '../lib/receipt';
-import { whatsappLink } from '../lib/whatsapp';
+import { whatsappLink, howToPayLines } from '../lib/whatsapp';
 import { looksOffline } from '../lib/offlineCache';
 import { enqueueSale } from '../lib/offlineQueue';
 import { HeldSale, listHeld, holdSale, removeHeld, restoreLines, heldAgo, heldByLabel } from '../lib/heldSales';
@@ -545,8 +545,8 @@ export default function POS() {
         `*${tenant?.name ?? 'Receipt'}*${done.docNo ? ` · ${done.docNo}` : ''}`,
         `Total: ₦${done.total.toLocaleString()}`,
         `Paid: ₦${done.paid.toLocaleString()}`,
-        balance > 0 ? `Balance: ₦${balance.toLocaleString()}` : `Status: PAID ✅`,
-        '', 'Thank you!',
+        balance > 0 ? `Balance due: *₦${balance.toLocaleString()}*` : `Status: PAID ✅`,
+        '', ...(balance > 0 ? howToPayLines(tenant?.bank_details) : []), 'Thank you!',
       ];
       window.open(whatsappLink(cust?.phone, lines.join('\n')), '_blank');
     };
