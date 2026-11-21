@@ -32,6 +32,7 @@ jest.mock('../../lib/api', () => ({
   sales: { create: jest.fn(), docNo: jest.fn(), findByDocNo: jest.fn() },
   finishedGoods: { list: () => Promise.resolve(mockGoods) },
   customers: { list: () => Promise.resolve([]) },
+  customFieldDefs: { forEntity: () => Promise.resolve([]) },
   lookups: { paymentTypes: () => Promise.resolve([{ id: 'cash', name: 'Cash' }, { id: 'credit', name: 'Credit' }]) },
   branding: { toDataUrl: jest.fn() },
   stock: { levels: () => Promise.resolve(Object.keys(mockStock).map(mockLevel)) },

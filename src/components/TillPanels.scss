@@ -26,45 +26,34 @@
 
 // ---- the "till open" chip + dropdown, shown above POS ----
 .till-header {
-  position: relative;
+  @include flex(center, space-between, 0.75rem);
+  flex-wrap: wrap;
   margin-bottom: 0.75rem;
+  padding: 0.55rem 0.6rem 0.55rem 0.9rem;
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
 
-  .till-chip {
-    @include flex(center, center, 0.4rem);
-    background: $success-light;
+  .till-status {
+    @include flex(center, flex-start, 0.4rem);
     color: $success;
-    border: 1px solid rgba($success, 0.25);
-    border-radius: $radius-full;
-    padding: 0.4rem 0.9rem;
     font-size: $font-size-sm;
     font-weight: 600;
-    cursor: pointer;
   }
 
-  .till-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    background: $white;
-    border: 1px solid $gray-200;
-    border-radius: $radius-lg;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-    padding: 0.35rem;
-    min-width: 180px;
+  .till-actions {
+    @include flex(center, flex-end, 0.4rem);
+    flex-wrap: wrap;
+    button { min-height: 38px; gap: 0.35rem; }
+  }
 
-    button {
-      @include flex(center, flex-start, 0.5rem);
+  // Phones: the three buttons share one full-width row under the status.
+  @media (max-width: 640px) {
+    .till-actions {
       width: 100%;
-      background: none;
-      border: none;
-      text-align: left;
-      padding: 0.5rem 0.6rem;
-      border-radius: $radius-sm;
-      font-size: $font-size-sm;
-      color: $gray-700;
-      cursor: pointer;
-      &:hover { background: $gray-100; }
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      button { min-height: 44px; justify-content: center; padding: 0 0.4rem; font-size: 0.8rem; }
     }
   }
 }
@@ -86,6 +75,42 @@
 }
 
 .till-close-summary { color: $gray-500; font-size: $font-size-sm; text-align: center; margin: 0; }
+
+// ---- note-by-note count when closing ----
+.till-count {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.till-count-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr 6.5rem;
+  align-items: center;
+  gap: 0.6rem;
+
+  label { font-size: $font-size-sm; font-weight: 600; color: $gray-700; font-variant-numeric: tabular-nums; }
+  input { min-height: 40px; text-align: right; }
+  span { font-size: $font-size-sm; color: $gray-500; text-align: right; font-variant-numeric: tabular-nums; }
+}
+
+.till-count-total {
+  @include flex(center, space-between, 0.5rem);
+  padding-top: 0.6rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid $gray-200;
+  span { font-size: $font-size-sm; font-weight: 600; color: $gray-700; }
+  strong { font-size: $font-size-lg; color: $gray-900; font-variant-numeric: tabular-nums; }
+}
+
+.till-z-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  button { flex: 1 1 10rem; justify-content: center; min-height: 44px; }
+}
 
 .till-kind-toggle {
   @include flex(center, flex-start, 0.5rem);

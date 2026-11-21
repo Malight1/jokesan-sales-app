@@ -3622,4 +3622,35 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 24. cashier follow-ups: new customer at the till, Z report (0056) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant');
+  v_cashier uuid := '00000000-0000-0000-0000-000000000031';
+  v_owner   uuid := '00000000-0000-0000-0000-000000000001';
+  v_cust uuid; v_z jsonb; v_shift uuid;
+begin
+  perform t_as(v_cashier);
+  insert into customers (first_name, last_name, phone, custom_fields) values ('Walk', 'Up', '08030000000', '{"cac_number":"RC999"}') returning id into v_cust;
+  perform t_rec('a cashier can add a customer from the till',
+    (select tenant_id = v_t from customers where id = v_cust));
+
+  select public.close_shift(1000, '{"1000": 1, "other": 0}'::jsonb, 'end of day') into v_z;
+  v_shift := (v_z->>'shift_id')::uuid;
+  perform t_rec('closing the till keeps the note-by-note count',
+    (v_z->'counted_breakdown'->>'1000')::int = 1);
+  perform t_rec('the Z report names the business, branch, till and cashier',
+    v_z->>'business_name' is not null and v_z->>'branch_name' is not null
+    and v_z->>'register_name' = 'Till 2' and v_z->>'opened_by_name' = 'Till Cashier');
+  perform t_rec('the Z report shows the credit this till gave (the 60 left owing earlier)',
+    (v_z->>'credit_given')::numeric >= 60);
+  perform t_rec('the Z report lists the cash movements, even when there are none',
+    jsonb_typeof(v_z->'cash_movements') = 'array');
+  perform t_su();
+
+  perform t_as(v_owner);
+  perform t_rec('the owner can open the cashier''s Z report', (public.z_report(v_shift)->>'doc_no') is not null);
+  perform t_su();
+end $$;
+
 select name, pass, detail from t_results order by n;

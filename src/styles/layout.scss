@@ -17,6 +17,7 @@
   top: 0;
   left: 0;
   height: 100vh;
+  height: 100dvh; // phones: the visible height, so the footer isn't under the browser bar
   z-index: $z-sidebar;
   overflow-y: auto;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
@@ -128,6 +129,12 @@
   &-footer {
     padding: 0.7rem;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
+    // Stays at the bottom of the sidebar even when the menu is long, so
+    // Sign out never needs scrolling to find.
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    background: $sidebar-bg;
 
     .user-info {
       @include flex(center, flex-start, 0.6rem);
@@ -259,6 +266,60 @@
   }
 }
 
+// Account button + menu (profile, sign out) in the top bar
+.account-btn {
+  @include flex(center, center);
+  width: 38px; height: 38px;
+  padding: 0;
+  border: none;
+  border-radius: $radius-full;
+  background: transparent;
+  cursor: pointer;
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: $radius-full;
+    @include flex(center, center);
+    background: linear-gradient(135deg, $primary, $primary-darker);
+    color: $white;
+    font-size: $font-size-xs;
+    font-weight: 700;
+  }
+  &:hover .avatar, &.active-surface .avatar { box-shadow: 0 0 0 3px $primary-light; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+
+.notif-dropdown.account-menu {
+  width: 240px;
+  padding: 0.35rem 0;
+
+  .account-who {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.6rem 1rem 0.75rem;
+    border-bottom: 1px solid $gray-100;
+    margin-bottom: 0.3rem;
+    strong { font-size: $font-size-sm; color: $gray-900; overflow-wrap: anywhere; }
+    span { font-size: $font-size-xs; color: $gray-500; overflow-wrap: anywhere; }
+  }
+
+  button {
+    @include flex(center, flex-start, 0.6rem);
+    width: 100%;
+    min-height: 44px;
+    padding: 0 1rem;
+    border: none;
+    background: none;
+    color: $gray-700;
+    font: 500 #{$font-size-sm}/1.2 $font-family;
+    text-align: left;
+    cursor: pointer;
+    &:hover { background: $gray-50; }
+    &:focus-visible { outline: none; background: $gray-50; box-shadow: inset 0 0 0 2px $primary; }
+    &.is-danger { color: $danger; }
+  }
+}
+
 // Notification dropdown
 .notif-wrap { position: relative; }
 
@@ -368,6 +429,22 @@
   .page-content { padding: 1rem; }
 }
 
+// Phones: the top bar has room for the title and its buttons only. The
+// date goes, the branch shrinks, and a long page title is cut short
+// rather than pushing the account button off the screen.
+@media (max-width: 640px) {
+  .topbar {
+    gap: 0.5rem;
+    padding: 0 0.5rem 0 0.25rem;
+    .topbar-left { min-width: 0; flex: 1;
+      h2 { font-size: $font-size-base; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    }
+    .topbar-right { gap: 0.15rem; flex-shrink: 0; }
+    .topbar-date { display: none; }
+    .topbar-branch { max-width: 7.5rem; overflow: hidden; select, span { overflow: hidden; text-overflow: ellipsis; } }
+  }
+}
+
 .topbar-menu-btn {
   @include flex(center, center);
   display: none;
@@ -407,6 +484,17 @@
   .till-business { font-weight: 700; font-size: $font-size-sm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .till-sub { font-size: $font-size-xs; color: rgba(255, 255, 255, 0.6); }
   .till-topbar-right { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+  .logo-icon, .till-logo { flex-shrink: 0; }
+
+  // Phones: one row. The name chip becomes just its icon (it opens the
+  // profile), so Sign out always fits beside it.
+  @media (max-width: 640px) {
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    .till-topbar-right { flex-wrap: nowrap; }
+    .till-chip-label { display: none; }
+    .till-chip { padding: 0.45rem 0.65rem; }
+  }
 }
 .till-chip {
   display: inline-flex;

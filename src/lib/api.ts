@@ -1153,6 +1153,11 @@ export interface ShiftReport {
   expected: ShiftExpected;
   counted_cash?: number | null; counted_breakdown?: Record<string, number> | null;
   variance?: number | null; notes?: string | null;
+  // Z report only (0056): names to print, credit given, cash movements.
+  credit_given?: number;
+  cash_movements?: { kind: 'pay_in' | 'pay_out' | 'drop'; amount: number; reason: string }[];
+  business_name?: string | null; branch_name?: string | null; register_name?: string | null;
+  opened_by_name?: string | null; closed_by_name?: string | null;
 }
 
 export const registers = {

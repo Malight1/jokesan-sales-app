@@ -132,6 +132,7 @@ const roleLabels: Record<string, string> = {
   sales: 'Sales',
   inventory: 'Inventory',
   accounts: 'Accounts',
+  cashier: 'Cashier',
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -156,6 +157,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  // The account menu in the top bar: the one place Sign out is always in
+  // reach. On a phone the sidebar (and its footer) is hidden in a drawer.
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
 
   const handleSignOutClick = () => {
     if (pendingCount + failedCount > 0) setConfirmSignOut(true);
@@ -206,11 +211,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setAccountOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
-  useEffect(() => { setNotifOpen(false); setDrawerOpen(false); }, [location.pathname]);
+  useEffect(() => { setNotifOpen(false); setDrawerOpen(false); setAccountOpen(false); }, [location.pathname]);
 
   const retail = isRetail(tenant);
   const title = (retail && location.pathname === '/finished-goods') ? 'Products'
@@ -299,9 +305,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
             <button className="till-chip" onClick={() => navigate(location.pathname === '/profile' ? '/pos' : '/profile')}
               aria-label={location.pathname === '/profile' ? 'Back to the till' : 'My profile'}>
-              <UserCircle size={15} /> {location.pathname === '/profile' ? 'Back to till' : userName}
+              <UserCircle size={15} /> <span className="till-chip-label">{location.pathname === '/profile' ? 'Back to till' : userName}</span>
             </button>
-            <button className="till-chip" onClick={handleSignOutClick}>Sign out</button>
+            <button className="till-chip" onClick={handleSignOutClick}><LogOut size={14} /> Sign out</button>
           </div>
         </header>
         <main className="till-content">
@@ -414,7 +420,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             {/* Branch — an admin chooses where they're working; staff just see theirs */}
             {multi && (role === 'admin' ? (
               <label
-                className="date-badge"
+                className="date-badge topbar-branch"
                 style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
                 title="Where your sales, purchases and production are recorded"
               >
@@ -430,12 +436,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </select>
               </label>
             ) : (
-              <span className="date-badge" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Your branch">
+              <span className="date-badge topbar-branch" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Your branch">
                 <MapPin size={13} /> {myBranchName}
               </span>
             ))}
 
-            <span className="date-badge">{today}</span>
+            <span className="date-badge topbar-date">{today}</span>
 
             {/* Notifications */}
             {(canAccess(role, '/stock-alerts') || supportUnread > 0) && (
@@ -490,10 +496,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            {/* Profile — every role, so staff can change their own password */}
-            <button className="icon-btn" onClick={() => navigate('/profile')} aria-label="My profile" title="My profile">
-              <UserCircle size={18} />
-            </button>
+            {/* Account — every role: profile (own password) and sign out */}
+            <div className="notif-wrap" ref={accountRef}>
+              <button className={`account-btn${accountOpen ? ' active-surface' : ''}`} onClick={() => setAccountOpen(o => !o)}
+                      aria-label="Account: profile and sign out" aria-expanded={accountOpen} aria-haspopup="menu">
+                <span className="avatar">{userInitial}</span>
+              </button>
+              {accountOpen && (
+                <div className="notif-dropdown account-menu" role="menu">
+                  <div className="account-who">
+                    <strong>{userName}</strong>
+                    <span>{inAdminMode ? 'Platform Admin' : (role ? roleLabels[role] : '')}{tenant ? ` · ${tenantName}` : ''}</span>
+                  </div>
+                  <button role="menuitem" onClick={() => { setAccountOpen(false); navigate('/profile'); }}>
+                    <UserCircle size={16} /> My profile
+                  </button>
+                  <button role="menuitem" className="is-danger" onClick={() => { setAccountOpen(false); handleSignOutClick(); }}>
+                    <LogOut size={16} /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Settings */}
             {canAccess(role, '/settings') && (

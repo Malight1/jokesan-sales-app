@@ -88,6 +88,11 @@ interface SignUpParams {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+// Development only: lets src/dev/ShellPreview render the signed-in frame
+// with a sample user, without a real login.
+export const AuthContextForPreview = AuthContext;
+export type { AuthState };
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);

@@ -662,6 +662,28 @@ $warn-text: #b45309;
   }
 }
 
+.co-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  > label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; font-weight: 600; color: $gray-700; }
+  .co-link { align-self: center; }
+}
+
+.co-newcust {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  input { @include input-base; min-height: 44px; font-size: $font-size-sm; }
+}
+
+.co-newcust-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .co-select {
   @include input-base;
   min-height: 44px;

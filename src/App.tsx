@@ -67,6 +67,11 @@ const Assistant = lazy(() => import('./pages/Assistant'));
 const DashboardPreview = process.env.NODE_ENV === 'development'
   ? lazy(() => import('./dev/DashboardPreview'))
   : null;
+// Same idea for the signed-in frame (top bar, sidebar, cashier till bar):
+//   /__dev/shell?role=admin|sales|inventory|accounts|cashier&type=retail|manufacturing
+const ShellPreview = process.env.NODE_ENV === 'development'
+  ? lazy(() => import('./dev/ShellPreview'))
+  : null;
 
 export default function App() {
   return (
@@ -89,6 +94,7 @@ export default function App() {
             <Route path="/join/:inviteId" element={<JoinTeam />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             {DashboardPreview && <Route path="/__dev/dashboards" element={<DashboardPreview />} />}
+            {ShellPreview && <Route path="/__dev/shell" element={<ShellPreview />} />}
             <Route
               path="/*"
               element={

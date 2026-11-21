@@ -6,6 +6,7 @@ import {
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
   FinishedGood, Customer, Lookup, StockLevel, SalesOrder, PriceList, PriceListItem, CustomerType, ProductUnit,
+  customFieldDefs, CustomFieldDef,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -132,6 +133,14 @@ export default function POS() {
   const [showScanner, setShowScanner] = useState(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
+  // Adding a customer without leaving the till: a credit sale needs a
+  // name, and a cashier can't open the Customers page.
+  const [newCust, setNewCust] = useState<{ name: string; phone: string; fields: Record<string, string> } | null>(null);
+  // Fields the owner made required for every customer (Settings → Custom
+  // fields); the database refuses a customer without them.
+  const reqFieldsQ = useQuery<CustomFieldDef[]>(() => customFieldDefs.forEntity('customer'), [], { cacheKey: 'pos-customer-fields' });
+  const requiredFields = (reqFieldsQ.data ?? []).filter(d => d.required);
+  const [savingCust, setSavingCust] = useState(false);
   const [payTypeId, setPayTypeId] = useState('');
   const [tendered, setTendered] = useState(0);
   const [payMode, setPayMode] = useState<'full' | 'part' | 'credit'>('full');
@@ -373,6 +382,34 @@ export default function POS() {
     ...(orderDiscount > 0 ? { orderDiscount } : {}),
     ...(approval ? { approval } : {}),
   });
+
+  const saveNewCustomer = async () => {
+    if (!newCust) return;
+    const name = newCust.name.trim();
+    if (!name) { toast.error('Type the customer’s name.'); return; }
+    const missing = requiredFields.find(d => !(newCust.fields[d.key] ?? '').trim());
+    if (missing) { toast.error(`${missing.label} is required.`); return; }
+    const custom_fields = Object.fromEntries(requiredFields.map(d => {
+      const v = newCust.fields[d.key].trim();
+      return [d.key, d.type === 'number' ? Number(v) : v];
+    }));
+    const [first, ...rest] = name.split(/\s+/);
+    setSavingCust(true);
+    try {
+      const c = await customersApi.create({
+        first_name: first, last_name: rest.join(' ') || null, phone: newCust.phone.trim() || null,
+        ...(requiredFields.length ? { custom_fields } : {}),
+      });
+      custQ.setData(prev => [c, ...(prev ?? [])]);
+      setCustomerId(c.id);
+      setNewCust(null);
+      toast.success(`${name} added.`);
+    } catch (e: any) {
+      toast.error(looksOffline(e) ? 'Adding a customer needs a connection. Try again when you’re back online.' : (e.message ?? 'Could not add the customer.'));
+    } finally {
+      setSavingCust(false);
+    }
+  };
 
   const customerName = (id: string) => {
     const c = custQ.data?.find(x => x.id === id);
@@ -827,13 +864,51 @@ export default function POS() {
                 </div>}
 
                 <div className="co-field">
-                  <label htmlFor="pos-customer"><UserRound size={13} aria-hidden="true" /> Customer</label>
+                  <div className="co-label-row">
+                    <label htmlFor="pos-customer"><UserRound size={13} aria-hidden="true" /> Customer</label>
+                    {!newCust && (
+                      <button type="button" className="co-link" onClick={() => setNewCust({ name: '', phone: '', fields: {} })}>
+                        <Plus size={13} aria-hidden="true" /> New customer
+                      </button>
+                    )}
+                  </div>
+                  {newCust ? (
+                    <div className="co-newcust">
+                      <input aria-label="Customer name" placeholder="Name" autoFocus value={newCust.name}
+                             onChange={e => setNewCust(n => n && { ...n, name: e.target.value })}
+                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveNewCustomer(); } }} />
+                      <input aria-label="Phone number" placeholder="Phone (for WhatsApp)" inputMode="tel" value={newCust.phone}
+                             onChange={e => setNewCust(n => n && { ...n, phone: e.target.value })}
+                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveNewCustomer(); } }} />
+                      {requiredFields.map(d => {
+                        const value = newCust.fields[d.key] ?? '';
+                        const set = (v: string) => setNewCust(n => n && { ...n, fields: { ...n.fields, [d.key]: v } });
+                        return d.type === 'select' ? (
+                          <select key={d.key} aria-label={d.label} className="co-select" value={value} onChange={e => set(e.target.value)}>
+                            <option value="">{d.label}</option>
+                            {(d.options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : (
+                          <input key={d.key} aria-label={d.label} placeholder={d.label} value={value}
+                                 type={d.type === 'date' ? 'date' : 'text'} inputMode={d.type === 'number' ? 'decimal' : undefined}
+                                 onChange={e => set(e.target.value)} />
+                        );
+                      })}
+                      <div className="co-newcust-actions">
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => setNewCust(null)}>Cancel</button>
+                        <button type="button" className="btn-primary btn-sm" disabled={savingCust} onClick={saveNewCustomer}>
+                          {savingCust ? 'Adding…' : 'Add customer'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                   <select id="pos-customer" className={`co-select${needsCustomer ? ' is-needed' : ''}`}
                           value={customerId} onChange={e => setCustomerId(e.target.value)}
                           aria-describedby={needsCustomer ? 'pos-customer-help' : undefined}>
                     <option value="">Walk-in customer</option>
                     {custQ.data?.map(c => <option key={c.id} value={c.id}>{customerLabel(c)}</option>)}
                   </select>
+                  )}
                   {needsCustomer && (
                     <p id="pos-customer-help" className="co-help is-warn">
                       Pick who is buying. An unpaid balance needs a name, or it never shows up under who owes you.

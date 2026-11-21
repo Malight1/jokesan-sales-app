@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Wallet, ChevronDown, ArrowLeftRight, ClipboardList, Lock } from 'lucide-react';
+import { Wallet, ArrowLeftRight, ClipboardList, Lock } from 'lucide-react';
 import Modal from './Modal';
 import CashMovementModal from './CashMovementModal';
 import CloseTillModal from './CloseTillModal';
@@ -8,10 +8,10 @@ import './TillPanels.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-// The persistent "till open" chip shown above POS once a shift is open —
-// with pay-in/out, an anytime X report, and closing the till.
+// The till bar shown above POS once a shift is open: when it opened, and
+// the three things a cashier does with the drawer. Closing the till is a
+// button of its own, not tucked in a menu, so nobody has to hunt for it.
 export default function TillHeader({ shift, onChanged }: { shift: ShiftReport; onChanged: () => void }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [showCash, setShowCash] = useState(false);
   const [showClose, setShowClose] = useState(false);
   const [showX, setShowX] = useState(false);
@@ -21,7 +21,6 @@ export default function TillHeader({ shift, onChanged }: { shift: ShiftReport; o
   const openedAt = new Date(shift.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const viewX = async () => {
-    setMenuOpen(false);
     setShowX(true);
     setXReport(null);
     setXError(null);
@@ -31,16 +30,18 @@ export default function TillHeader({ shift, onChanged }: { shift: ShiftReport; o
 
   return (
     <div className="till-header">
-      <button type="button" className="till-chip" onClick={() => setMenuOpen(o => !o)}>
-        <Wallet size={15} /> Till open · {openedAt} <ChevronDown size={14} />
-      </button>
-      {menuOpen && (
-        <div className="till-menu" onMouseLeave={() => setMenuOpen(false)}>
-          <button type="button" onClick={() => { setMenuOpen(false); setShowCash(true); }}><ArrowLeftRight size={15} /> Pay in / out</button>
-          <button type="button" onClick={viewX}><ClipboardList size={15} /> X report</button>
-          <button type="button" onClick={() => { setMenuOpen(false); setShowClose(true); }}><Lock size={15} /> Close till</button>
-        </div>
-      )}
+      <span className="till-status"><Wallet size={15} aria-hidden="true" /> Till open since {openedAt}</span>
+      <div className="till-actions">
+        <button type="button" className="btn-secondary btn-sm" onClick={() => setShowCash(true)}>
+          <ArrowLeftRight size={15} aria-hidden="true" /> Pay in / out
+        </button>
+        <button type="button" className="btn-secondary btn-sm" onClick={viewX}>
+          <ClipboardList size={15} aria-hidden="true" /> X report
+        </button>
+        <button type="button" className="btn-primary btn-sm" onClick={() => setShowClose(true)}>
+          <Lock size={15} aria-hidden="true" /> Close till
+        </button>
+      </div>
 
       {showCash && <CashMovementModal onClose={() => setShowCash(false)} onDone={onChanged} />}
       {showClose && <CloseTillModal onClose={() => setShowClose(false)} onDone={onChanged} />}

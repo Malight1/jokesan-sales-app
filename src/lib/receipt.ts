@@ -103,6 +103,11 @@ export function receiptHtml(d: ReceiptData, width: ReceiptWidth): string {
 
 /** Opens the print dialog for a receipt. Resolves once the dialog is shown. */
 export function printReceipt(d: ReceiptData, width: ReceiptWidth = getReceiptWidth()): Promise<void> {
+  return printHtml(receiptHtml(d, width));
+}
+
+/** Prints a whole HTML document from a hidden iframe. */
+export function printHtml(html: string): Promise<void> {
   return new Promise(resolve => {
     const frame = document.createElement('iframe');
     frame.setAttribute('aria-hidden', 'true');
@@ -118,7 +123,129 @@ export function printReceipt(d: ReceiptData, width: ReceiptWidth = getReceiptWid
       win.print();
       resolve();
     };
-    frame.srcdoc = receiptHtml(d, width);
+    frame.srcdoc = html;
     document.body.appendChild(frame);
   });
+}
+
+// ---- Z report (end of shift) ----
+
+/** Naira notes counted at close, biggest first. */
+export const NOTE_VALUES = [1000, 500, 200, 100, 50, 20, 10, 5] as const;
+
+export interface ZReportData {
+  doc_no?: string | null;
+  business_name?: string | null; branch_name?: string | null; register_name?: string | null;
+  opened_by_name?: string | null; closed_by_name?: string | null;
+  opened_at: string; closed_at?: string | null;
+  opening_float: number;
+  sales_count: number; sales_total: number; discount_total: number; refunds_total: number;
+  credit_given?: number;
+  expected: Record<string, number | undefined>;
+  cash_movements?: { kind: 'pay_in' | 'pay_out' | 'drop'; amount: number; reason: string }[];
+  counted_cash?: number | null; counted_breakdown?: Record<string, number> | null;
+  variance?: number | null; notes?: string | null;
+}
+
+// Keys of `expected` that are cash workings, not payment methods.
+const CASH_KEYS = new Set(['cash', 'opening_float', 'cash_sales', 'pay_in', 'pay_out', 'drop']);
+const METHOD_LABEL: Record<string, string> = { transfer: 'Transfer', card: 'Card (POS)', store_credit: 'Store credit / other' };
+const MOVE_LABEL = { pay_in: 'Pay-in', pay_out: 'Pay-out', drop: 'Drop' } as const;
+
+// Short enough to fit a 58mm roll next to its label.
+const when = (iso?: string | null) => iso
+  ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  : '';
+
+/** The Z report's lines as label/value pairs, shared by print and WhatsApp. */
+export function zReportSections(z: ZReportData): { title: string; rows: [string, string, boolean?][] }[] {
+  const e = z.expected ?? {};
+  const methods = Object.keys(e).filter(k => !CASH_KEYS.has(k) && Number(e[k] || 0) !== 0);
+  const variance = z.variance ?? 0;
+  const breakdown = z.counted_breakdown ?? {};
+  const noteRows: [string, string][] = NOTE_VALUES
+    .filter(n => Number(breakdown[String(n)] || 0) > 0)
+    .map(n => [`₦${n.toLocaleString()} × ${breakdown[String(n)]}`, money(n * Number(breakdown[String(n)]))]);
+  if (Number(breakdown.other || 0) > 0) noteRows.push(['Coins and other', money(Number(breakdown.other))]);
+
+  return [
+    { title: 'Till', rows: [
+      ['Z report', z.doc_no ?? ''],
+      ...(z.branch_name ? [['Branch', z.branch_name] as [string, string]] : []),
+      ...(z.register_name ? [['Till', z.register_name] as [string, string]] : []),
+      ['Opened', when(z.opened_at)],
+      ['Closed', when(z.closed_at)],
+      ...(z.opened_by_name ? [['Cashier', z.opened_by_name] as [string, string]] : []),
+      ...(z.closed_by_name && z.closed_by_name !== z.opened_by_name ? [['Closed by', z.closed_by_name] as [string, string]] : []),
+    ] },
+    { title: 'Sales', rows: [
+      ['Sales', `${z.sales_count} for ${money(z.sales_total)}`, true],
+      ...(z.discount_total ? [['Discounts given', money(z.discount_total)] as [string, string]] : []),
+      ...(z.refunds_total ? [['Refunds', money(z.refunds_total)] as [string, string]] : []),
+      ...(z.credit_given ? [['Left owing (credit)', money(z.credit_given)] as [string, string]] : []),
+    ] },
+    { title: 'Payments taken', rows: [
+      ['Cash', money(Number(e.cash_sales || 0))],
+      ...methods.map(k => [METHOD_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '), money(Number(e[k] || 0))] as [string, string]),
+    ] },
+    { title: 'Cash drawer', rows: [
+      ['Opening float', money(Number(e.opening_float ?? z.opening_float ?? 0))],
+      ['Cash sales', money(Number(e.cash_sales || 0))],
+      ...(z.cash_movements ?? []).map(m => [`${MOVE_LABEL[m.kind]}: ${m.reason}`, `${m.kind === 'pay_in' ? '' : '−'}${money(m.amount)}`] as [string, string]),
+      ['Expected in drawer', money(Number(e.cash || 0)), true],
+      ['Counted', money(Number(z.counted_cash || 0)), true],
+      [variance === 0 ? 'Balanced' : variance > 0 ? 'Over' : 'Short', money(Math.abs(variance)), true],
+    ] },
+    ...(noteRows.length ? [{ title: 'Note count', rows: noteRows }] : []),
+  ];
+}
+
+export function zReportHtml(z: ZReportData, width: ReceiptWidth): string {
+  const printable = width === 58 ? 48 : 72;
+  const small = width === 58;
+  const body = zReportSections(z).map(sec => `
+    <div class="rule"></div>
+    <div class="sec">${esc(sec.title)}</div>
+    ${sec.rows.map(([l, v, strong]) => `<div class="row${strong ? ' strong' : ''}"><span>${esc(l)}</span><span>${esc(v)}</span></div>`).join('')}
+  `).join('');
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${esc(z.doc_no ?? 'Z report')}</title>
+<style>
+  @page { size: ${width}mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+  body { width: ${printable}mm; margin: 0 auto; padding: 3mm 0 6mm;
+         font: ${small ? 10 : 11.5}px/1.35 ui-monospace, Menlo, Consolas, "Courier New", monospace; }
+  .center { text-align: center; }
+  h1 { font-size: ${small ? 13 : 15}px; margin: 0 0 1mm; }
+  .rule { border-top: 1px dashed #000; margin: 2mm 0; }
+  .sec { font-weight: 700; margin-bottom: 1mm; }
+  .row { display: flex; justify-content: space-between; gap: 2mm; }
+  .row span:first-child { word-break: break-word; }
+  .row span:last-child { white-space: nowrap; }
+  .strong { font-weight: 700; }
+  .notes { margin-top: 2mm; word-break: break-word; }
+</style></head>
+<body>
+  <div class="center">
+    <h1>${esc(z.business_name ?? 'End of shift')}</h1>
+    <div>END OF SHIFT (Z) REPORT</div>
+  </div>
+  ${body}
+  ${z.notes ? `<div class="rule"></div><div class="notes">Notes: ${esc(z.notes)}</div>` : ''}
+</body></html>`;
+}
+
+/** The same report as a WhatsApp message for the owner. */
+export function zReportText(z: ZReportData): string {
+  const lines = [`*${z.business_name ?? 'End of shift'}: ${z.doc_no ?? 'Z report'}*`];
+  for (const sec of zReportSections(z)) {
+    if (sec.title === 'Till') {
+      lines.push(...sec.rows.slice(1).map(([l, v]) => `${l}: ${v}`));
+      continue;
+    }
+    lines.push('', `*${sec.title}*`, ...sec.rows.map(([l, v, strong]) => strong ? `*${l}: ${v}*` : `${l}: ${v}`));
+  }
+  if (z.notes) lines.push('', `Notes: ${z.notes}`);
+  return lines.join('\n');
 }
