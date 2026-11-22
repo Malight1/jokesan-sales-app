@@ -3,7 +3,7 @@ import { Printer, MessageCircle } from 'lucide-react';
 import Modal from './Modal';
 import { ErrorState } from './DataStates';
 import NumberInput from './NumberInput';
-import { shifts as shiftsApi, ShiftReport } from '../lib/api';
+import { shifts as shiftsApi, tillPayments, ShiftReport } from '../lib/api';
 import { NOTE_VALUES, printHtml, zReportHtml, zReportText, getReceiptWidth } from '../lib/receipt';
 import { whatsappLink } from '../lib/whatsapp';
 
@@ -34,10 +34,12 @@ export default function CloseTillModal({ onClose, onDone }: { onClose: () => voi
     if (other) breakdown.other = other;
     try {
       const z = await shiftsApi.close(countedCash, Object.keys(breakdown).length ? breakdown : null, notes.trim() || null);
+      // Confirmed transfers by provider (0058); the report still works without it.
+      const confirmed = await tillPayments.shiftTotals(z.shift_id).catch(() => []);
       // onDone (which swaps the till for the "open till" screen) waits until
       // the cashier dismisses the result, or the Z report would vanish
       // before they could print or send it.
-      setResult(z);
+      setResult({ ...z, confirmed } as ShiftReport);
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {

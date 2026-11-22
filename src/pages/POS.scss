@@ -1167,3 +1167,11 @@ $warn-text: #b45309;
   font-size: 0.75rem;
   color: #92400e;
 }
+
+// Confirmed "Pay by transfer" chips (migration 0058): set apart from the
+// plain methods because the till itself checks the money arrived.
+.pay-chips button.is-confirmed {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  &.is-on { background: #2563eb; border-color: #2563eb; color: #fff; }
+}

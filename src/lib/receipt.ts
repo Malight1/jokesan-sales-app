@@ -145,7 +145,11 @@ export interface ZReportData {
   cash_movements?: { kind: 'pay_in' | 'pay_out' | 'drop'; amount: number; reason: string }[];
   counted_cash?: number | null; counted_breakdown?: Record<string, number> | null;
   variance?: number | null; notes?: string | null;
+  // Transfers confirmed by a provider on this till (migration 0058).
+  confirmed?: { provider: string; total: number; count: number }[];
 }
+
+const PROVIDER_LABEL: Record<string, string> = { monnify: 'Moniepoint', paystack: 'Paystack', opay: 'OPay' };
 
 // Keys of `expected` that are cash workings, not payment methods.
 const CASH_KEYS = new Set(['cash', 'opening_float', 'cash_sales', 'pay_in', 'pay_out', 'drop']);
@@ -188,6 +192,8 @@ export function zReportSections(z: ZReportData): { title: string; rows: [string,
       ['Cash', money(Number(e.cash_sales || 0))],
       ...methods.map(k => [METHOD_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' '), money(Number(e[k] || 0))] as [string, string]),
     ] },
+    ...((z.confirmed ?? []).length ? [{ title: 'Confirmed transfers', rows: (z.confirmed ?? []).map(c =>
+      [`${PROVIDER_LABEL[c.provider] ?? c.provider} (${c.count})`, money(Number(c.total || 0))] as [string, string]) }] : []),
     { title: 'Cash drawer', rows: [
       ['Opening float', money(Number(e.opening_float ?? z.opening_float ?? 0))],
       ['Cash sales', money(Number(e.cash_sales || 0))],

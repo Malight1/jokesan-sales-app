@@ -7,6 +7,7 @@
 //   paystack  { secretKey: 'sk_…', publicKey: 'pk_…' }
 //   monnify   { apiKey: 'MK_…', secretKey: '…', contractCode: '…' }
 //             (Moniepoint's gateway; MK_TEST_ keys = sandbox, others = live)
+//   opay      { publicKey, secretKey, merchantId, environment: 'sandbox'|'live' }
 //
 // The key is checked against the provider once, then stored ONLY in
 // Supabase Vault (store_tenant_payment_secret, service role). The app can
@@ -29,7 +30,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const provider: string = body.provider ?? 'paystack';
-    if (!['paystack', 'monnify'].includes(provider)) return json({ error: 'That payment provider is not supported yet.' });
+    if (!['paystack', 'monnify', 'opay'].includes(provider)) return json({ error: 'That payment provider is not supported yet.' });
 
     // 1) The caller must be a signed-in admin (checked with their own JWT).
     const authHeader = req.headers.get('Authorization') ?? '';
@@ -67,6 +68,32 @@ Deno.serve(async (req) => {
       const v = await vr.json().catch(() => ({}));
       if (!vr.ok || v.status !== true) return json({ error: 'Paystack rejected that secret key. Check it and try again.' });
       secret = secretKey; publicKey = pk;
+    } else if (provider === 'opay') {
+      const pk = String(body.publicKey ?? '').trim();
+      const sk = String(body.secretKey ?? '').trim();
+      const merchantId = String(body.merchantId ?? '').trim();
+      const environment = body.environment === 'live' ? 'live' : 'sandbox';
+      if (!pk || !sk || !/^\d{6,20}$/.test(merchantId)) {
+        return json({ error: 'Enter the public key, secret key and merchant ID from your OPay Business dashboard (API Keys & Webhooks).' });
+      }
+      // A status lookup for a reference that can't exist: OPay answers
+      // "not found" (02006) for good keys and "authentication failed"
+      // (02000) for bad ones, without creating anything.
+      const base = environment === 'live' ? 'https://api.opaycheckout.com' : 'https://sandboxapi.opaycheckout.com';
+      const probe = JSON.stringify({ country: 'NG', reference: `PROFIXBOOK-KEYCHECK-${crypto.randomUUID()}` });
+      const vr = await fetch(`${base}/api/v1/international/cashier/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${await hmacSha512Hex(sk, probe)}`, MerchantId: merchantId, 'Content-Type': 'application/json' },
+        body: probe,
+      });
+      const v = await vr.json().catch(() => ({}));
+      if (v.code !== '02006' && v.code !== '00000') {
+        return json({ error: v.code === '02000'
+          ? 'OPay rejected those keys. Check the secret key and merchant ID, and that Test/Live matches the keys.'
+          : `OPay said: ${v.message ?? 'could not check the keys'}.` });
+      }
+      secret = sk; publicKey = pk;
+      settings = { merchant_id: merchantId, environment };
     } else {
       const apiKey = String(body.apiKey ?? '').trim();
       const secretKey = String(body.secretKey ?? '').trim();
@@ -99,6 +126,13 @@ Deno.serve(async (req) => {
     return json({ error: String((e as Error)?.message ?? e) });
   }
 });
+
+async function hmacSha512Hex(key: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-512' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, enc.encode(message));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // 200 with {error} so the app shows the real message.
 function json(body: unknown) {

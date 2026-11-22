@@ -57,6 +57,7 @@ const PlatformTicketThread = lazy(() => import('./pages/admin/PlatformTicketThre
 const Support = lazy(() => import('./pages/Support'));
 const SupportThread = lazy(() => import('./pages/SupportThread'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
+const MoneyReceived = lazy(() => import('./pages/MoneyReceived'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
 const Batches = lazy(() => import('./pages/Batches'));
@@ -132,6 +133,7 @@ export default function App() {
                         <Route path="/support" element={<Support />} />
                         <Route path="/support/:id" element={<SupportThread />} />
                         <Route path="/match-payment" element={<MatchPayment />} />
+                        <Route path="/money-received" element={<MoneyReceived />} />
                         <Route path="/transfers" element={<Transfers />} />
                         <Route path="/batches" element={<Batches />} />
                         <Route path="/profile" element={<Profile />} />

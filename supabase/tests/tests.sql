@@ -3703,4 +3703,106 @@ begin
     (select provider from public.tenant_payment_provider(v_t)) = 'paystack');
 end $$;
 
+-- ---------- 24. confirmed "Pay by transfer" at the till (0058) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos');
+  v_soap uuid; v_tp uuid; v_tp2 uuid; v_tp3 uuid; v_tp4 uuid; v_sale uuid; v_shift uuid; v_res text;
+  v_transfer uuid; v_cash uuid; v_items jsonb; v_conf jsonb;
+begin
+  perform t_su();
+  select id into v_soap from finished_goods where tenant_id = v_t and name = 'Till Soap';
+  select id into v_shift from shifts where opened_by = '00000000-0000-0000-0000-000000000031' and status = 'open';
+  if v_shift is null then
+    perform t_as('00000000-0000-0000-0000-000000000031');
+    select public.open_shift((select id from registers where tenant_id = v_t and name = 'Till 2'), 1000) into v_shift;
+    perform t_su();
+  end if;
+  select id into v_transfer from payment_types where tenant_id = v_t and method_group = 'transfer' limit 1;
+  select id into v_cash from payment_types where tenant_id = v_t and method_group = 'cash' limit 1;
+  v_items := t_items(v_soap, 2, 100)::jsonb;
+
+  -- What till-payment-create leaves behind for the cashier.
+  insert into till_payments (tenant_id, branch_id, shift_id, created_by, provider, provider_ref, amount, account_number, bank_name, expires_at)
+  values (v_t, v_lagos, v_shift, '00000000-0000-0000-0000-000000000031', 'monnify', 'PFB-T1', 200, '2247883476', 'Moniepoint MFB', now() + interval '40 minutes')
+  returning id into v_tp;
+
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  perform t_rec('the cashier sees their own pending transfer', exists (select 1 from till_payments where id = v_tp));
+  perform t_err('no sale until the money arrives',
+    format('select public.complete_till_sale(%L::uuid, null, %L::jsonb)', v_tp, v_items), 'not arrived');
+  perform t_su();
+
+  select public.record_till_payment('monnify', 'PFB-T1', 200, 'BOLA ADE', '0123456789', 'ACCOUNT_TRANSFER') into v_res;
+  perform t_rec('confirmed money marks the transfer paid', v_res = 'paid'
+    and (select status from till_payments where id = v_tp) = 'paid');
+  perform public.record_till_payment('monnify', 'PFB-T1', 200);
+  perform t_rec('a repeated notification records the money once',
+    (select count(*) from incoming_payments where provider = 'monnify' and provider_ref = 'PFB-T1') = 1);
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_rec('another staff member cannot see someone else''s till transfer', not exists (select 1 from till_payments where id = v_tp));
+  perform t_err('nor use it',
+    format('select public.complete_till_sale(%L::uuid, null, %L::jsonb)', v_tp, v_items), 'someone else');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  execute format('select public.complete_till_sale(%L::uuid, null, %L::jsonb)', v_tp, v_items) into v_sale;
+  perform t_rec('the sale goes through fully paid, tied to the confirmed money',
+    (select payment_status::text = 'full' and balance = 0 from sales_orders where id = v_sale)
+    and exists (select 1 from sale_payments sp join till_payments tp on tp.incoming_payment_id = sp.incoming_payment_id
+                 where sp.sales_order_id = v_sale and tp.id = v_tp));
+  perform t_err('one transfer pays one sale only',
+    format('select public.complete_till_sale(%L::uuid, null, %L::jsonb)', v_tp, v_items), 'already been used');
+  perform t_su();
+  perform t_rec('the money shows which sale it paid',
+    (select sales_order_id = v_sale and match_status = 'auto' from incoming_payments where provider_ref = 'PFB-T1'));
+
+  -- Cart changed after the transfer was requested: refused, nothing kept.
+  -- (a sales lead, so the cashier-only credit rule doesn't answer first)
+  insert into till_payments (tenant_id, branch_id, created_by, provider, provider_ref, amount)
+  values (v_t, t_id('abuja'), '00000000-0000-0000-0000-000000000002', 'monnify', 'PFB-T2', 150) returning id into v_tp2;
+  perform public.record_till_payment('monnify', 'PFB-T2', 150);
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a sale that no longer matches the transfer is refused',
+    format('select public.complete_till_sale(%L::uuid, null, %L::jsonb)', v_tp2, v_items), 'no longer matches');
+  perform t_su();
+  perform t_rec('and the transfer is still there to use', (select status from till_payments where id = v_tp2) = 'paid');
+
+  -- Short payment and money for a cancelled request: kept for the owner.
+  insert into till_payments (tenant_id, branch_id, created_by, provider, provider_ref, amount)
+  values (v_t, v_lagos, '00000000-0000-0000-0000-000000000031', 'opay', 'OP-T3', 500) returning id into v_tp3;
+  select public.record_till_payment('opay', 'OP-T3', 300) into v_res;
+  perform t_rec('a short payment does not count as paid', v_res = 'pending'
+    and (select match_status from incoming_payments where provider_ref = 'OP-T3') = 'unmatched');
+  insert into till_payments (tenant_id, branch_id, created_by, provider, provider_ref, amount)
+  values (v_t, v_lagos, '00000000-0000-0000-0000-000000000031', 'paystack', 'PS-T4', 400) returning id into v_tp4;
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  perform public.cancel_till_payment(v_tp4);
+  perform t_su();
+  perform public.record_till_payment('paystack', 'PS-T4', 400);
+  perform t_rec('money for a cancelled request is recorded but left for the owner to sort out',
+    (select status from till_payments where id = v_tp4) = 'cancelled'
+    and (select match_status from incoming_payments where provider_ref = 'PS-T4') = 'unmatched');
+
+  -- The switch: cashiers must use confirmed transfers.
+  update tenants set require_confirmed_transfer = true where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  perform t_err('with the switch on, a cashier cannot record a plain transfer',
+    format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_transfer, t_items(v_soap, 1, 100)),
+    'have to be confirmed');
+  perform t_ok('cash still works', format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_cash, t_items(v_soap, 1, 100)));
+  perform t_su();
+  update tenants set require_confirmed_transfer = false where id = v_t;
+
+  perform t_as('00000000-0000-0000-0000-000000000031');
+  select public.shift_confirmed_payments(v_shift) into v_conf;
+  perform t_su();
+  perform t_rec('the Z report splits confirmed money by provider',
+    v_conf->0->>'provider' = 'monnify' and (v_conf->0->>'total')::numeric = 200);
+
+  perform t_rec('only the server can mark money as arrived',
+    not has_function_privilege('authenticated', 'public.record_till_payment(text, text, numeric, text, text, text, jsonb)', 'execute'));
+end $$;
+
 select name, pass, detail from t_results order by n;

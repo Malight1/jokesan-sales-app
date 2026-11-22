@@ -461,7 +461,7 @@ function BillingTab() {
 const PROVIDERS: { id: PaymentProvider; name: string; short: string; blurb: string; soon?: boolean }[] = [
   { id: 'monnify', name: 'Moniepoint', short: 'MP', blurb: 'Through Monnify, Moniepoint\'s payment service. Customers pay by transfer, card or USSD into your Moniepoint business account.' },
   { id: 'paystack', name: 'Paystack', short: 'PS', blurb: 'Customers pay by card, transfer or USSD into your Paystack account.' },
-  { id: 'opay', name: 'OPay', short: 'OP', blurb: 'Coming next. Pay into your OPay business account.', soon: true },
+  { id: 'opay', name: 'OPay', short: 'OP', blurb: 'Customers pay with their OPay app, a bank transfer or a card into your OPay business account.' },
 ];
 
 function PaymentsTab() {
@@ -545,6 +545,8 @@ function PaymentsTab() {
         })}
       </div>
 
+      {connected.length > 0 && <TillTransferRule />}
+
       <div className="card" style={{ marginTop: '1.25rem' }}>
         <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Link2 size={18} color="#2563eb" /> One more step for each account you connect
@@ -559,6 +561,7 @@ function PaymentsTab() {
         <ul className="pay-steps">
           <li><strong>Moniepoint (Monnify):</strong> Monnify dashboard → Developer → Webhook URLs → <em>Transaction Completion</em>.</li>
           <li><strong>Paystack:</strong> Paystack dashboard → Settings → API Keys &amp; Webhooks → <em>Webhook URL</em>.</li>
+          <li><strong>OPay:</strong> nothing to paste. ProfixBook tells OPay where to send each confirmation.</li>
           <li>Then, on an unpaid invoice (Sales Orders, or a customer's account under Customers), tap <strong>Pay link</strong>. It opens WhatsApp with the link ready to send.</li>
         </ul>
       </div>
@@ -581,6 +584,43 @@ function PaymentsTab() {
   );
 }
 
+// At the till: cashiers must take transfers through confirmed "Pay by
+// transfer" (migration 0058). The database enforces it too.
+function TillTransferRule() {
+  const toast = useToast();
+  const { tenant, refresh } = useAuth();
+  const [saving, setSaving] = useState(false);
+  if (!tenant || tenant.require_confirmed_transfer === undefined) return null;
+  const on = !!tenant.require_confirmed_transfer;
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      await tenantApi.update(tenant.id, { require_confirmed_transfer: !on });
+      await refresh();
+      toast.success(!on ? 'Cashiers now have to use Pay by transfer for transfers.' : 'Cashiers can record transfers without confirmation again.');
+    } catch (e: any) { toast.error(e.message ?? 'Could not save.'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="card" style={{ marginTop: '1.25rem' }}>
+      <h3 style={{ marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ShieldCheck size={18} color="#2563eb" /> Pay by transfer at the till
+      </h3>
+      <p style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.55, marginBottom: '0.75rem' }}>
+        At the till, <strong>Pay by transfer</strong> shows the customer an account number (or a QR code) for that sale, and the sale
+        completes only when your provider confirms the money arrived. A fake transfer screenshot can't get past it.
+      </p>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+        <input type="checkbox" checked={on} onChange={toggle} disabled={saving} style={{ width: 'auto', marginTop: 3 }} />
+        <span>
+          Cashiers must use Pay by transfer for every transfer
+          <small className="setting-hint">Hides the plain "Transfer" button from cashiers, so a transfer can only be recorded once the money is confirmed. Cash and card still work as normal.</small>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function ConnectProviderModal({ provider, onClose, onDone }: { provider: PaymentProvider; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -588,7 +628,13 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setKeys(v => ({ ...v, [k]: e.target.value }));
   const name = PROVIDERS.find(p => p.id === provider)?.name ?? provider;
 
-  const fields = provider === 'monnify'
+  const fields = provider === 'opay'
+    ? [
+        { k: 'publicKey', label: 'Public key', ph: 'OPAYPUB…', secret: false },
+        { k: 'secretKey', label: 'Secret key', ph: 'OPAYPRV…', secret: true },
+        { k: 'merchantId', label: 'Merchant ID', ph: 'e.g. 256612345678901', secret: false },
+      ]
+    : provider === 'monnify'
     ? [
         { k: 'apiKey', label: 'API key', ph: 'MK_PROD_… (or MK_TEST_… to try it first)', secret: false },
         { k: 'secretKey', label: 'Secret key', ph: 'From the same page', secret: true },
@@ -598,13 +644,15 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
         { k: 'secretKey', label: 'Secret key', ph: 'sk_live_… or sk_test_…', secret: true },
         { k: 'publicKey', label: 'Public key', ph: 'pk_live_… or pk_test_…', secret: false },
       ];
+  const [environment, setEnvironment] = useState<'live' | 'sandbox'>('live');
   const ready = fields.every(f => (keys[f.k] ?? '').trim());
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ready) { toast.error('Fill in every field.'); return; }
     setSaving(true);
-    const res = await paymentsApi.connect(provider, Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.trim()])));
+    const trimmed = Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.trim()]));
+    const res = await paymentsApi.connect(provider, provider === 'opay' ? { ...trimmed, environment } : trimmed);
     setSaving(false);
     if (res.error) { toast.error(res.error); return; }
     toast.success(`${name} connected. Invoices can now get a pay link.`);
@@ -622,9 +670,20 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
           <p className="setting-hint" style={{ marginTop: 0, marginBottom: '1rem' }}>
             {provider === 'monnify'
               ? 'Find these in your Monnify dashboard under Developer → API Keys & Contracts. You need a Monnify business account (Moniepoint\'s payment service) first.'
+              : provider === 'opay'
+              ? 'Find these in your OPay Business dashboard under Developer → API Keys & Webhooks. You need an OPay merchant account first.'
               : 'Find these in your Paystack dashboard under Settings → API Keys & Webhooks.'}
             {' '}Your secret key is checked once, then locked away. Nobody at ProfixBook can read it.
           </p>
+          {provider === 'opay' && (
+            <div className="form-group">
+              <label htmlFor="pk-env">Keys are for</label>
+              <select id="pk-env" value={environment} onChange={e => setEnvironment(e.target.value as 'live' | 'sandbox')}>
+                <option value="live">Real payments (live keys)</option>
+                <option value="sandbox">Testing (sandbox keys)</option>
+              </select>
+            </div>
+          )}
           {fields.map(f => (
             <div className="form-group" key={f.k}>
               <label htmlFor={`pk-${f.k}`}>{f.label}</label>

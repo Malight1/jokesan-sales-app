@@ -8,8 +8,9 @@
 // straight into the business's own account; ProfixBook never holds it.
 // payments-webhook confirms the payment and marks the invoice paid.
 //
-// Monnify checkout links work for 40 minutes (their limit); the response
-// says when it stops working so the message to the customer can say so.
+// Monnify checkout links work for 40 minutes and OPay's for 30; the
+// response says when it stops working so the message to the customer can
+// say so. OPay is told where to send its confirmation with each payment.
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -119,6 +120,28 @@ Deno.serve(async (req) => {
       url = b.checkoutUrl;
       meta = { transactionReference: b.transactionReference };
       expiresAt = new Date(Date.now() + 40 * 60_000).toISOString();
+    } else if (prov.provider === 'opay') {
+      const base = prov.settings?.environment === 'live' ? 'https://api.opaycheckout.com' : 'https://sandboxapi.opaycheckout.com';
+      const kobo = Math.round(Number(sale.balance) * 100);
+      reference = `PFB-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+      const initRes = await fetch(`${base}/api/v1/international/cashier/create`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${prov.public_key}`, MerchantId: prov.settings?.merchant_id, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          country: 'NG', reference, amount: { total: kobo, currency: 'NGN' },
+          returnUrl: `${appUrl}/paid`, cancelUrl: `${appUrl}/paid`,
+          callbackUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/payments-webhook`,
+          expireAt: 30,
+          userInfo: { userName: customerName, userEmail: email },
+          productList: [{ productId: String(sale.id), name: `Invoice ${docNo}`, description: `Payment for ${docNo}`, price: kobo, quantity: 1 }],
+        }),
+      });
+      const init = await initRes.json().catch(() => ({}));
+      if (!initRes.ok || init.code !== '00000' || !init.data?.cashierUrl) return json({ error: init.message || 'OPay could not create the payment link.' });
+      if (init.data.reference !== reference) return json({ error: 'OPay returned a different reference. Try again.' });
+      url = init.data.cashierUrl;
+      meta = { orderNo: init.data.orderNo };
+      expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
     } else {
       return json({ error: 'That payment provider is not supported yet.' });
     }

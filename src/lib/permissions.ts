@@ -3,11 +3,11 @@ import { Role } from './AuthContext';
 // Which routes each role may access. 'admin' implicitly gets everything.
 export const ROLE_ROUTES: Record<Role, string[]> = {
   admin: ['*'],
-  sales: ['/dashboard', '/profile', '/pos', '/sales', '/quotes', '/deliveries', '/customers', '/finished-goods', '/stock-alerts', '/match-payment', '/assistant', '/support'],
+  sales: ['/dashboard', '/profile', '/pos', '/sales', '/quotes', '/deliveries', '/customers', '/finished-goods', '/stock-alerts', '/match-payment', '/money-received', '/assistant', '/support'],
   inventory: ['/dashboard', '/profile', '/inventory', '/finished-goods', '/production', '/batches', '/purchases', '/suppliers', '/stock-movement', '/stock-alerts', '/transfers', '/import', '/insights', '/assistant', '/support'],
   // Till only. The database enforces the rest (migration 0054).
   cashier: ['/pos', '/profile'],
-  accounts: ['/dashboard', '/profile', '/expenses', '/reports', '/sales', '/quotes', '/deliveries', '/purchases', '/batches', '/stock-alerts', '/insights', '/match-payment', '/assistant', '/support'],
+  accounts: ['/dashboard', '/profile', '/expenses', '/reports', '/sales', '/quotes', '/deliveries', '/purchases', '/batches', '/stock-alerts', '/insights', '/match-payment', '/money-received', '/assistant', '/support'],
 };
 
 export function canAccess(role: Role | undefined, path: string): boolean {

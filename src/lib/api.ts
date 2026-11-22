@@ -1011,6 +1011,8 @@ export const tenantApi = {
     reorder_z?: number; reorder_cover_days?: number; reorder_default_lead_days?: number;
     // E-invoicing (NRS) readiness (migration 0035).
     rc_number?: string | null; address?: string | null;
+    // Cashiers must take transfers through confirmed "Pay by transfer" (0058).
+    require_confirmed_transfer?: boolean;
   }) =>
     del(supabase.from('tenants').update(patch).eq('id', id)),
 };
@@ -1155,7 +1157,9 @@ export interface ShiftReport {
   variance?: number | null; notes?: string | null;
   // Z report only (0056): names to print, credit given, cash movements.
   credit_given?: number;
-  cash_movements?: { kind: 'pay_in' | 'pay_out' | 'drop'; amount: number; reason: string }[];
+  cash_movements?: { kind: 'pay_in' | 'pay_out' | 'drop'; amount: number; reason: string   // Confirmed transfers on this till by provider (0058), added by the app.
+  confirmed?: { provider: string; total: number; count: number }[];
+}[];
   business_name?: string | null; branch_name?: string | null; register_name?: string | null;
   opened_by_name?: string | null; closed_by_name?: string | null;
 }
@@ -1584,6 +1588,47 @@ export interface PaymentLink {
   id: string; sales_order_id: string; provider_ref: string; url: string;
   amount: number; status: 'pending' | 'paid' | 'expired' | 'cancelled'; created_at: string;
 }
+
+// Confirmed "Pay by transfer" at the till (migration 0058).
+export interface TillPayment {
+  id: string; provider: PaymentProvider; provider_ref: string; amount: number;
+  account_number: string | null; account_name: string | null; bank_name: string | null; pay_url: string | null;
+  expires_at: string | null; status: 'pending' | 'paid' | 'cancelled' | 'expired' | 'used';
+  sales_order_id: string | null; paid_at: string | null; created_at: string;
+}
+export interface IncomingPayment {
+  id: string; provider: string; provider_ref: string; amount: number; payer_name: string | null; payer_account: string | null;
+  channel: string | null; received_at: string; match_status: 'auto' | 'suggested' | 'manual' | 'unmatched' | 'ignored';
+  sales_order_id: string | null; till_payment_id?: string | null;
+  sales_orders?: { doc_no: string | null; customer_id: string | null } | null;
+}
+export const tillPayments = {
+  create: async (amount: number, provider?: PaymentProvider): Promise<{ payment?: TillPayment; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('till-payment-create', { body: { amount, ...(provider ? { provider } : {}) } });
+    if (error) return { error: "Couldn't reach the payment service. Check your internet and try again." };
+    return data ?? { error: 'No answer from the payment service.' };
+  },
+  status: async (id: string): Promise<{ status?: TillPayment['status']; payment?: TillPayment; shortBy?: number; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('till-payment-status', { body: { id } });
+    if (error) return { error: 'offline' };
+    return data ?? { error: 'No answer.' };
+  },
+  cancel: (id: string) => rpcVoid('cancel_till_payment', { p_till_payment: id }),
+  completeSale: (params: {
+    tillPaymentId: string; customerId: string | null;
+    items: { finished_good_id: string; quantity: number; unit_price: number; fg_batch_id?: string; discount_reason?: string | null }[];
+    branchId?: string | null; orderDiscount?: number; approval?: { userId: string; pin: string } | null;
+  }) => approvalArgs(params.approval).then(approval =>
+    rpc<string>('complete_till_sale', {
+      p_till_payment: params.tillPaymentId, p_customer: params.customerId, p_items: params.items,
+      p_branch: params.branchId ?? null, p_order_discount: params.orderDiscount ?? 0, ...approval,
+    })),
+  shiftTotals: (shiftId: string) => rpc<{ provider: string; total: number; count: number }[]>('shift_confirmed_payments', { p_shift: shiftId }),
+};
+export const incomingPayments = {
+  list: () => runAll<IncomingPayment>((f, t) => supabase.from('incoming_payments')
+    .select('*, sales_orders(doc_no, customer_id)').order('received_at', { ascending: false }).range(f, t)),
+};
 
 export const payments = {
   integrationStatus: () => rpc<IntegrationStatus>('integration_status'),

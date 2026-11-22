@@ -1,0 +1,64 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.tw-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  text-align: center;
+
+  .tw-amount {
+    display: flex; flex-direction: column; gap: 2px;
+    span { font-size: $font-size-xs; color: $gray-500; }
+    strong { font-size: 2rem; letter-spacing: -0.02em; color: $gray-900; font-variant-numeric: tabular-nums; }
+  }
+
+  .tw-account {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 1rem;
+    border: 1px solid $gray-200;
+    border-radius: $radius-lg;
+    background: $gray-50;
+    .tw-label { font-size: $font-size-xs; color: $gray-500; }
+    .tw-number {
+      display: inline-flex; align-items: center; gap: 8px;
+      border: none; background: none; cursor: pointer;
+      font: 800 2rem/1.15 $font-family; letter-spacing: 0.04em; color: $gray-900;
+      font-variant-numeric: tabular-nums;
+      svg { color: $gray-400; }
+      &:focus-visible { outline: none; box-shadow: $ring; border-radius: $radius-sm; }
+    }
+    .tw-bank { font-weight: 700; color: $gray-800; }
+    .tw-name { font-size: $font-size-sm; color: $gray-600; }
+  }
+
+  .tw-qr {
+    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    img { width: 220px; height: 220px; border: 1px solid $gray-200; border-radius: $radius-lg; padding: 6px; background: $white; }
+  }
+
+  .tw-note { font-size: $font-size-xs; color: $gray-500; line-height: 1.5; max-width: 34ch; margin: 0.25rem auto 0; }
+
+  .tw-wait {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: $radius-full;
+    background: $primary-light; color: $primary-darker;
+    font-size: $font-size-sm;
+    .tw-left { font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 0.25rem; }
+  }
+
+  .tw-state {
+    display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+    padding: 1rem;
+    border-radius: $radius-lg;
+    strong { font-size: $font-size-lg; }
+    span { font-size: $font-size-sm; }
+    &.is-paid { background: $success-light; color: darken($success, 8%); }
+    &.is-expired { background: $warning-light; color: darken($warning, 14%); }
+    .tw-row { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
+  }
+
+  .tw-short { font-size: $font-size-sm; color: darken($warning, 14%); background: $warning-light; padding: 0.6rem 0.8rem; border-radius: $radius; }
+  .tw-foot { font-size: $font-size-xs; color: $gray-400; }
+}

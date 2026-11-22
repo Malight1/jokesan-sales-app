@@ -6,7 +6,7 @@ import {
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
   FinishedGood, Customer, Lookup, StockLevel, SalesOrder, PriceList, PriceListItem, CustomerType, ProductUnit,
-  customFieldDefs, CustomFieldDef,
+  customFieldDefs, CustomFieldDef, payments as paymentsApi, tillPayments, TillPayment, PaymentProvider, IntegrationStatus,
 } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -28,6 +28,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import NumberInput from '../components/NumberInput';
 import Modal from '../components/Modal';
 import ApprovalModal from '../components/ApprovalModal';
+import TransferWaitModal from '../components/TransferWaitModal';
 import LinePriceModal from '../components/LinePriceModal';
 import TillHeader from '../components/TillHeader';
 import OpenTillScreen from '../components/OpenTillScreen';
@@ -39,6 +40,8 @@ const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumF
 const NEEDS_APPROVAL = /manager'?s? pin/i;
 const IS_CASH = /cash/i;
 const IS_CREDIT = /credit/i;
+const IS_TRANSFER = /transfer/i;
+const PROVIDER_LABEL: Record<string, string> = { monnify: 'Moniepoint', paystack: 'Paystack', opay: 'OPay' };
 
 // unitPrice defaults to the resolved list price; `manual` marks a line the
 // cashier has hand-priced, so switching the customer later re-prices
@@ -128,6 +131,14 @@ export default function POS() {
   const custTypesQ = useQuery<CustomerType[]>(() => tiersEnabled ? pricing.customerTypes() : Promise.resolve([]), [tiersEnabled], { cacheKey: 'pos-cust-types' });
   const { data: unitsData } = useQuery<ProductUnit[]>(() => productUnits.list(), [], { cacheKey: 'pos-units' });
   const [checkingOut, setCheckingOut] = useState(false);
+  // Confirmed "Pay by transfer" (migration 0058): which connected account
+  // the customer pays into, the request the till is waiting on, and a
+  // confirmed payment whose sale still has to be finished (e.g. a PIN).
+  const integQ = useQuery<IntegrationStatus | null>(() => paymentsApi.integrationStatus().catch(() => null), [], { cacheKey: 'pos-integration' });
+  const liveProviders = (integQ.data?.providers ?? []).filter(p => p.status === 'live');
+  const [confirmedVia, setConfirmedVia] = useState<PaymentProvider | null>(null);
+  const [waiting, setWaiting] = useState<TillPayment | null>(null);
+  const [paidTill, setPaidTill] = useState<TillPayment | null>(null);
 
   const [search, setSearch] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -182,9 +193,12 @@ export default function POS() {
   // not a payment method beside Cash and Transfer. Offering it twice (a
   // mode AND a method) is how a cash sale gets filed as credit by mistake.
   // Cash leads: it's the default and the most common way a counter gets paid.
+  const mustConfirm = profile?.role === 'cashier' && !!tenant?.require_confirmed_transfer && liveProviders.length > 0;
   const payChips = useMemo(() => (payQ.data ?? [])
     .filter(p => !IS_CREDIT.test(p.name))
-    .sort((a, b) => Number(IS_CASH.test(b.name)) - Number(IS_CASH.test(a.name))), [payQ.data]);
+    // The owner requires confirmed transfers: no unconfirmed "Transfer" chip.
+    .filter(p => !(mustConfirm && IS_TRANSFER.test(p.name)))
+    .sort((a, b) => Number(IS_CASH.test(b.name)) - Number(IS_CASH.test(a.name))), [payQ.data, mustConfirm]);
   const creditTypeId = useMemo(() => (payQ.data ?? []).find(p => IS_CREDIT.test(p.name))?.id ?? '', [payQ.data]);
   // Most counter sales are cash, so start there instead of on a blank
   // dropdown that has to be answered before every single sale.
@@ -339,6 +353,7 @@ export default function POS() {
   };
 
   const clearSale = () => {
+    setConfirmedVia(null); setPaidTill(null);
     setCart([]); setCustomerId(''); setTendered(0); setPayMode('full'); setPayTypeId(defaultPayId);
     setShowKeypad(false); setOrderDiscount(0); setShowOrderDiscount(false); setConfirmClear(false); setCartOpen(false);
   };
@@ -353,9 +368,14 @@ export default function POS() {
 
   const pickMethod = (id: string) => {
     setPayTypeId(id);
+    setConfirmedVia(null);
     if (payMode === 'credit') setPayMode('full');
   };
-  const pickCredit = () => { setPayMode('credit'); setPayTypeId(creditTypeId); setTendered(0); setShowKeypad(false); };
+  const transferTypeId = useMemo(() => (payQ.data ?? []).find(p => IS_TRANSFER.test(p.name))?.id ?? payChips[0]?.id ?? '', [payQ.data, payChips]);
+  const pickConfirmed = (provider: PaymentProvider) => {
+    setConfirmedVia(provider); setPayMode('full'); setPayTypeId(transferTypeId); setTendered(0); setShowKeypad(false);
+  };
+  const pickCredit = () => { setConfirmedVia(null); setPayMode('credit'); setPayTypeId(creditTypeId); setTendered(0); setShowKeypad(false); };
 
   const applyLinePrice = (fgId: string, unitPrice: number, reason: string) => {
     setCart(c => c.map(l => l.good.id === fgId
@@ -532,14 +552,54 @@ export default function POS() {
     }
   };
 
+  // Confirmed transfer: ask the provider for a one-time payment of the
+  // total, wait until the money is confirmed, then finish the sale.
+  const startTransfer = async () => {
+    if (blocker) { toast.error(blocker); return; }
+    if (!navigator.onLine) { toast.error('Pay by transfer needs internet. Use cash, or wait for the connection.'); return; }
+    setCheckingOut(true);
+    const res = await tillPayments.create(Math.round(total * 100) / 100, confirmedVia ?? undefined);
+    setCheckingOut(false);
+    if (!res.payment) { toast.error(res.error ?? 'Could not start the transfer.'); return; }
+    setWaiting(res.payment);
+  };
+
+  const completeTill = async (tp: TillPayment, approval?: { userId: string; pin: string }) => {
+    setWaiting(null);
+    setPaidTill(tp);
+    setCheckingOut(true);
+    if (approval) { setApproving(true); setApprovalError(null); }
+    try {
+      const saleId = await tillPayments.completeSale({
+        tillPaymentId: tp.id, customerId: customerId || null, items: buildPayload().items,
+        branchId: myBranchId, orderDiscount, approval: approval ?? null,
+      });
+      const docNo = await salesApi.docNo(saleId).catch(() => null);
+      setNeedsApproval(false);
+      setPaidTill(null);
+      setConfirmedVia(null);
+      setDone({ total, paid: total, subtotal, vat: vatAmt, vatRate, change: 0, docNo });
+      goodsQ.refetch();
+      levelsQ.refetch();
+    } catch (e: any) {
+      const msg = e.message ?? 'Could not finish the sale.';
+      if (!approval && NEEDS_APPROVAL.test(msg)) { setNeedsApproval(true); return; }
+      if (approval) { setApprovalError(msg); return; }
+      toast.error(`The money was received, but the sale wasn't saved: ${msg}`);
+    } finally {
+      setCheckingOut(false);
+      if (approval) setApproving(false);
+    }
+  };
+
   // Keyboard: "/" jumps to search from anywhere on the till, Ctrl/Cmd+Enter
   // charges. Read through a ref so the listener always sees this render's
   // cart and totals, not the ones from when it was attached.
   const keysRef = useRef({ charge: () => {}, canCharge: false, busy: false });
   keysRef.current = {
-    charge: () => checkout(),
-    canCharge: !blocker && !checkingOut,
-    busy: !!(done || showScanner || showFindReturn || returnSale || discountLine || needsApproval || showHeld),
+    charge: () => (paidTill ? completeTill(paidTill) : confirmedVia ? startTransfer() : checkout()),
+    canCharge: (!blocker || !!paidTill) && !checkingOut,
+    busy: !!(done || showScanner || showFindReturn || returnSale || discountLine || needsApproval || showHeld || waiting),
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -666,8 +726,11 @@ export default function POS() {
 
   const needsCustomer = payMode !== 'full' && !customerId;
   const chargeLabel = checkingOut ? 'Processing…'
+    : paidTill ? 'Finish sale (paid)'
     : blocker ?? (payMode === 'credit' ? 'Sell on credit'
-      : payMode === 'part' ? `Take ${fmt(paid)} now` : 'Charge');
+      : payMode === 'part' ? `Take ${fmt(paid)} now`
+      : confirmedVia ? 'Show transfer details' : 'Charge');
+  const charge = () => (paidTill ? completeTill(paidTill) : confirmedVia ? startTransfer() : checkout());
 
   return (
     <div className="pos-page">
@@ -921,10 +984,19 @@ export default function POS() {
                   <div className="pay-chips" role="radiogroup" aria-labelledby="pos-pay-label">
                     {payChips.map(p => (
                       <button key={p.id} type="button" role="radio"
-                              aria-checked={payMode !== 'credit' && payTypeId === p.id}
-                              className={payMode !== 'credit' && payTypeId === p.id ? 'is-on' : ''}
-                              onClick={() => pickMethod(p.id)}>
+                              aria-checked={payMode !== 'credit' && !confirmedVia && payTypeId === p.id}
+                              className={payMode !== 'credit' && !confirmedVia && payTypeId === p.id ? 'is-on' : ''}
+                              onClick={() => pickMethod(p.id)} disabled={!!paidTill}>
                         {p.name}
+                      </button>
+                    ))}
+                    {liveProviders.map(lp => (
+                      <button key={lp.provider} type="button" role="radio" disabled={!!paidTill}
+                              aria-checked={confirmedVia === lp.provider}
+                              className={`is-confirmed${confirmedVia === lp.provider ? ' is-on' : ''}`}
+                              onClick={() => pickConfirmed(lp.provider)}
+                              title="The till checks the money arrived before the sale completes">
+                        {liveProviders.length === 1 ? 'Pay by transfer' : PROVIDER_LABEL[lp.provider]} ✓
                       </button>
                     ))}
                     <button type="button" role="radio" aria-checked={payMode === 'credit'}
@@ -932,7 +1004,10 @@ export default function POS() {
                       Credit
                     </button>
                   </div>
-                  {payMode !== 'credit' && (
+                  {confirmedVia && (
+                    <p className="co-help">The till shows an account number{confirmedVia === 'monnify' ? '' : ' or QR code'} for this sale and completes it only when {PROVIDER_LABEL[confirmedVia]} confirms the money.</p>
+                  )}
+                  {payMode !== 'credit' && !confirmedVia && (
                     <label className="co-switch">
                       <input type="checkbox" checked={payMode === 'part'}
                              onChange={e => { setPayMode(e.target.checked ? 'part' : 'full'); setTendered(0); }} />
@@ -1019,8 +1094,8 @@ export default function POS() {
                   <span>Total</span>
                   <strong>{fmt(total)}</strong>
                 </div>
-                <button className={`checkout-btn${blocker ? ' is-blocked' : ''}`}
-                        onClick={() => checkout()} disabled={checkingOut || !!blocker}>
+                <button className={`checkout-btn${blocker && !paidTill ? ' is-blocked' : ''}`}
+                        onClick={charge} disabled={checkingOut || (!!blocker && !paidTill)}>
                   <span>{chargeLabel}</span>
                   {!blocker && !checkingOut && <kbd>Ctrl ↵</kbd>}
                 </button>
@@ -1145,12 +1220,21 @@ export default function POS() {
           />
         )}
 
+        {waiting && (
+          <TransferWaitModal
+            payment={waiting}
+            onPaid={tp => completeTill(tp)}
+            onCancel={() => setWaiting(null)}
+            onRetry={() => { setWaiting(null); startTransfer(); }}
+          />
+        )}
+
         {needsApproval && (
           <ApprovalModal
             pending={approving}
             error={approvalError}
             onCancel={() => { setNeedsApproval(false); setApprovalError(null); }}
-            onApprove={(managerId, pin) => checkout({ userId: managerId, pin })}
+            onApprove={(managerId, pin) => (paidTill ? completeTill(paidTill, { userId: managerId, pin }) : checkout({ userId: managerId, pin }))}
           />
         )}
       </div>

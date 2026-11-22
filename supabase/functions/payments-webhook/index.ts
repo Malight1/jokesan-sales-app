@@ -1,27 +1,31 @@
 // ============================================================
-// ProfixBook — payment confirmations from Paystack and Moniepoint
-// (Monnify). Supabase Edge Function. Deploy: Edge Functions →
+// ProfixBook — payment confirmations from Paystack, Moniepoint (Monnify)
+// and OPay. Supabase Edge Function. Deploy: Edge Functions →
 // payments-webhook → replace → Deploy with JWT verification OFF
 // (providers call it with no Supabase login).
 //
-// Each business pastes this URL into its own provider dashboard:
+// Where each business points its provider:
 //   Paystack: Settings → API Keys & Webhooks → Webhook URL
 //   Monnify:  Developer → Webhook URLs → Transaction Completion
+//   OPay:     nothing to set; ProfixBook sends this URL with every payment
 //
-// Paystack: trusted only if x-paystack-signature (HMAC-SHA512 of the body
-//   with the business's secret key) matches.
-// Monnify: the monnify-signature header (HMAC-SHA512 of the body with the
-//   client secret) must match WHEN PRESENT. Monnify leaves it off sandbox
-//   notifications, so every Monnify payment is ALSO checked by asking
-//   Monnify's verify endpoint with the business's own keys: only PAID or
-//   OVERPAID, for the amount Monnify reports, is ever recorded.
-// Recording is idempotent: incoming_payments is unique on
-// (provider, provider_ref), so a retried notification does nothing twice.
+// Trust rules:
+//   Paystack  x-paystack-signature (HMAC-SHA512 of the body, secret key)
+//             must match.
+//   Monnify   monnify-signature must match when present (Monnify leaves it
+//             off sandbox), AND the payment is re-checked with Monnify.
+//   OPay      its signature uses SHA3-512, which this runtime can't do
+//             natively, so every OPay notification is re-checked with
+//             OPay's signed status API instead. Only SUCCESS counts.
+// The amount recorded is always the provider's own verified figure.
+//
+// Two kinds of payment:
+//   invoice pay links  (payment_links)  → incoming_payments + apply to the sale
+//   till transfers     (till_payments)  → record_till_payment(); the till
+//                                         then completes the sale itself
+// Both idempotent: a retried notification never records money twice.
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const monnifyBase = (apiKey: string) =>
-  apiKey.startsWith('MK_TEST') ? 'https://sandbox.monnify.com' : 'https://api.monnify.com';
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
@@ -33,99 +37,141 @@ Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
   if (typeof event?.eventType === 'string') return handleMonnify(req, raw, event, admin);
+  if (event?.type === 'transaction-status' && event?.payload) return handleOpay(event, admin);
   return handlePaystack(req, raw, event, admin);
 });
 
+// ---------------- Paystack ----------------
 async function handlePaystack(req: Request, raw: string, event: any, admin: any): Promise<Response> {
   const tenantId = event?.data?.metadata?.tenant_id;
-  const saleId = event?.data?.metadata?.sales_order_id;
   const signature = req.headers.get('x-paystack-signature') ?? '';
-  if (!tenantId || !signature) return ok(); // nothing we can verify: ignore, don't 500
+  if (!tenantId || !signature) return ok();
 
   const { data: secretKey } = await admin.rpc('get_tenant_payment_secret', { p_tenant: tenantId, p_provider: 'paystack' });
   if (!secretKey) return ok();
-
-  const expected = await hmacSha512Hex(secretKey, raw);
-  if (!timingSafeEqual(expected, signature)) return new Response('Invalid signature', { status: 401 });
+  if (!timingSafeEqual(await hmacSha512Hex(secretKey, raw), signature)) return new Response('Invalid signature', { status: 401 });
   if (event.event !== 'charge.success') return ok();
 
-  const customer = event.data.customer ?? {};
-  await record(admin, {
-    tenant_id: tenantId,
-    provider: 'paystack',
-    provider_ref: event.data.reference,
-    amount: Number(event.data.amount) / 100,
-    payer_name: [customer.first_name, customer.last_name].filter(Boolean).join(' ') || customer.email || null,
-    channel: event.data.channel ?? null,
-    raw: event,
-    sales_order_id: saleId ?? null,
+  const reference = event.data.reference;
+  const amount = Number(event.data.amount) / 100;
+  const c = event.data.customer ?? {};
+  const payerName = [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+
+  if (event.data.metadata?.till) {
+    await admin.rpc('record_till_payment', { p_provider: 'paystack', p_provider_ref: reference, p_amount: amount, p_payer_name: payerName, p_channel: event.data.channel ?? null, p_raw: event });
+    return ok();
+  }
+  await recordInvoice(admin, {
+    tenant_id: tenantId, provider: 'paystack', provider_ref: reference, amount, payer_name: payerName,
+    channel: event.data.channel ?? null, raw: event, sales_order_id: event.data.metadata?.sales_order_id ?? null,
   });
   return ok();
 }
 
+// ---------------- Moniepoint (Monnify) ----------------
 async function handleMonnify(req: Request, raw: string, event: any, admin: any): Promise<Response> {
   if (event.eventType !== 'SUCCESSFUL_TRANSACTION') return ok();
-  const data = event.eventData ?? {};
-  const paymentReference: string | undefined = data.paymentReference;
-  if (!paymentReference) return ok();
+  const reference: string | undefined = event.eventData?.paymentReference;
+  if (!reference) return ok();
 
-  // Which business: the link we created carries our own reference.
-  const { data: link } = await admin.from('payment_links')
-    .select('tenant_id, sales_order_id, amount').eq('provider', 'monnify').eq('provider_ref', paymentReference).maybeSingle();
-  if (!link) return ok(); // not one of ours (e.g. a payment made outside ProfixBook)
+  const target = await findTarget(admin, 'monnify', reference);
+  if (!target) return ok(); // not a ProfixBook payment
 
-  const { data: provRows } = await admin.rpc('tenant_payment_provider', { p_tenant: link.tenant_id, p_provider: 'monnify' });
-  const prov = Array.isArray(provRows) ? provRows[0] : provRows;
-  const { data: secretKey } = await admin.rpc('get_tenant_payment_secret', { p_tenant: link.tenant_id, p_provider: 'monnify' });
-  if (!prov || !secretKey) return ok();
-
+  const creds = await credentials(admin, target.tenant_id, 'monnify');
+  if (!creds) return ok();
   const signature = req.headers.get('monnify-signature');
-  if (signature) {
-    const expected = await hmacSha512Hex(secretKey, raw);
-    if (!timingSafeEqual(expected, signature.toLowerCase())) return new Response('Invalid signature', { status: 401 });
+  if (signature && !timingSafeEqual(await hmacSha512Hex(creds.secret, raw), signature.toLowerCase())) {
+    return new Response('Invalid signature', { status: 401 });
   }
+  return settle(admin, target, await verify('monnify', reference, creds.prov, creds.secret), event);
+}
 
-  // Ask Monnify directly. Never trust the notification's own numbers.
-  const base = monnifyBase(prov.public_key);
-  const token = await monnifyToken(base, prov.public_key, secretKey);
-  if (!token) return new Response('Could not verify', { status: 502 }); // Monnify retries later
-  const vr = await fetch(`${base}/api/v2/merchant/transactions/query?paymentReference=${encodeURIComponent(paymentReference)}`,
-    { headers: { Authorization: `Bearer ${token}` } });
-  const v = await vr.json().catch(() => ({}));
-  const tx = v?.responseBody;
-  if (!vr.ok || v.requestSuccessful !== true || !tx) return new Response('Could not verify', { status: 502 });
-  if (!['PAID', 'OVERPAID'].includes(tx.paymentStatus) || tx.paymentReference !== paymentReference) return ok();
+// ---------------- OPay ----------------
+async function handleOpay(event: any, admin: any): Promise<Response> {
+  const reference: string | undefined = event.payload?.reference;
+  if (!reference) return ok();
+  const target = await findTarget(admin, 'opay', reference);
+  if (!target) return ok();
+  const creds = await credentials(admin, target.tenant_id, 'opay');
+  if (!creds) return ok();
+  return settle(admin, target, await verify('opay', reference, creds.prov, creds.secret), event);
+}
 
-  const source = Array.isArray(tx.paymentSourceInformation) ? tx.paymentSourceInformation[0] : null;
-  await record(admin, {
-    tenant_id: link.tenant_id,
-    provider: 'monnify',
-    provider_ref: paymentReference,
-    amount: Number(tx.amountPaid),
-    payer_name: source?.accountName ?? tx.customerDTO?.name ?? null,
-    payer_account: source?.accountNumber ?? null,
-    channel: tx.paymentMethod ?? null,
-    raw: { notification: event, verified: tx },
-    sales_order_id: link.sales_order_id,
-  });
+// ---------------- shared ----------------
+interface Target { kind: 'link' | 'till'; tenant_id: string; sales_order_id?: string | null }
+
+async function findTarget(admin: any, provider: string, reference: string): Promise<Target | null> {
+  const { data: link } = await admin.from('payment_links').select('tenant_id, sales_order_id')
+    .eq('provider', provider).eq('provider_ref', reference).maybeSingle();
+  if (link) return { kind: 'link', tenant_id: link.tenant_id, sales_order_id: link.sales_order_id };
+  const { data: till } = await admin.from('till_payments').select('tenant_id')
+    .eq('provider', provider).eq('provider_ref', reference).maybeSingle();
+  if (till) return { kind: 'till', tenant_id: till.tenant_id };
+  return null;
+}
+
+async function credentials(admin: any, tenantId: string, provider: string) {
+  const { data: provRows } = await admin.rpc('tenant_payment_provider', { p_tenant: tenantId, p_provider: provider });
+  const prov = Array.isArray(provRows) ? provRows[0] : provRows;
+  const { data: secret } = await admin.rpc('get_tenant_payment_secret', { p_tenant: tenantId, p_provider: provider });
+  return prov && secret ? { prov, secret: secret as string } : null;
+}
+
+async function settle(admin: any, target: Target, v: Verified | null, notification: unknown): Promise<Response> {
+  if (!v) return new Response('Could not verify', { status: 502 }); // the provider retries later
+  if (!v.paid) return ok();
+  if (target.kind === 'till') {
+    await admin.rpc('record_till_payment', {
+      p_provider: v.provider, p_provider_ref: v.reference, p_amount: v.amount,
+      p_payer_name: v.payerName ?? null, p_payer_account: v.payerAccount ?? null, p_channel: v.channel ?? null,
+      p_raw: { notification, verified: v.raw },
+    });
+  } else {
+    await recordInvoice(admin, {
+      tenant_id: target.tenant_id, provider: v.provider, provider_ref: v.reference, amount: v.amount,
+      payer_name: v.payerName ?? null, payer_account: v.payerAccount ?? null, channel: v.channel ?? null,
+      raw: { notification, verified: v.raw }, sales_order_id: target.sales_order_id ?? null,
+    });
+  }
   return ok();
 }
 
-async function record(admin: any, row: Record<string, unknown>) {
+async function recordInvoice(admin: any, row: Record<string, unknown>) {
   const { data: inserted, error } = await admin.from('incoming_payments').insert(row).select('id').maybeSingle();
   if (!error && inserted) await admin.rpc('apply_incoming_payment', { p_incoming: inserted.id });
-  // A unique-violation means this exact payment was already recorded.
-  await admin.from('payment_links').update({ status: 'paid' })
-    .eq('provider', row.provider).eq('provider_ref', row.provider_ref);
+  await admin.from('payment_links').update({ status: 'paid' }).eq('provider', row.provider).eq('provider_ref', row.provider_ref);
 }
 
-async function monnifyToken(base: string, apiKey: string, secretKey: string): Promise<string | null> {
-  const r = await fetch(`${base}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${btoa(`${apiKey}:${secretKey}`)}` },
-  });
-  const j = await r.json().catch(() => ({}));
-  return r.ok && j.requestSuccessful === true ? j.responseBody?.accessToken ?? null : null;
+interface Verified { provider: string; reference: string; paid: boolean; amount: number; payerName?: string | null; payerAccount?: string | null; channel?: string | null; raw?: unknown }
+
+async function verify(provider: string, reference: string, prov: any, secret: string): Promise<Verified | null> {
+  if (provider === 'monnify') {
+    const base = prov.public_key.startsWith('MK_TEST') ? 'https://sandbox.monnify.com' : 'https://api.monnify.com';
+    const lr = await fetch(`${base}/api/v1/auth/login`, { method: 'POST', headers: { Authorization: `Basic ${btoa(`${prov.public_key}:${secret}`)}` } });
+    const l = await lr.json().catch(() => ({}));
+    const token = lr.ok && l.requestSuccessful === true ? l.responseBody?.accessToken : null;
+    if (!token) return null;
+    const r = await fetch(`${base}/api/v2/merchant/transactions/query?paymentReference=${encodeURIComponent(reference)}`, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json().catch(() => ({}));
+    const tx = j?.responseBody;
+    if (!r.ok || j.requestSuccessful !== true || !tx || tx.paymentReference !== reference) return null;
+    const src = Array.isArray(tx.paymentSourceInformation) ? tx.paymentSourceInformation[0] : null;
+    return { provider, reference, paid: ['PAID', 'OVERPAID'].includes(tx.paymentStatus), amount: Number(tx.amountPaid),
+      payerName: src?.accountName ?? tx.customerDTO?.name ?? null, payerAccount: src?.accountNumber ?? null, channel: tx.paymentMethod ?? null, raw: tx };
+  }
+  if (provider === 'opay') {
+    const base = prov.settings?.environment === 'live' ? 'https://api.opaycheckout.com' : 'https://sandboxapi.opaycheckout.com';
+    const body = JSON.stringify({ country: 'NG', reference }); // alphabetical, as OPay signs it
+    const r = await fetch(`${base}/api/v1/international/cashier/status`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await hmacSha512Hex(secret, body)}`, MerchantId: prov.settings?.merchant_id, 'Content-Type': 'application/json' },
+      body,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.code !== '00000' || j.data?.reference !== reference) return null;
+    return { provider, reference, paid: j.data.status === 'SUCCESS', amount: Number(j.data.amount?.total ?? 0) / 100, channel: 'OPay', raw: j.data };
+  }
+  return null;
 }
 
 const ok = () => new Response('ok', { status: 200 });

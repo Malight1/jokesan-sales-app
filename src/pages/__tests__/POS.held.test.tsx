@@ -38,6 +38,8 @@ jest.mock('../../lib/api', () => ({
   stock: { levels: () => Promise.resolve(Object.keys(mockStock).map(mockLevel)) },
   pricing: { lists: () => Promise.resolve([]), allItems: () => Promise.resolve([]), customerTypes: () => Promise.resolve([]) },
   productUnits: { list: () => Promise.resolve([]) },
+  payments: { integrationStatus: () => Promise.resolve({ connected: false, status: 'not_connected', public_key: null, last_verified_at: null, providers: [] }) },
+  tillPayments: { create: jest.fn(), status: jest.fn(), cancel: jest.fn(), completeSale: jest.fn() },
 }));
 
 beforeAll(() => { Element.prototype.scrollIntoView = jest.fn(); });

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2, MessageSquare
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, BadgeCheck, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2, MessageSquare
 } from 'lucide-react';
 import { stock, branches as branchesApi, support as supportApi, platform as platformApi, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
@@ -34,6 +34,7 @@ const navItems = [
       { to: '/sales', label: 'Sales Orders', icon: ShoppingCart },
       { to: '/quotes', label: 'Quotes', icon: Receipt },
       { to: '/deliveries', label: 'Deliveries', icon: Send },
+      { to: '/money-received', label: 'Money Received', icon: BadgeCheck },
       { to: '/match-payment', label: 'Match Bank Payment', icon: Landmark },
     ],
   },
@@ -99,6 +100,7 @@ const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/pos': 'Point of Sale',
   '/match-payment': 'Match Bank Payment',
+  '/money-received': 'Money Received',
   '/import': 'Import Data',
   '/sales': 'Sales Orders',
   '/quotes': 'Quotes',
