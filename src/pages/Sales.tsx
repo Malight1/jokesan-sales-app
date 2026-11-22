@@ -304,7 +304,7 @@ export default function Sales() {
       const message = paymentRequestMessage({
         businessName: tenant?.name ?? 'us', customerName: customerName(s.customer_id), total: s.balance,
         invoices: [{ docNo: invoiceNo(s), date: s.transaction_date, balance: s.balance }],
-        bank: tenant?.bank_details, payUrl: res.url, friendly: false,
+        bank: tenant?.bank_details, payUrl: res.url, payUntil: res.expiresAt, friendly: false,
       });
       window.open(whatsappLink(cust?.phone, message), '_blank');
       toast.success('Payment link created — the sale updates automatically once it\'s paid.');

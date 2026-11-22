@@ -369,7 +369,7 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
       const message = paymentRequestMessage({
         businessName: tenant?.name ?? 'us', customerName: name, total: s.balance,
         invoices: [{ docNo: docNo(s), date: fmtDate(s.transaction_date), balance: s.balance }],
-        bank, payUrl: res.url, friendly: false,
+        bank, payUrl: res.url, payUntil: res.expiresAt, friendly: false,
       });
       window.open(whatsappLink(customer.phone, message), '_blank');
       toast.success('Pay link sent. The invoice marks itself paid once they pay.');

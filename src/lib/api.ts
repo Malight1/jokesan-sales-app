@@ -1564,11 +1564,21 @@ export const billing = {
 // inside Edge Functions; the app only ever sees integration_status()'s
 // public-facing shape (status + public key, never the secret).
 // ============================================================
+export type PaymentProvider = 'paystack' | 'monnify' | 'opay';
+export interface ConnectedProvider {
+  provider: PaymentProvider; status: 'pending' | 'live' | 'error'; is_default: boolean;
+  public_key: string | null; last_verified_at: string | null;
+  environment?: 'sandbox' | 'live' | null; contract_code?: string | null;
+}
 export interface IntegrationStatus {
   connected: boolean;
   status: 'not_connected' | 'pending' | 'live' | 'error';
   public_key: string | null;
   last_verified_at: string | null;
+  // Several providers per business (migration 0057). Optional so the app
+  // still works against a database that hasn't run it.
+  default_provider?: PaymentProvider | null;
+  providers?: ConnectedProvider[];
 }
 export interface PaymentLink {
   id: string; sales_order_id: string; provider_ref: string; url: string;
@@ -1577,15 +1587,19 @@ export interface PaymentLink {
 
 export const payments = {
   integrationStatus: () => rpc<IntegrationStatus>('integration_status'),
-  connect: async (secretKey: string, publicKey: string): Promise<{ success?: boolean; error?: string }> => {
-    const { data, error } = await supabase.functions.invoke('payments-connect', { body: { secretKey, publicKey } });
-    if (error) return { error: error.message };
-    return data;
+  // provider 'paystack': { secretKey, publicKey }; 'monnify': { apiKey, secretKey, contractCode }
+  connect: async (provider: PaymentProvider, keys: Record<string, string>): Promise<{ success?: boolean; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('payments-connect', { body: { provider, ...keys } });
+    if (error) return { error: "Couldn't reach the payment service. Check your internet and try again." };
+    return data ?? { error: 'No answer from the payment service.' };
   },
-  createLink: async (saleId: string): Promise<{ success?: boolean; url?: string; reference?: string; error?: string }> => {
-    const { data, error } = await supabase.functions.invoke('payment-link-create', { body: { saleId } });
-    if (error) return { error: error.message };
-    return data;
+  setDefault: (provider: PaymentProvider) => rpcVoid('set_default_payment_provider', { p_provider: provider }),
+  disconnect: (provider: PaymentProvider) => rpcVoid('disconnect_payment_provider', { p_provider: provider }),
+  // Uses the business's default provider unless one is named.
+  createLink: async (saleId: string, provider?: PaymentProvider): Promise<{ success?: boolean; url?: string; reference?: string; provider?: PaymentProvider; expiresAt?: string | null; error?: string }> => {
+    const { data, error } = await supabase.functions.invoke('payment-link-create', { body: { saleId, ...(provider ? { provider } : {}) } });
+    if (error) return { error: "Couldn't create the pay link. Check your internet and try again." };
+    return data ?? { error: 'No answer from the payment service.' };
   },
   linksForSale: (saleId: string) =>
     run<PaymentLink[]>(supabase.from('payment_links').select('*').eq('sales_order_id', saleId).order('created_at', { ascending: false })),

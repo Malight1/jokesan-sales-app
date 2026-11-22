@@ -277,3 +277,43 @@
   &.is-sent { background: $success-light; border-color: lighten($success, 45%); color: darken($success, 12%); > svg { color: $success; } }
   &.is-failed { background: $warning-light; border-color: lighten($warning, 35%); color: darken($warning, 16%); > svg { color: $warning; } }
 }
+
+// Payments tab: several providers (migration 0057).
+.pay-intro {
+  margin-bottom: 1.25rem;
+  h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 0.4rem; svg { color: $primary; } }
+  p { font-size: 0.85rem; color: $gray-600; line-height: 1.55; }
+  .pay-intro-tip { margin-top: 0.5rem; color: $gray-500; font-size: 0.8rem; }
+}
+.pay-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.pay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  &.is-default { border-color: $primary; box-shadow: 0 0 0 1px $primary; }
+  &.is-soon { opacity: 0.7; }
+  .pay-card-head { display: flex; align-items: center; gap: 0.7rem; }
+  .pay-card-title { display: flex; flex-direction: column; gap: 4px; h3 { font-size: $font-size-base; } }
+  .pay-badges { display: flex; gap: 4px; flex-wrap: wrap; }
+  .badge-warning { @include badge($warning-light, $warning); }
+  .pay-blurb { font-size: 0.82rem; color: $gray-600; line-height: 1.5; flex: 1; }
+  .pay-meta { font-size: 0.72rem; color: $gray-500; word-break: break-all; }
+  .pay-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .pay-danger { color: $danger; }
+}
+.pay-mark {
+  width: 40px; height: 40px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: $radius;
+  font-weight: 800; font-size: 0.85rem;
+  color: $white;
+  flex-shrink: 0;
+  background: $gray-500;
+  &.pay-mark-monnify { background: #0357ee; }
+  &.pay-mark-paystack { background: #011b33; }
+  &.pay-mark-opay { background: #1dcf9f; }
+}

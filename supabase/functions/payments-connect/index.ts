@@ -1,23 +1,16 @@
 // ============================================================
-// ProfixBook — connect a tenant's own Paystack account (Phase 5a)
+// ProfixBook — connect a business's OWN payment account
+// (Supabase Edge Function). Deploy: Edge Functions → payments-connect →
+// replace the code → Deploy (keep JWT verification ON).
 //
-// Deploy from the Supabase dashboard (Edge Functions → New function
-// → name it "payments-connect" → paste this) OR via CLI:
-//   supabase functions deploy payments-connect
+// Providers (migration 0057 allows several per business):
+//   paystack  { secretKey: 'sk_…', publicKey: 'pk_…' }
+//   monnify   { apiKey: 'MK_…', secretKey: '…', contractCode: '…' }
+//             (Moniepoint's gateway; MK_TEST_ keys = sandbox, others = live)
 //
-// No custom secret to set — SUPABASE_URL, SUPABASE_ANON_KEY, and
-// SUPABASE_SERVICE_ROLE_KEY are auto-injected into every Edge Function.
-//
-// Flow: admin pastes their business's OWN Paystack secret + public key
-// (Settings → Payments) → this function checks the secret actually works
-// against Paystack's API → stores it in Supabase Vault (never in a plain
-// table, never returned to the app) via store_tenant_paystack_secret(),
-// which only exists once the `vault` extension is enabled on this project
-// (Database → Extensions → supabase_vault).
-//
-// Money never passes through ProfixBook — each business's own Paystack
-// account collects it directly. This function only ever sees the secret
-// key once, to verify it, then hands it straight to Vault.
+// The key is checked against the provider once, then stored ONLY in
+// Supabase Vault (store_tenant_payment_secret, service role). The app can
+// never read it back. Business plan and above.
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -27,17 +20,18 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+export const monnifyBase = (apiKey: string) =>
+  apiKey.startsWith('MK_TEST') ? 'https://sandbox.monnify.com' : 'https://api.monnify.com';
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { secretKey, publicKey } = await req.json();
-    if (!secretKey?.startsWith('sk_') || !publicKey?.startsWith('pk_')) {
-      return json({ error: 'That doesn\'t look like a Paystack secret/public key pair.' }, 400);
-    }
+    const body = await req.json();
+    const provider: string = body.provider ?? 'paystack';
+    if (!['paystack', 'monnify'].includes(provider)) return json({ error: 'That payment provider is not supported yet.' });
 
-    // 1) Confirm the CALLER is an authenticated admin — never trust a
-    //    client-supplied "I am admin" flag, check their JWT-scoped row.
+    // 1) The caller must be a signed-in admin (checked with their own JWT).
     const authHeader = req.headers.get('Authorization') ?? '';
     const callerClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -45,55 +39,68 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
     const { data: userData, error: userErr } = await callerClient.auth.getUser();
-    if (userErr || !userData.user) return json({ error: 'Not authenticated' }, 401);
+    if (userErr || !userData.user) return json({ error: 'Please sign in again.' });
 
-    const { data: profile, error: profErr } = await callerClient
+    const { data: profile } = await callerClient
       .from('profiles').select('role, tenant_id').eq('id', userData.user.id).single();
-    if (profErr || !profile || profile.role !== 'admin' || !profile.tenant_id) {
-      return json({ error: 'Only an admin can connect a payment account' }, 403);
+    if (!profile || profile.role !== 'admin' || !profile.tenant_id) {
+      return json({ error: 'Only an admin can connect a payment account.' });
     }
 
-    // 1b) Business plan and above only (0037) — checked via the same
-    //     require_feature() every other plan gate uses, not duplicated
-    //     threshold logic here. Only gates CONNECTING a new account; an
-    //     already-connected one that later downgrades keeps working.
+    // 1b) Business plan and above.
     const { error: featErr } = await callerClient.rpc('require_feature', {
       p_feature: 'auto_payments', p_label: 'Automatic payment confirmation',
     });
-    if (featErr) return json({ error: featErr.message }, 403);
+    if (featErr) return json({ error: featErr.message });
 
-    // 2) Check the secret key actually works. Listing transactions is a
-    //    harmless, always-available endpoint that any valid secret key can
-    //    call — a bad key comes back 401 here before we ever store it.
-    const vr = await fetch('https://api.paystack.co/transaction?perPage=1', {
-      headers: { Authorization: `Bearer ${secretKey}` },
-    });
-    const v = await vr.json();
-    if (!vr.ok || v.status !== true) {
-      return json({ error: 'Paystack rejected that secret key — double-check it and try again.' }, 400);
+    // 2) Check the keys work with the provider before storing anything.
+    let secret = '';
+    let publicKey = '';
+    let settings: Record<string, unknown> = {};
+
+    if (provider === 'paystack') {
+      const { secretKey, publicKey: pk } = body;
+      if (!secretKey?.startsWith('sk_') || !pk?.startsWith('pk_')) {
+        return json({ error: "That doesn't look like a Paystack secret and public key." });
+      }
+      const vr = await fetch('https://api.paystack.co/transaction?perPage=1', { headers: { Authorization: `Bearer ${secretKey}` } });
+      const v = await vr.json().catch(() => ({}));
+      if (!vr.ok || v.status !== true) return json({ error: 'Paystack rejected that secret key. Check it and try again.' });
+      secret = secretKey; publicKey = pk;
+    } else {
+      const apiKey = String(body.apiKey ?? '').trim();
+      const secretKey = String(body.secretKey ?? '').trim();
+      const contractCode = String(body.contractCode ?? '').trim();
+      if (!apiKey.startsWith('MK_') || !secretKey || !/^\d{6,20}$/.test(contractCode)) {
+        return json({ error: 'Enter the API key (starts with MK_), the secret key and the contract code from your Monnify dashboard.' });
+      }
+      const base = monnifyBase(apiKey);
+      const lr = await fetch(`${base}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${btoa(`${apiKey}:${secretKey}`)}` },
+      });
+      const l = await lr.json().catch(() => ({}));
+      if (!lr.ok || l.requestSuccessful !== true || !l.responseBody?.accessToken) {
+        return json({ error: 'Monnify rejected those keys. Check the API key and secret key (test keys only work in sandbox).' });
+      }
+      secret = secretKey; publicKey = apiKey;
+      settings = { contract_code: contractCode, environment: apiKey.startsWith('MK_TEST') ? 'sandbox' : 'live' };
     }
 
-    // 3) Store it in Vault and record the connection, as the service role
-    //    (payment_integrations has no policy the app could use directly).
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
-    const { error: storeErr } = await admin.rpc('store_tenant_paystack_secret', {
-      p_tenant: profile.tenant_id, p_secret: secretKey, p_public_key: publicKey,
+    // 3) Store in Vault and record the connection (service role only).
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { error: storeErr } = await admin.rpc('store_tenant_payment_secret', {
+      p_tenant: profile.tenant_id, p_provider: provider, p_secret: secret, p_public_key: publicKey, p_settings: settings,
     });
-    if (storeErr) {
-      // Most likely cause: the `vault` extension isn't enabled yet on this
-      // project (Database → Extensions → supabase_vault).
-      return json({ error: `Could not save the connection: ${storeErr.message}` }, 500);
-    }
+    if (storeErr) return json({ error: `Could not save the connection: ${storeErr.message}` });
 
-    return json({ success: true });
+    return json({ success: true, provider });
   } catch (e) {
-    return json({ error: String((e as Error)?.message ?? e) }, 500);
+    return json({ error: String((e as Error)?.message ?? e) });
   }
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+// 200 with {error} so the app shows the real message.
+function json(body: unknown) {
+  return new Response(JSON.stringify(body), { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } });
 }

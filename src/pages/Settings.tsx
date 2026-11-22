@@ -7,7 +7,7 @@ import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, PlanUsage, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
   customFieldDefs, compliance, TeamMember, StaffInvite, LookupTable, Lookup, Material, FinishedGood, Branch, PriceList, PriceListItem, CustomerType, Register, IntegrationStatus,
-  CustomFieldDef, CustomFieldEntity, EinvoiceReadiness,
+  CustomFieldDef, CustomFieldEntity, EinvoiceReadiness, PaymentProvider, ConnectedProvider,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
@@ -458,95 +458,186 @@ function BillingTab() {
 // through ProfixBook; this only stores the key (in Supabase Vault, via the
 // payments-connect Edge Function) and lets Sales generate "Pay now" links.
 // ============================================================
+const PROVIDERS: { id: PaymentProvider; name: string; short: string; blurb: string; soon?: boolean }[] = [
+  { id: 'monnify', name: 'Moniepoint', short: 'MP', blurb: 'Through Monnify, Moniepoint\'s payment service. Customers pay by transfer, card or USSD into your Moniepoint business account.' },
+  { id: 'paystack', name: 'Paystack', short: 'PS', blurb: 'Customers pay by card, transfer or USSD into your Paystack account.' },
+  { id: 'opay', name: 'OPay', short: 'OP', blurb: 'Coming next. Pay into your OPay business account.', soon: true },
+];
+
 function PaymentsTab() {
   const toast = useToast();
   const statusQ = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus(), []);
-  const [secretKey, setSecretKey] = useState('');
-  const [publicKey, setPublicKey] = useState('');
-  const [connecting, setConnecting] = useState(false);
+  const [connectingTo, setConnectingTo] = useState<PaymentProvider | null>(null);
+  const [disconnecting, setDisconnecting] = useState<PaymentProvider | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!secretKey.trim() || !publicKey.trim()) { toast.error('Both keys are needed.'); return; }
-    setConnecting(true);
-    try {
-      const res = await paymentsApi.connect(secretKey.trim(), publicKey.trim());
-      if (res.error) { toast.error(res.error); return; }
-      toast.success('Paystack connected — invoices can now get a "Pay now" link.');
-      setSecretKey(''); setPublicKey('');
-      statusQ.refetch();
-    } catch (e: any) {
-      toast.error(e.message ?? 'Could not connect.');
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  if (statusQ.loading) return <Loading label="Checking your payment connection…" />;
+  if (statusQ.loading) return <Loading label="Checking your payment connections…" />;
   if (statusQ.error) return <ErrorState message={statusQ.error} onRetry={statusQ.refetch} />;
 
-  const connected = statusQ.data?.connected;
+  // A database without 0057 reports one Paystack connection the old way.
+  const connected: ConnectedProvider[] = statusQ.data?.providers
+    ?? (statusQ.data?.connected ? [{ provider: 'paystack', status: 'live', is_default: true, public_key: statusQ.data.public_key, last_verified_at: statusQ.data.last_verified_at }] : []);
+  const conn = (id: PaymentProvider) => connected.find(c => c.provider === id);
+
   const copyWebhook = async () => {
     try { await navigator.clipboard.writeText(WEBHOOK_URL); toast.success('Webhook URL copied.'); }
     catch { toast.error('Could not copy. Press and hold the link to copy it.'); }
   };
 
+  const makeDefault = async (id: PaymentProvider) => {
+    setBusy(true);
+    try { await paymentsApi.setDefault(id); toast.success(`${PROVIDERS.find(p => p.id === id)?.name} is now the default.`); statusQ.refetch(); }
+    catch (e: any) { toast.error(e.message ?? 'Could not change the default.'); }
+    finally { setBusy(false); }
+  };
+
+  const confirmDisconnect = async () => {
+    if (!disconnecting) return;
+    setBusy(true);
+    try { await paymentsApi.disconnect(disconnecting); toast.success('Disconnected.'); statusQ.refetch(); }
+    catch (e: any) { toast.error(e.message ?? 'Could not disconnect.'); }
+    finally { setBusy(false); setDisconnecting(null); }
+  };
+
   return (
-    <div className="grid-2" style={{ alignItems: 'start' }}>
-      <div className="card">
-        <h3 style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Landmark size={18} color="#2563eb" /> Paystack
-        </h3>
-        <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
-          Connect your own Paystack account and customers can pay an invoice by card, transfer or USSD from a link. The money goes straight into your Paystack account. ProfixBook never holds it.
+    <div>
+      <div className="card pay-intro">
+        <h3><Landmark size={18} /> Get paid online, confirmed automatically</h3>
+        <p>
+          Connect the payment accounts you already use. When a customer pays an invoice through a pay link, the money goes straight
+          into your own account and the invoice marks itself paid. No bank alert to check, and a fake screenshot can't fool it.
+          ProfixBook never holds your money.
         </p>
-
-        {connected ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.75rem 1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, marginBottom: '1rem' }}>
-            <ShieldCheck size={18} color="#16a34a" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#16a34a' }}>Connected</div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Public key {statusQ.data?.public_key}</div>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={submit}>
-            <div className="form-group">
-              <label>Secret Key</label>
-              <input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder="sk_live_… or sk_test_…" autoComplete="off" />
-            </div>
-            <div className="form-group">
-              <label>Public Key</label>
-              <input value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk_live_… or pk_test_…" autoComplete="off" />
-            </div>
-            <small style={{ display: 'block', color: '#94a3b8', fontSize: '0.72rem', marginBottom: '0.75rem' }}>
-              Find these in your Paystack dashboard under Settings → API Keys &amp; Webhooks. Your secret key is checked once, then locked away. Nobody at ProfixBook can read it.
-            </small>
-            <button className="btn-primary" type="submit" disabled={connecting}>
-              {connecting ? 'Connecting…' : 'Connect Paystack'}
-            </button>
-          </form>
-        )}
+        <p className="pay-intro-tip">You can connect more than one, for example Moniepoint and Paystack. The one marked <strong>Default</strong> is used unless you choose another.</p>
       </div>
 
-      <div className="card">
+      <div className="pay-grid">
+        {PROVIDERS.map(p => {
+          const c = conn(p.id);
+          return (
+            <div key={p.id} className={`card pay-card${c?.is_default ? ' is-default' : ''}${p.soon ? ' is-soon' : ''}`}>
+              <div className="pay-card-head">
+                <span className={`pay-mark pay-mark-${p.id}`} aria-hidden="true">{p.short}</span>
+                <div className="pay-card-title">
+                  <h3>{p.name}</h3>
+                  {c ? (
+                    <span className="pay-badges">
+                      <span className="badge-success">Connected</span>
+                      {c.is_default && <span className="badge-primary">Default</span>}
+                      {c.environment === 'sandbox' && <span className="badge-warning">Test mode</span>}
+                    </span>
+                  ) : p.soon ? <span className="badge-gray">Coming soon</span> : <span className="badge-gray">Not connected</span>}
+                </div>
+              </div>
+              <p className="pay-blurb">{p.blurb}</p>
+              {c?.public_key && <p className="pay-meta">Key {c.public_key}{c.contract_code ? ` · Contract ${c.contract_code}` : ''}</p>}
+
+              {!p.soon && (
+                <div className="pay-actions">
+                  {!c && <button type="button" className="btn-primary btn-sm" onClick={() => setConnectingTo(p.id)}>Connect {p.name}</button>}
+                  {c && !c.is_default && <button type="button" className="btn-secondary btn-sm" disabled={busy} onClick={() => makeDefault(p.id)}><Star size={13} /> Make default</button>}
+                  {c && <button type="button" className="btn-ghost btn-sm" onClick={() => setConnectingTo(p.id)}>Update keys</button>}
+                  {c && <button type="button" className="btn-ghost btn-sm pay-danger" onClick={() => setDisconnecting(p.id)}>Disconnect</button>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ marginTop: '1.25rem' }}>
         <h3 style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Link2 size={18} color="#2563eb" /> How it works
+          <Link2 size={18} color="#2563eb" /> One more step for each account you connect
         </h3>
-        <ol className="pay-steps">
-          <li>Connect your Paystack account (one time).</li>
-          <li>
-            In your Paystack dashboard, open Settings → API Keys &amp; Webhooks and paste this as the <strong>Webhook URL</strong>. Without it, Paystack can't tell ProfixBook when a customer has paid.
-            <div className="invite-share-link" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-              <input readOnly value={WEBHOOK_URL} aria-label="Webhook URL" onFocus={e => e.currentTarget.select()} />
-              <button type="button" className="btn-secondary btn-sm" onClick={copyWebhook}><Copy size={14} /> Copy</button>
-            </div>
-          </li>
-          <li>On an unpaid invoice (Sales Orders, or a customer's account under Customers), tap <strong>Pay link</strong>. It opens WhatsApp with the link ready to send.</li>
-          <li>When the customer pays, the invoice marks itself paid. No bank alert to check.</li>
-        </ol>
+        <p style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.55, marginBottom: '0.75rem' }}>
+          Paste this <strong>webhook URL</strong> into the provider's dashboard. Without it, the provider can't tell ProfixBook that a customer has paid.
+        </p>
+        <div className="invite-share-link" style={{ marginBottom: '0.75rem' }}>
+          <input readOnly value={WEBHOOK_URL} aria-label="Webhook URL" onFocus={e => e.currentTarget.select()} />
+          <button type="button" className="btn-secondary btn-sm" onClick={copyWebhook}><Copy size={14} /> Copy</button>
+        </div>
+        <ul className="pay-steps">
+          <li><strong>Moniepoint (Monnify):</strong> Monnify dashboard → Developer → Webhook URLs → <em>Transaction Completion</em>.</li>
+          <li><strong>Paystack:</strong> Paystack dashboard → Settings → API Keys &amp; Webhooks → <em>Webhook URL</em>.</li>
+          <li>Then, on an unpaid invoice (Sales Orders, or a customer's account under Customers), tap <strong>Pay link</strong>. It opens WhatsApp with the link ready to send.</li>
+        </ul>
       </div>
+
+      {connectingTo && (
+        <ConnectProviderModal provider={connectingTo} onClose={() => setConnectingTo(null)}
+          onDone={() => { setConnectingTo(null); statusQ.refetch(); }} />
+      )}
+      {disconnecting && (
+        <ConfirmDialog
+          title="Disconnect payment account"
+          message={<>Disconnect <strong>{PROVIDERS.find(p => p.id === disconnecting)?.name}</strong>? New pay links won't use it. Payments already received stay recorded.</>}
+          confirmLabel="Disconnect"
+          pending={busy}
+          onConfirm={confirmDisconnect}
+          onCancel={() => setDisconnecting(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function ConnectProviderModal({ provider, onClose, onDone }: { provider: PaymentProvider; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setKeys(v => ({ ...v, [k]: e.target.value }));
+  const name = PROVIDERS.find(p => p.id === provider)?.name ?? provider;
+
+  const fields = provider === 'monnify'
+    ? [
+        { k: 'apiKey', label: 'API key', ph: 'MK_PROD_… (or MK_TEST_… to try it first)', secret: false },
+        { k: 'secretKey', label: 'Secret key', ph: 'From the same page', secret: true },
+        { k: 'contractCode', label: 'Contract code', ph: 'e.g. 1234567890', secret: false },
+      ]
+    : [
+        { k: 'secretKey', label: 'Secret key', ph: 'sk_live_… or sk_test_…', secret: true },
+        { k: 'publicKey', label: 'Public key', ph: 'pk_live_… or pk_test_…', secret: false },
+      ];
+  const ready = fields.every(f => (keys[f.k] ?? '').trim());
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ready) { toast.error('Fill in every field.'); return; }
+    setSaving(true);
+    const res = await paymentsApi.connect(provider, Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.trim()])));
+    setSaving(false);
+    if (res.error) { toast.error(res.error); return; }
+    toast.success(`${name} connected. Invoices can now get a pay link.`);
+    onDone();
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={460}>
+      <div className="modal-header">
+        <h2>Connect {name}</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <form onSubmit={submit}>
+        <div className="modal-body">
+          <p className="setting-hint" style={{ marginTop: 0, marginBottom: '1rem' }}>
+            {provider === 'monnify'
+              ? 'Find these in your Monnify dashboard under Developer → API Keys & Contracts. You need a Monnify business account (Moniepoint\'s payment service) first.'
+              : 'Find these in your Paystack dashboard under Settings → API Keys & Webhooks.'}
+            {' '}Your secret key is checked once, then locked away. Nobody at ProfixBook can read it.
+          </p>
+          {fields.map(f => (
+            <div className="form-group" key={f.k}>
+              <label htmlFor={`pk-${f.k}`}>{f.label}</label>
+              <input id={`pk-${f.k}`} type={f.secret ? 'password' : 'text'} autoComplete="off" value={keys[f.k] ?? ''} onChange={set(f.k)} placeholder={f.ph} />
+            </div>
+          ))}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={saving || !ready}>{saving ? 'Checking the keys…' : `Connect ${name}`}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

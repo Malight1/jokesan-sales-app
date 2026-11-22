@@ -3653,4 +3653,54 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 23. several payment providers per business (0057) ----------
+do $$
+declare v_t uuid := t_id('tenant'); v_status jsonb;
+begin
+  perform t_su();
+  -- payments-connect would leave this behind after checking the Monnify keys.
+  insert into payment_integrations (tenant_id, provider, status, public_key, secret_vault_id, last_verified_at, settings)
+  values (v_t, 'monnify', 'live', 'MK_TEST_ABC', gen_random_uuid(), now() + interval '1 minute',
+          '{"contract_code":"1234567890","environment":"sandbox"}');
+  perform t_rec('a business can connect Paystack and Moniepoint side by side',
+    (select count(*) from payment_integrations where tenant_id = v_t) = 2);
+  perform t_err('an unknown provider is refused',
+    format('insert into payment_integrations (tenant_id, provider) values (%L, %L)', v_t, 'mtn'), 'provider_check');
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_default_payment_provider('monnify');
+  select public.integration_status() into v_status;
+  perform t_rec('the admin picks Moniepoint as the default',
+    v_status->>'default_provider' = 'monnify' and jsonb_array_length(v_status->'providers') = 2
+    and (v_status->>'connected')::boolean);
+  perform t_rec('the default lists first, with its contract code and test/live mode, never a secret',
+    v_status->'providers'->0->>'provider' = 'monnify'
+    and v_status->'providers'->0->>'contract_code' = '1234567890'
+    and v_status->'providers'->0->>'environment' = 'sandbox'
+    and not (v_status->'providers'->0 ? 'secret_vault_id'));
+  perform t_err('a default must be connected first', $q$select public.set_default_payment_provider('opay')$q$, 'Connect opay first');
+  perform t_su();
+
+  perform t_rec('only one default per business',
+    (select count(*) from payment_integrations where tenant_id = v_t and is_default) = 1);
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a sales person cannot change the default', $q$select public.set_default_payment_provider('paystack')$q$, 'Only an admin');
+  perform t_err('a sales person cannot disconnect a provider', $q$select public.disconnect_payment_provider('monnify')$q$, 'Only an admin');
+  perform t_su();
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.disconnect_payment_provider('monnify');
+  select public.integration_status() into v_status;
+  perform t_su();
+  perform t_rec('disconnecting the default hands it to the one left',
+    v_status->>'default_provider' = 'paystack' and jsonb_array_length(v_status->'providers') = 1
+    and (select is_default from payment_integrations where tenant_id = v_t and provider = 'paystack'));
+
+  perform t_rec('provider settings are for the server only',
+    not has_function_privilege('authenticated', 'public.tenant_payment_provider(uuid, text)', 'execute'));
+  perform t_rec('the server finds the default provider and its settings',
+    (select provider from public.tenant_payment_provider(v_t)) = 'paystack');
+end $$;
+
 select name, pass, detail from t_results order by n;

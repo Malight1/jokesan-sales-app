@@ -25,10 +25,15 @@ export function hasBank(b: BankDetails | null | undefined): b is BankDetails {
 // The "how to pay" lines that go at the end of every money message a
 // customer receives (reminder, receipt with a balance, quote, statement).
 // Without these the customer knows they owe, but not where to send it.
-export function howToPayLines(bank: BankDetails | null | undefined, payUrl?: string | null): string[] {
+export function howToPayLines(bank: BankDetails | null | undefined, payUrl?: string | null, payUntil?: string | null): string[] {
   const lines: string[] = [];
   if (payUrl) {
-    lines.push('*Pay online (card, transfer or USSD):*', payUrl, '');
+    lines.push('*Pay online (card, transfer or USSD):*', payUrl);
+    if (payUntil) {
+      const t = new Date(payUntil).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true });
+      lines.push(`This link works until ${t} today. Ask us for a new one after that.`);
+    }
+    lines.push('');
   }
   if (hasBank(bank)) {
     lines.push(payUrl ? '*Or pay by bank transfer:*' : '*Pay by bank transfer:*');
@@ -51,6 +56,7 @@ export function paymentRequestMessage(p: {
   invoices?: { docNo: string; date?: string | null; balance: number }[];
   bank?: BankDetails | null;
   payUrl?: string | null;
+  payUntil?: string | null;
   friendly?: boolean;
 }): string {
   const lines: string[] = [
@@ -68,7 +74,7 @@ export function paymentRequestMessage(p: {
     if (inv.length > 8) lines.push(`• and ${inv.length - 8} more`);
   }
   lines.push('');
-  lines.push(...howToPayLines(p.bank, p.payUrl));
+  lines.push(...howToPayLines(p.bank, p.payUrl, p.payUntil));
   lines.push('Please send your payment receipt here once you pay. Thank you!');
   return lines.join('\n');
 }

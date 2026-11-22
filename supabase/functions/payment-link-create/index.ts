@@ -1,20 +1,15 @@
 // ============================================================
-// ProfixBook — create a Paystack pay link for a sale (Phase 5a)
+// ProfixBook — a pay link for an unpaid invoice (Supabase Edge Function)
+// Deploy: Edge Functions → payment-link-create → replace → Deploy
+// (keep JWT verification ON).
 //
-// Deploy from the Supabase dashboard (Edge Functions → New function
-// → name it "payment-link-create" → paste this) OR via CLI:
-//   supabase functions deploy payment-link-create
+// Uses the business's DEFAULT provider unless the app asks for one
+// (migration 0057): Paystack, or Moniepoint through Monnify. Money goes
+// straight into the business's own account; ProfixBook never holds it.
+// payments-webhook confirms the payment and marks the invoice paid.
 //
-// No custom secret to set — SUPABASE_URL, SUPABASE_ANON_KEY, and
-// SUPABASE_SERVICE_ROLE_KEY are auto-injected into every Edge Function.
-//
-// Flow: a cashier/admin taps "Pay now" on an unpaid invoice → this
-// function reads the sale (as the caller — RLS applies, same as any
-// other read) → fetches the tenant's OWN Paystack secret out of Vault
-// (the app never sees it) → asks Paystack to initialize a transaction for
-// the sale's balance, tagged with metadata the webhook will use to find
-// this exact sale later → records the link (as the caller, through the
-// normal payment_links insert policy) and returns the URL to share.
+// Monnify checkout links work for 40 minutes (their limit); the response
+// says when it stops working so the message to the customer can say so.
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -24,15 +19,17 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const monnifyBase = (apiKey: string) =>
+  apiKey.startsWith('MK_TEST') ? 'https://sandbox.monnify.com' : 'https://api.monnify.com';
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { saleId } = await req.json();
-    if (!saleId) return json({ error: 'Missing saleId' }, 400);
+    const { saleId, provider: wanted } = await req.json();
+    if (!saleId) return json({ error: 'Missing sale.' });
 
-    // 1) Act as the caller for everything that isn't the secret itself —
-    //    normal RLS decides whether they can even see this sale.
+    // 1) As the caller: normal RLS decides whether they can see this sale.
     const authHeader = req.headers.get('Authorization') ?? '';
     const callerClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -40,64 +37,120 @@ Deno.serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
     const { data: userData, error: userErr } = await callerClient.auth.getUser();
-    if (userErr || !userData.user) return json({ error: 'Not authenticated' }, 401);
+    if (userErr || !userData.user) return json({ error: 'Please sign in again.' });
 
     const { data: profile } = await callerClient
       .from('profiles').select('tenant_id').eq('id', userData.user.id).single();
-    if (!profile?.tenant_id) return json({ error: 'No tenant context' }, 400);
+    if (!profile?.tenant_id) return json({ error: 'No business found for this account.' });
 
     const { data: sale, error: saleErr } = await callerClient
-      .from('sales_orders').select('id, tenant_id, balance, voided, customers(first_name, last_name, email)')
+      .from('sales_orders').select('id, tenant_id, doc_no, balance, voided, customers(first_name, last_name, company_store, email)')
       .eq('id', saleId).single();
-    if (saleErr || !sale) return json({ error: 'Sale not found' }, 404);
-    if (sale.voided) return json({ error: 'This sale has been voided.' }, 400);
-    if (!sale.balance || sale.balance <= 0) return json({ error: 'This sale has nothing left to pay.' }, 400);
+    if (saleErr || !sale) return json({ error: 'Sale not found.' });
+    if (sale.voided) return json({ error: 'This sale has been voided.' });
+    if (!sale.balance || sale.balance <= 0) return json({ error: 'This sale has nothing left to pay.' });
 
-    // 2) Get this tenant's own Paystack secret back out of Vault — the
-    //    service role is the only thing that can call this function.
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
-    const { data: secretKey, error: secretErr } = await admin.rpc('get_tenant_paystack_secret', { p_tenant: profile.tenant_id });
-    if (secretErr || !secretKey) {
-      return json({ error: 'This business hasn\'t connected a Paystack account yet — see Settings → Payments.' }, 400);
-    }
+    // 2) Which provider, and its secret (service role only).
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { data: provRows } = await admin.rpc('tenant_payment_provider', { p_tenant: profile.tenant_id, p_provider: wanted ?? null });
+    const prov = Array.isArray(provRows) ? provRows[0] : provRows;
+    if (!prov) return json({ error: 'No payment account is connected yet. An admin can connect one under Settings → Payments.' });
+    const { data: secret } = await admin.rpc('get_tenant_payment_secret', { p_tenant: profile.tenant_id, p_provider: prov.provider });
+    if (!secret) return json({ error: 'The payment connection needs to be set up again under Settings → Payments.' });
 
-    // 3) Ask Paystack to initialize the transaction on the BUSINESS'S OWN
-    //    account. metadata carries what the webhook needs to auto-confirm.
     const customer = Array.isArray(sale.customers) ? sale.customers[0] : sale.customers;
+    const customerName = customer
+      ? (`${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || customer.company_store || 'Customer')
+      : 'Customer';
     const email = customer?.email || `customer+${saleId}@profixbook.invoice`;
-    const initRes = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        amount: Math.round(sale.balance * 100), // kobo
-        metadata: { tenant_id: sale.tenant_id, sales_order_id: sale.id },
-      }),
-    });
-    const init = await initRes.json();
-    if (!initRes.ok || !init.status) {
-      return json({ error: init.message || 'Paystack could not create the payment link.' }, 400);
+    const docNo = sale.doc_no ?? `INV-${String(sale.id).slice(0, 8).toUpperCase()}`;
+    const appUrl = (Deno.env.get('APP_URL') ?? 'https://www.profixbook.com').replace(/\/$/, '');
+
+    let url = '';
+    let reference = '';
+    let meta: Record<string, unknown> = {};
+    let expiresAt: string | null = null;
+
+    if (prov.provider === 'paystack') {
+      const initRes = await fetch('https://api.paystack.co/transaction/initialize', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          amount: Math.round(sale.balance * 100), // kobo
+          metadata: { tenant_id: sale.tenant_id, sales_order_id: sale.id },
+        }),
+      });
+      const init = await initRes.json().catch(() => ({}));
+      if (!initRes.ok || !init.status) return json({ error: init.message || 'Paystack could not create the payment link.' });
+      url = init.data.authorization_url;
+      reference = init.data.reference;
+    } else if (prov.provider === 'monnify') {
+      const apiKey: string = prov.public_key;
+      const contractCode: string = prov.settings?.contract_code;
+      const base = monnifyBase(apiKey);
+      const token = await monnifyToken(base, apiKey, secret);
+      if (!token) return json({ error: 'Monnify did not accept the saved keys. Reconnect under Settings → Payments.' });
+
+      reference = `PFB-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+      const initRes = await fetch(`${base}/api/v1/merchant/transactions/init-transaction`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(sale.balance),
+          customerName,
+          customerEmail: email,
+          paymentReference: reference,
+          paymentDescription: `Payment for ${docNo}`,
+          currencyCode: 'NGN',
+          contractCode,
+          redirectUrl: `${appUrl}/paid`,
+          paymentMethods: ['ACCOUNT_TRANSFER', 'CARD', 'USSD'],
+          metaData: { tenant_id: sale.tenant_id, sales_order_id: sale.id },
+        }),
+      });
+      const init = await initRes.json().catch(() => ({}));
+      const b = init?.responseBody;
+      if (!initRes.ok || init.requestSuccessful !== true || !b?.checkoutUrl) {
+        return json({ error: init?.responseMessage || 'Monnify could not create the payment link.' });
+      }
+      // Monnify's own advice: check what came back is what we asked for.
+      if (b.paymentReference !== reference) return json({ error: 'Monnify returned a different reference. Try again.' });
+      url = b.checkoutUrl;
+      meta = { transactionReference: b.transactionReference };
+      expiresAt = new Date(Date.now() + 40 * 60_000).toISOString();
+    } else {
+      return json({ error: 'That payment provider is not supported yet.' });
     }
 
-    // 4) Record it as the caller, through the normal RLS insert policy.
+    // 3) Record it as the caller, through the normal RLS insert policy.
     const { error: insertErr } = await callerClient.from('payment_links').insert({
       tenant_id: sale.tenant_id,
       sales_order_id: sale.id,
-      provider_ref: init.data.reference,
-      url: init.data.authorization_url,
+      provider: prov.provider,
+      provider_ref: reference,
+      url,
       amount: sale.balance,
+      meta,
+      expires_at: expiresAt,
     });
-    if (insertErr) return json({ error: insertErr.message }, 400);
+    if (insertErr) return json({ error: insertErr.message });
 
-    return json({ success: true, url: init.data.authorization_url, reference: init.data.reference });
+    return json({ success: true, url, reference, provider: prov.provider, expiresAt });
   } catch (e) {
-    return json({ error: String((e as Error)?.message ?? e) }, 500);
+    return json({ error: String((e as Error)?.message ?? e) });
   }
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+async function monnifyToken(base: string, apiKey: string, secretKey: string): Promise<string | null> {
+  const r = await fetch(`${base}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${btoa(`${apiKey}:${secretKey}`)}` },
+  });
+  const j = await r.json().catch(() => ({}));
+  return r.ok && j.requestSuccessful === true ? j.responseBody?.accessToken ?? null : null;
+}
+
+function json(body: unknown) {
+  return new Response(JSON.stringify(body), { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } });
 }
