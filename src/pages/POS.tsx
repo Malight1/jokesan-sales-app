@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine,
-  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle, Printer,
+  Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle, Printer, HelpCircle,
 } from 'lucide-react';
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
@@ -29,6 +29,8 @@ import NumberInput from '../components/NumberInput';
 import Modal from '../components/Modal';
 import ApprovalModal from '../components/ApprovalModal';
 import TransferWaitModal from '../components/TransferWaitModal';
+import PaymentHelp from '../components/PaymentHelp';
+import { Link } from 'react-router-dom';
 import LinePriceModal from '../components/LinePriceModal';
 import TillHeader from '../components/TillHeader';
 import OpenTillScreen from '../components/OpenTillScreen';
@@ -139,6 +141,7 @@ export default function POS() {
   const [confirmedVia, setConfirmedVia] = useState<PaymentProvider | null>(null);
   const [waiting, setWaiting] = useState<TillPayment | null>(null);
   const [paidTill, setPaidTill] = useState<TillPayment | null>(null);
+  const [tillHelp, setTillHelp] = useState(false);
 
   const [search, setSearch] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -980,7 +983,15 @@ export default function POS() {
                 </div>
 
                 <div className="co-field">
-                  <span className="co-label" id="pos-pay-label">Payment</span>
+                  <div className="co-label-row">
+                    <span className="co-label" id="pos-pay-label">Payment</span>
+                    {liveProviders.length > 0 && (
+                      <button type="button" className="help-icon-btn co-help-btn" onClick={() => setTillHelp(true)}
+                              aria-label="How Pay by transfer works" title="How Pay by transfer works">
+                        <HelpCircle size={14} />
+                      </button>
+                    )}
+                  </div>
                   <div className="pay-chips" role="radiogroup" aria-labelledby="pos-pay-label">
                     {payChips.map(p => (
                       <button key={p.id} type="button" role="radio"
@@ -1004,6 +1015,11 @@ export default function POS() {
                       Credit
                     </button>
                   </div>
+                  {liveProviders.length === 0 && profile?.role === 'admin' && integQ.data && (
+                    <p className="co-help co-setup-tip">
+                      Tired of fake transfer alerts? <Link to="/settings?tab=payments">Set up Pay by transfer</Link> with Moniepoint, OPay or Paystack.
+                    </p>
+                  )}
                   {confirmedVia && (
                     <p className="co-help">The till shows an account number{confirmedVia === 'monnify' ? '' : ' or QR code'} for this sale and completes it only when {PROVIDER_LABEL[confirmedVia]} confirms the money.</p>
                   )}
@@ -1219,6 +1235,8 @@ export default function POS() {
             onClose={() => setDiscountLine(null)}
           />
         )}
+
+        {tillHelp && <PaymentHelp topic="till" webhookUrl="" onClose={() => setTillHelp(false)} />}
 
         {waiting && (
           <TransferWaitModal

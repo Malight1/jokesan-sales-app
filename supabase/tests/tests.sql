@@ -3805,4 +3805,24 @@ begin
     not has_function_privilege('authenticated', 'public.record_till_payment(text, text, numeric, text, text, text, jsonb)', 'execute'));
 end $$;
 
+-- ---------- 25. payment setup status (0059) ----------
+do $$
+declare v_t uuid := t_id('tenant'); v_status jsonb;
+begin
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select public.integration_status() into v_status;
+  perform t_su();
+  perform t_rec('before any notification, the webhook step is not ticked',
+    (v_status->'providers'->0->>'webhook_seen_at') is null and (v_status->'providers'->0 ? 'payments_count'));
+  perform public.mark_payment_webhook_seen(v_t, 'paystack');
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select public.integration_status() into v_status;
+  perform t_su();
+  perform t_rec('a verified notification ticks "webhook working"',
+    (v_status->'providers'->0->>'webhook_seen_at') is not null);
+  perform t_rec('only the server can tick it',
+    not has_function_privilege('authenticated', 'public.mark_payment_webhook_seen(uuid, text)', 'execute'));
+end $$;
+
 select name, pass, detail from t_results order by n;

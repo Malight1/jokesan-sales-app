@@ -24,6 +24,8 @@
 //   till transfers     (till_payments)  → record_till_payment(); the till
 //                                         then completes the sale itself
 // Both idempotent: a retried notification never records money twice.
+// A verified notification also stamps webhook_seen_at (migration 0059) so
+// the Payments screen can tell the owner the setup works.
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -50,6 +52,7 @@ async function handlePaystack(req: Request, raw: string, event: any, admin: any)
   const { data: secretKey } = await admin.rpc('get_tenant_payment_secret', { p_tenant: tenantId, p_provider: 'paystack' });
   if (!secretKey) return ok();
   if (!timingSafeEqual(await hmacSha512Hex(secretKey, raw), signature)) return new Response('Invalid signature', { status: 401 });
+  await admin.rpc('mark_payment_webhook_seen', { p_tenant: tenantId, p_provider: 'paystack' }); // setup tick (0059)
   if (event.event !== 'charge.success') return ok();
 
   const reference = event.data.reference;
@@ -119,6 +122,8 @@ async function credentials(admin: any, tenantId: string, provider: string) {
 
 async function settle(admin: any, target: Target, v: Verified | null, notification: unknown): Promise<Response> {
   if (!v) return new Response('Could not verify', { status: 502 }); // the provider retries later
+  // The provider reached us and the payment checked out: setup tick (0059).
+  await admin.rpc('mark_payment_webhook_seen', { p_tenant: target.tenant_id, p_provider: v.provider });
   if (!v.paid) return ok();
   if (target.kind === 'till') {
     await admin.rpc('record_till_payment', {

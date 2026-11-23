@@ -1573,6 +1573,8 @@ export interface ConnectedProvider {
   provider: PaymentProvider; status: 'pending' | 'live' | 'error'; is_default: boolean;
   public_key: string | null; last_verified_at: string | null;
   environment?: 'sandbox' | 'live' | null; contract_code?: string | null;
+  // Setup progress (migration 0059).
+  webhook_seen_at?: string | null; payments_count?: number;
 }
 export interface IntegrationStatus {
   connected: boolean;

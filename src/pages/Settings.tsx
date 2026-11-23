@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Landmark, Link2, ShieldCheck, ListPlus, MessageCircle, Mail } from 'lucide-react';
+import { Building2, Users, Tags, FlaskConical, Plus, X, Trash2, Send, CreditCard, Check, MapPin, Pencil, Receipt, Copy, Tag, Star, Landmark, Link2, ShieldCheck, ListPlus, MessageCircle, Mail, HelpCircle, Lock, CheckCircle2, Circle, AlertTriangle } from 'lucide-react';
 import { whatsappLink } from '../lib/whatsapp';
 import ApprovalPinCard from '../components/ApprovalPinCard';
 import { useAuth } from '../lib/AuthContext';
+import { useSearchParams, Link as RouterLink } from 'react-router-dom';
+import PaymentHelp, { HelpTopic } from '../components/PaymentHelp';
 import {
   team, tenantApi, lookupsAdmin, profileApi, lookups, boms, branding, billing, PLANS, ANNUAL_MONTHS_CHARGED, FOUNDING_SPOTS, BillingInterval, MyBilling, PlanUsage, branches as branchesApi, docs,
   materials as materialsApi, finishedGoods as goodsApi, pricing, registers as registersApi, payments as paymentsApi,
@@ -64,7 +66,11 @@ export default function Settings() {
   // sellable stock directly (migration 0045) and has no BOM to build.
   const retail = isRetail(tenant);
   const TABS = ALL_TABS.filter(t => (t.id !== 'branches' || isMultiBranch) && (t.id !== 'recipes' || !retail));
-  const [tab, setTab] = useState<Tab>('business');
+  // ?tab=payments (etc.) opens a tab directly, e.g. from the till's set-up tip.
+  const [params, setParams] = useSearchParams();
+  const fromUrl = params.get('tab') as Tab | null;
+  const [tab, setTabState] = useState<Tab>(fromUrl && TABS.some(t => t.id === fromUrl) ? fromUrl : 'business');
+  const setTab = (t: Tab) => { setTabState(t); setParams(t === 'business' ? {} : { tab: t }, { replace: true }); };
 
   return (
     <div>
@@ -467,9 +473,13 @@ const PROVIDERS: { id: PaymentProvider; name: string; short: string; blurb: stri
 function PaymentsTab() {
   const toast = useToast();
   const statusQ = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus(), []);
+  const { tenant } = useAuth();
   const [connectingTo, setConnectingTo] = useState<PaymentProvider | null>(null);
   const [disconnecting, setDisconnecting] = useState<PaymentProvider | null>(null);
   const [busy, setBusy] = useState(false);
+  const [help, setHelp] = useState<HelpTopic | null>(null);
+  // Business plan feature: say so BEFORE anyone fetches their keys.
+  const allowed = hasFeature(tenant, 'auto_payments');
 
   if (statusQ.loading) return <Loading label="Checking your payment connections…" />;
   if (statusQ.error) return <ErrorState message={statusQ.error} onRetry={statusQ.refetch} />;
@@ -502,7 +512,10 @@ function PaymentsTab() {
   return (
     <div>
       <div className="card pay-intro">
-        <h3><Landmark size={18} /> Get paid online, confirmed automatically</h3>
+        <div className="pay-intro-head">
+          <h3><Landmark size={18} /> Get paid online, confirmed automatically</h3>
+          <button type="button" className="btn-ghost btn-sm" onClick={() => setHelp('overview')}><HelpCircle size={15} /> How it works</button>
+        </div>
         <p>
           Connect the payment accounts you already use. When a customer pays an invoice through a pay link, the money goes straight
           into your own account and the invoice marks itself paid. No bank alert to check, and a fake screenshot can't fool it.
@@ -511,12 +524,26 @@ function PaymentsTab() {
         <p className="pay-intro-tip">You can connect more than one, for example Moniepoint and Paystack. The one marked <strong>Default</strong> is used unless you choose another.</p>
       </div>
 
+      {!allowed && (
+        <div className="card pay-plan">
+          <Lock size={18} aria-hidden="true" />
+          <div>
+            <strong>Online payments are on the {planFor('auto_payments')} plan.</strong>
+            <p>Upgrade first, then come back here to connect Moniepoint, OPay or Paystack. You can read the guides now to see what you'll need.</p>
+          </div>
+          <RouterLink className="btn-primary btn-sm" to="/settings?tab=billing" onClick={() => window.scrollTo(0, 0)}>See plans</RouterLink>
+        </div>
+      )}
+
       <div className="pay-grid">
         {PROVIDERS.map(p => {
           const c = conn(p.id);
           return (
             <div key={p.id} className={`card pay-card${c?.is_default ? ' is-default' : ''}${p.soon ? ' is-soon' : ''}`}>
               <div className="pay-card-head">
+                <button type="button" className="help-icon-btn pay-help" onClick={() => setHelp(p.id)} aria-label={`How to connect ${p.name}`} title={`How to connect ${p.name}`}>
+                  <HelpCircle size={16} />
+                </button>
                 <span className={`pay-mark pay-mark-${p.id}`} aria-hidden="true">{p.short}</span>
                 <div className="pay-card-title">
                   <h3>{p.name}</h3>
@@ -531,10 +558,33 @@ function PaymentsTab() {
               </div>
               <p className="pay-blurb">{p.blurb}</p>
               {c?.public_key && <p className="pay-meta">Key {c.public_key}{c.contract_code ? ` · Contract ${c.contract_code}` : ''}</p>}
+              {c && (
+                <ul className="pay-checklist" aria-label={`${p.name} setup`}>
+                  <li className="is-done"><CheckCircle2 size={14} aria-hidden="true" /> Keys checked with {p.name}</li>
+                  {p.id === 'opay' ? (
+                    <li className="is-done"><CheckCircle2 size={14} aria-hidden="true" /> No webhook needed</li>
+                  ) : c.webhook_seen_at ? (
+                    <li className="is-done"><CheckCircle2 size={14} aria-hidden="true" /> Webhook working (last {new Date(c.webhook_seen_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })})</li>
+                  ) : (
+                    <li className="is-todo">
+                      <Circle size={14} aria-hidden="true" /> Add the webhook URL in {p.id === 'monnify' ? 'Monnify' : 'Paystack'}
+                      <button type="button" className="link-inline" onClick={() => setHelp(p.id)}>How?</button>
+                      <small>Ticks itself after the first payment comes through.</small>
+                    </li>
+                  )}
+                  {c.environment === 'sandbox' && (
+                    <li className="is-warn"><AlertTriangle size={14} aria-hidden="true" /> <span>Test mode: no real money moves. Update to live keys when you're ready.</span></li>
+                  )}
+                  {(c.payments_count ?? 0) > 0 && (
+                    <li className="is-done"><CheckCircle2 size={14} aria-hidden="true" /> {c.payments_count} {c.payments_count === 1 ? 'payment' : 'payments'} received</li>
+                  )}
+                </ul>
+              )}
 
               {!p.soon && (
                 <div className="pay-actions">
-                  {!c && <button type="button" className="btn-primary btn-sm" onClick={() => setConnectingTo(p.id)}>Connect {p.name}</button>}
+                  {!c && allowed && <button type="button" className="btn-primary btn-sm" onClick={() => setConnectingTo(p.id)}>Connect {p.name}</button>}
+                  {!c && <button type="button" className="btn-ghost btn-sm" onClick={() => setHelp(p.id)}><HelpCircle size={13} /> What do I need?</button>}
                   {c && !c.is_default && <button type="button" className="btn-secondary btn-sm" disabled={busy} onClick={() => makeDefault(p.id)}><Star size={13} /> Make default</button>}
                   {c && <button type="button" className="btn-ghost btn-sm" onClick={() => setConnectingTo(p.id)}>Update keys</button>}
                   {c && <button type="button" className="btn-ghost btn-sm pay-danger" onClick={() => setDisconnecting(p.id)}>Disconnect</button>}
@@ -565,6 +615,12 @@ function PaymentsTab() {
           <li>Then, on an unpaid invoice (Sales Orders, or a customer's account under Customers), tap <strong>Pay link</strong>. It opens WhatsApp with the link ready to send.</li>
         </ul>
       </div>
+
+      {help && (
+        <PaymentHelp topic={help} webhookUrl={WEBHOOK_URL} onClose={() => setHelp(null)}
+          onConnect={allowed && help !== 'overview' && help !== 'till' && !conn(help as PaymentProvider)
+            ? () => { const t = help as PaymentProvider; setHelp(null); setConnectingTo(t); } : undefined} />
+      )}
 
       {connectingTo && (
         <ConnectProviderModal provider={connectingTo} onClose={() => setConnectingTo(null)}
@@ -645,6 +701,7 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
         { k: 'publicKey', label: 'Public key', ph: 'pk_live_… or pk_test_…', secret: false },
       ];
   const [environment, setEnvironment] = useState<'live' | 'sandbox'>('live');
+  const [showGuide, setShowGuide] = useState(false);
   const ready = fields.every(f => (keys[f.k] ?? '').trim());
 
   const submit = async (e: React.FormEvent) => {
@@ -660,6 +717,8 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
   };
 
   return (
+    <>
+    {showGuide && <PaymentHelp topic={provider} webhookUrl={WEBHOOK_URL} onClose={() => setShowGuide(false)} />}
     <Modal onClose={onClose} maxWidth={460}>
       <div className="modal-header">
         <h2>Connect {name}</h2>
@@ -674,6 +733,7 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
               ? 'Find these in your OPay Business dashboard under Developer → API Keys & Webhooks. You need an OPay merchant account first.'
               : 'Find these in your Paystack dashboard under Settings → API Keys & Webhooks.'}
             {' '}Your secret key is checked once, then locked away. Nobody at ProfixBook can read it.
+            {' '}<button type="button" className="link-inline" onClick={() => setShowGuide(true)}>Step-by-step guide</button>
           </p>
           {provider === 'opay' && (
             <div className="form-group">
@@ -697,6 +757,7 @@ function ConnectProviderModal({ provider, onClose, onDone }: { provider: Payment
         </div>
       </form>
     </Modal>
+    </>
   );
 }
 

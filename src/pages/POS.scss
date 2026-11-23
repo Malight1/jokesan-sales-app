@@ -1175,3 +1175,7 @@ $warn-text: #b45309;
   color: #1d4ed8;
   &.is-on { background: #2563eb; border-color: #2563eb; color: #fff; }
 }
+
+.co-label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.co-help-btn { width: 24px; height: 24px; }
+.co-setup-tip a { color: #2563eb; font-weight: 600; }

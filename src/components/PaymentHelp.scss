@@ -1,0 +1,98 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
+.ph {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+
+  h3 { display: flex; align-items: center; gap: 6px; font-size: $font-size-sm; font-weight: 700; color: $gray-800; margin-bottom: 0.4rem; }
+  .ph-lead { font-size: $font-size-sm; color: $gray-600; line-height: 1.6; }
+
+  .ph-video {
+    display: flex; flex-direction: column; gap: 0.4rem;
+    iframe, video { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: $radius-lg; background: $gray-900; }
+    span { display: flex; align-items: center; gap: 6px; font-size: $font-size-xs; color: $gray-500; }
+  }
+
+  .ph-needs {
+    padding: 0.85rem 1rem;
+    border-radius: $radius-lg;
+    background: $primary-light;
+    ul { padding-left: 1.1rem; display: grid; gap: 0.3rem; font-size: $font-size-sm; color: $gray-700; line-height: 1.5; }
+  }
+
+  .ph-steps {
+    list-style: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.9rem;
+    li { display: flex; gap: 0.75rem; align-items: flex-start; min-width: 0; }
+    .ph-num {
+      flex-shrink: 0;
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: $radius-full;
+      background: $primary; color: $white;
+      font-size: $font-size-xs; font-weight: 800;
+    }
+    .ph-step-body { flex: 1; min-width: 0; }
+    .ph-step-title { display: block; font-size: $font-size-sm; font-weight: 700; color: $gray-900; margin-bottom: 2px; }
+    p strong { color: $gray-800; }
+    p { font-size: $font-size-sm; color: $gray-600; line-height: 1.55; }
+    .ph-example {
+      margin-top: 0.35rem;
+      padding: 0.45rem 0.65rem;
+      border-radius: $radius-sm;
+      background: $gray-50;
+      border: 1px dashed $gray-300;
+      font-size: $font-size-xs;
+      color: $gray-600;
+    }
+    .ph-copy {
+      display: flex; gap: 0.5rem; align-items: center; margin-top: 0.45rem;
+      code {
+        flex: 1; min-width: 0;
+        padding: 0.45rem 0.6rem;
+        border-radius: $radius-sm;
+        background: $gray-50; border: 1px solid $gray-200;
+        font-size: 0.72rem; color: $gray-800;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+    }
+  }
+
+  .ph-done {
+    padding: 0.75rem 1rem;
+    border-radius: $radius-lg;
+    background: $success-light;
+    h3 { color: darken($success, 8%); }
+    ul { padding-left: 1.1rem; font-size: $font-size-sm; color: $gray-700; display: grid; gap: 0.25rem; }
+  }
+
+  .ph-trouble {
+    details {
+      border-top: 1px solid $gray-100;
+      padding: 0.55rem 0;
+      summary { cursor: pointer; font-size: $font-size-sm; font-weight: 600; color: $gray-800; }
+      p { margin-top: 0.35rem; font-size: $font-size-sm; color: $gray-600; line-height: 1.55; }
+    }
+  }
+
+  .ph-link { display: inline-flex; align-items: center; gap: 4px; font-size: $font-size-sm; font-weight: 600; color: $primary; text-decoration: none; }
+}
+
+// The round "?" that opens a guide.
+.help-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px solid $gray-200;
+  border-radius: $radius-full;
+  background: $white;
+  color: $gray-500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: $transition-fast;
+  &:hover { color: $primary; border-color: $primary-100; background: $primary-light; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}

@@ -317,3 +317,34 @@
   &.pay-mark-paystack { background: #011b33; }
   &.pay-mark-opay { background: #1dcf9f; }
 }
+
+// Payments: help, plan notice, setup checklist (0059).
+.pay-intro-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; h3 { margin-bottom: 0.4rem; } }
+.pay-plan {
+  display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 1.25rem;
+  background: $warning-light; border-color: lighten($warning, 35%);
+  > svg { color: $warning; flex-shrink: 0; margin-top: 2px; }
+  div { flex: 1; }
+  strong { font-size: $font-size-sm; color: $gray-900; }
+  p { font-size: 0.82rem; color: $gray-600; margin-top: 2px; line-height: 1.5; }
+}
+.pay-card {
+  position: relative;
+  .pay-help { position: absolute; top: 0.85rem; right: 0.85rem; }
+  .pay-card-title { padding-right: 2rem; }
+}
+.pay-checklist {
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: $radius;
+  background: $gray-50;
+  li { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 0.35rem; font-size: 0.78rem; line-height: 1.4; color: $gray-700; }
+  li svg { margin-top: 2px; flex-shrink: 0; }
+  li > span { flex: 1; min-width: 0; }
+  li small { flex-basis: 100%; padding-left: 1.2rem; color: $gray-500; font-size: 0.72rem; }
+  .is-done svg { color: $success; }
+  .is-todo { color: $gray-800; font-weight: 500; svg { color: $gray-400; } .link-inline { color: $primary; } }
+  .is-warn { color: darken($warning, 14%); svg { color: $warning; } }
+}
