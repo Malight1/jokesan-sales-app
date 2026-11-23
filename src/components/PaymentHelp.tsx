@@ -34,7 +34,7 @@ function guides(webhookUrl: string): Record<HelpTopic, Guide> {
       steps: [
         { title: 'Open a business account with a provider', body: 'Moniepoint (through Monnify), OPay or Paystack. Use the one you already bank with. The provider will check your ID and business details first. That is their rule, not ours.' },
         { title: 'Connect it here', body: 'Copy two or three keys from the provider\'s dashboard and paste them into ProfixBook. Takes about 5 minutes. Each provider has its own guide: tap the ? on its card.' },
-        { title: 'Use it', body: <>At the till, tap <strong>Pay by transfer ✓</strong>: the customer gets an account number (or QR code) for that sale, and the sale completes only when the money lands. On invoices, tap <strong>Pay link</strong> to send a link on WhatsApp.</> },
+        { title: 'Use it', body: <>At the till, tap <strong>Transfer</strong> and pick the account: the customer gets an account number (or QR code) for that sale, and the sale completes only when the money lands. On invoices, tap <strong>Pay link</strong> to send a link on WhatsApp.</> },
         { title: 'See every payment', body: <>All confirmed payments appear under <strong>Money received</strong> in the menu, with who paid and what for.</> },
       ],
       trouble: [
@@ -55,7 +55,7 @@ function guides(webhookUrl: string): Record<HelpTopic, Guide> {
         { title: 'Find your keys under Developer', body: 'In the left menu, open Developer. You will see three things you need: the API key, the Secret key and the Contract code.', example: 'API key looks like MK_PROD_XXXXXXXXXX (test keys start MK_TEST_). Contract code is a 10-digit number.' },
         { title: 'Paste them into ProfixBook', body: <>Back here, tap <strong>Connect Moniepoint</strong> and paste each one into its box. ProfixBook checks them with Monnify straight away and tells you if anything is wrong.</> },
         { title: 'Add the webhook URL in Monnify', body: <>Still under Developer in Monnify, find <strong>Webhook URLs</strong> and paste this into <strong>Transaction Completion</strong>, then save. This lets Monnify tell ProfixBook when an invoice pay link is paid.</>, copy: webhookUrl },
-        { title: 'Try it with a small payment', body: <>Ring up a small sale at the till, tap <strong>Moniepoint ✓</strong> (or Pay by transfer ✓), and send the amount to the account number shown. The till switches to "Money received" by itself.</> },
+        { title: 'Try it with a small payment', body: <>Ring up a small sale at the till, tap <strong>Transfer</strong>, choose <strong>Moniepoint</strong>, and send the amount to the account number shown. The till switches to "Money received" by itself.</> },
       ],
       done: ['Moniepoint shows "Connected" on the Payments page', 'After the first paid pay link, "Webhook working" gets a tick'],
       trouble: [
@@ -78,7 +78,7 @@ function guides(webhookUrl: string): Record<HelpTopic, Guide> {
         { title: 'Copy your keys', body: 'Open API Keys & Webhooks. Copy the Public key and the Secret key. Your Merchant ID is shown in the dashboard too (OPay support can tell you if you can\'t find it).', example: 'Public key starts OPAYPUB, secret key starts OPAYPRV, merchant ID is a long number like 256612345678901.' },
         { title: 'Paste them into ProfixBook', body: <>Tap <strong>Connect OPay</strong>, choose <strong>Real payments</strong> (or Testing if you have sandbox keys), and paste the three values. ProfixBook checks them with OPay before saving.</> },
         { title: 'No webhook to set', body: 'ProfixBook tells OPay where to confirm with every payment, so there is nothing to paste into OPay.' },
-        { title: 'Try it with a small payment', body: <>At the till, tap <strong>OPay ✓</strong>. The customer scans the QR code with their phone and pays. The sale completes when OPay confirms.</> },
+        { title: 'Try it with a small payment', body: <>At the till, tap <strong>Transfer</strong> and choose <strong>OPay</strong>. The customer scans the QR code with their phone and pays. The sale completes when OPay confirms.</> },
       ],
       done: ['OPay shows "Connected" on the Payments page'],
       trouble: [
@@ -96,7 +96,7 @@ function guides(webhookUrl: string): Record<HelpTopic, Guide> {
         { title: 'Copy your keys', body: 'Go to Settings → API Keys & Webhooks. Copy the Secret key and the Public key.', example: 'Live keys start sk_live_ and pk_live_ (test keys: sk_test_, pk_test_).' },
         { title: 'Paste them into ProfixBook', body: <>Tap <strong>Connect Paystack</strong> and paste both keys.</> },
         { title: 'Add the webhook URL in Paystack', body: <>On the same Paystack page, paste this into <strong>Webhook URL</strong> and save.</>, copy: webhookUrl },
-        { title: 'Try it', body: 'Send yourself a pay link from a small invoice, or use Pay by transfer ✓ at the till.' },
+        { title: 'Try it', body: 'Send yourself a pay link from a small invoice, or tap Transfer at the till.' },
       ],
       done: ['Paystack shows "Connected"', 'After the first payment, "Webhook working" gets a tick'],
       trouble: [{ q: '"Paystack rejected that secret key"', a: 'Copy it again from Settings → API Keys & Webhooks; make sure it is the secret key, not the public one.' }],
@@ -107,7 +107,7 @@ function guides(webhookUrl: string): Record<HelpTopic, Guide> {
       lead: 'The safe way to take a transfer: the till only completes the sale when the money has really arrived, so a fake alert or screenshot can\'t fool it.',
       steps: [
         { title: 'Add the items as normal', body: 'Pick the customer too if it\'s a regular.' },
-        { title: 'Tap Pay by transfer ✓', body: 'If the shop has more than one account (e.g. Moniepoint and OPay), tap the one the customer wants to pay into. Then tap Show transfer details.' },
+        { title: 'Tap Transfer', body: 'Under Transfer into, tap the account the customer wants to pay into (the shop\'s main one is picked for you). Then tap Show transfer details.' },
         { title: 'Show the customer the screen', body: 'Moniepoint: they transfer the exact amount to the account number shown (it works for this sale only, for 40 minutes). OPay or Paystack: they scan the QR code with their phone and pay.' },
         { title: 'Wait for "Money received"', body: 'The till checks by itself every few seconds. When the money lands it says Money received and finishes the sale. Then print or WhatsApp the receipt.' },
       ],

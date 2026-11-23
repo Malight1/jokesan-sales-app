@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Tag, Link2, Send } from 'lucide-react';
+import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Link2, Send, Trash2 } from 'lucide-react';
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
   returns as returnsApi, storeCredit, payments as paymentsApi, deliveries as deliveriesApi, IntegrationStatus,
@@ -14,7 +14,8 @@ import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
 import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
-import { generateInvoicePdf, generateCreditNotePdf } from '../lib/invoice';
+import { generateInvoicePdf, generateCreditNotePdf, prettyDate } from '../lib/invoice';
+import { DocTotals, DocLink } from '../components/DocParts';
 import { whatsappLink, howToPayLines, paymentRequestMessage } from '../lib/whatsapp';
 import { enqueuePayment } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -36,11 +37,13 @@ const CONDITIONS: { id: ReturnCondition; label: string; hint: string }[] = [
   { id: 'expired', label: 'Expired', hint: 'Written off — cost stays a loss' },
 ];
 
-const statusMap: Record<string, { label: string; cls: string }> = {
-  full: { label: 'Full Payment', cls: 'badge-success' },
-  part: { label: 'Part Payment', cls: 'badge-warning' },
-  unpaid: { label: 'Unpaid', cls: 'badge-danger' },
-};
+// Read the status off the money itself, so the label can never disagree
+// with the Paid and Balance columns beside it.
+const saleStatus = (s: { voided?: boolean; balance: number; amount_paid: number }) =>
+  s.voided ? { label: 'Voided', cls: 'badge-gray' }
+  : s.balance <= 0 ? { label: 'Paid', cls: 'badge-success' }
+  : s.amount_paid > 0 ? { label: 'Part paid', cls: 'badge-warning' }
+  : { label: 'Unpaid', cls: 'badge-danger' };
 
 interface LineItem { finished_good_id: string; quantity: number; unit_price: number; discount_reason: string; }
 
@@ -106,6 +109,11 @@ export default function Sales() {
     items: [blankItem()],
   });
 
+  const customerOption = (c: Customer) => {
+    const person = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim();
+    const company = (c.company_store ?? '').trim();
+    return person && company ? `${person} · ${company}` : person || company || 'Unnamed customer';
+  };
   const customerName = (id: string | null) => {
     const c = customers?.find(x => x.id === id);
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Walk-in' : '—';
@@ -331,17 +339,15 @@ export default function Sales() {
 
   const columns: Column<SalesOrder>[] = [
     { key: 'doc_no', header: 'Invoice', value: s => invoiceNo(s),
-      render: s => <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{invoiceNo(s)}</span> },
-    { key: 'transaction_date', header: 'Date', value: s => s.transaction_date },
+      render: s => <DocLink onClick={() => setViewId(s.id)} label={`Open ${invoiceNo(s)}`}>{invoiceNo(s)}</DocLink> },
+    { key: 'transaction_date', header: 'Date', value: s => s.transaction_date, render: s => <span className="nowrap">{prettyDate(s.transaction_date)}</span> },
     { key: 'customer', header: 'Customer', value: s => customerName(s.customer_id) },
     { key: 'total_amount', header: 'Total', align: 'right', value: s => s.total_amount, render: s => fmt(s.total_amount) },
     { key: 'amount_paid', header: 'Paid', align: 'right', value: s => s.amount_paid, render: s => fmt(s.amount_paid) },
-    { key: 'balance', header: 'Balance', align: 'right', value: s => s.balance, render: s => <span className={s.balance > 0 ? 'text-danger' : ''}>{fmt(s.balance)}</span> },
-    ...(seesProfit ? [{ key: 'gross_profit', header: 'Profit', align: 'right', value: (s: SalesOrder) => s.gross_profit, render: (s: SalesOrder) => <span style={{ color: '#16a34a', fontWeight: 600 }}>{fmt(s.gross_profit)}</span> } as Column<SalesOrder>] : []),
-    { key: 'payment_status', header: 'Status', value: s => s.voided ? 'Voided' : (statusMap[s.payment_status]?.label ?? s.payment_status),
-      render: s => s.voided
-        ? <span className="badge-gray" style={{ textDecoration: 'line-through' }}>Voided</span>
-        : <span className={statusMap[s.payment_status]?.cls ?? 'badge-gray'}>{statusMap[s.payment_status]?.label ?? s.payment_status}</span> },
+    { key: 'balance', header: 'Balance', align: 'right', value: s => s.balance, render: s => s.balance > 0 ? <span className="text-danger">{fmt(s.balance)}</span> : <span className="text-muted">{fmt(0)}</span> },
+    ...(seesProfit ? [{ key: 'gross_profit', header: 'Profit', align: 'right', value: (s: SalesOrder) => s.gross_profit, render: (s: SalesOrder) => <span className={s.gross_profit < 0 ? 'text-danger' : ''}>{fmt(s.gross_profit)}</span> } as Column<SalesOrder>] : []),
+    { key: 'payment_status', header: 'Status', value: s => saleStatus(s).label,
+      render: s => <span className={saleStatus(s).cls}>{saleStatus(s).label}</span> },
   ];
 
   const rowActions: RowAction<SalesOrder>[] = [
@@ -361,7 +367,7 @@ export default function Sales() {
       <div className="page-header">
         <div className="page-title">
           <h1>Sales Orders</h1>
-          <p>{rows ? `${rows.length} total transactions` : ' '}</p>
+          <p>Every sale and invoice, what was paid and what is still owed.</p>
         </div>
         <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Sale</button>
       </div>
@@ -403,93 +409,84 @@ export default function Sales() {
                     <label>Customer</label>
                     <select value={form.customerId} onChange={e => setCustomer(e.target.value)}>
                       <option value="">Walk-in / none</option>
-                      {customers?.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name} — {c.company_store}</option>)}
+                      {customers?.map(c => <option key={c.id} value={c.id}>{customerOption(c)}</option>)}
                     </select>
                   </div>
                 </div>
 
-                <h3 className="section-title">Items</h3>
-                {form.items.map((item, idx) => {
-                  const stock = item.finished_good_id ? productStock(item.finished_good_id) : null;
-                  const isOut = stock === 0;
-                  const isOver = stock !== null && item.quantity > stock;
-                  const list = item.finished_good_id ? listPriceFor(item.finished_good_id, item.quantity || 1, form.customerId) : 0;
-                  const discounted = tiersEnabled && item.finished_good_id && item.unit_price < list;
-                  return (
-                    <div key={idx}>
-                      <div className="item-row">
-                        <div className="form-group">
-                          <label>Product</label>
-                          <select value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
-                            <option value="">— select —</option>
+                <h3 className="doc-section-title">Products</h3>
+                <div className="doc-lines">
+                  <div className="doc-line doc-line-head" aria-hidden="true">
+                    <span>Product</span><span>Qty</span><span>Price (₦)</span><span className="r">Amount</span><span />
+                  </div>
+                  {form.items.map((item, idx) => {
+                    const stock = item.finished_good_id ? productStock(item.finished_good_id) : null;
+                    const isOut = stock === 0;
+                    const isOver = stock !== null && item.quantity > stock;
+                    const list = item.finished_good_id ? listPriceFor(item.finished_good_id, item.quantity || 1, form.customerId) : 0;
+                    const discounted = tiersEnabled && item.finished_good_id && item.unit_price < list;
+                    return (
+                      <div key={idx} className="doc-line">
+                        <div className="dl-product">
+                          <select aria-label={`Product, line ${idx + 1}`} value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
+                            <option value="">Choose a product</option>
                             {goods?.map(g => (
                               <option key={g.id} value={g.id} disabled={productStock(g.id) === 0}>
-                                {g.name}{productStock(g.id) === 0 ? ' — OUT OF STOCK' : ` (${productStock(g.id)} in stock)`}
+                                {g.name}{productStock(g.id) === 0 ? ' (out of stock)' : ''}
                               </option>
                             ))}
                           </select>
-                          {isOut && <small className="stock-error">Out of stock</small>}
+                          {stock !== null && (
+                            <small className={`dl-hint${isOut || isOver ? ' is-bad' : ''}`}>
+                              {isOut ? 'Out of stock' : isOver ? `Only ${stock} in stock` : `${stock} in stock`}
+                              {discounted ? ` · list price ${fmt(list)}` : ''}
+                            </small>
+                          )}
                         </div>
-                        <div className="form-group">
-                          <label>Qty {stock !== null && <span className="stock-hint">({stock} avail)</span>}</label>
-                          <NumberInput value={item.quantity}
-                            onChange={v => updateItem(idx, 'quantity', v)}
-                            style={{ borderColor: isOver ? '#dc2626' : undefined }} />
-                          {isOver && <small className="stock-error">Exceeds stock ({stock})</small>}
-                        </div>
-                        <div className="form-group">
-                          <label>Unit Price (₦){discounted && <span className="stock-hint"> (list {fmt(list)})</span>}</label>
-                          <NumberInput value={item.unit_price} onChange={v => updateItem(idx, 'unit_price', v)} />
-                        </div>
-                        <div className="form-group amount-col">
-                          <label>Amount</label>
-                          <div className="amount-display">{fmt(item.quantity * item.unit_price)}</div>
-                        </div>
-                        {form.items.length > 1 && (
-                          <button type="button" className="remove-item" onClick={() => removeItem(idx)} title="Remove line" aria-label="Remove this line"><X size={14} /></button>
+                        <NumberInput aria-label={`Quantity, line ${idx + 1}`} value={item.quantity}
+                          onChange={v => updateItem(idx, 'quantity', v)} aria-invalid={isOver || undefined}
+                          style={{ borderColor: isOver ? '#dc2626' : undefined }} />
+                        <NumberInput aria-label={`Unit price, line ${idx + 1}`} placeholder="Price" value={item.unit_price} onChange={v => updateItem(idx, 'unit_price', v)} />
+                        <span className="dl-amount">{fmt(item.quantity * item.unit_price)}</span>
+                        {form.items.length > 1
+                          ? <button type="button" className="dl-remove" onClick={() => removeItem(idx)} aria-label={`Remove line ${idx + 1}`}><Trash2 size={15} /></button>
+                          : <span />}
+                        {discounted && (
+                          <input className="dl-extra" value={item.discount_reason} aria-label={`Reason for the discount, line ${idx + 1}`}
+                                 placeholder="Reason for the lower price (e.g. regular customer)"
+                                 onChange={e => updateItem(idx, 'discount_reason', e.target.value)} />
                         )}
                       </div>
-                      {discounted && (
-                        <div className="form-group" style={{ marginTop: '-0.5rem', marginBottom: '0.75rem' }}>
-                          <input value={item.discount_reason} placeholder="Reason for the discount (e.g. regular customer)"
-                                 onChange={e => updateItem(idx, 'discount_reason', e.target.value)} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                <button type="button" className="btn-ghost btn-sm add-item-btn" onClick={addItem}><Plus size={14} /> Add item</button>
-
-                {tiersEnabled && (
-                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: '0.75rem' }}>
-                    <label style={{ margin: 0, whiteSpace: 'nowrap' }}><Tag size={13} style={{ verticalAlign: -2 }} /> Order discount (₦)</label>
-                    <NumberInput value={orderDiscount} onChange={v => setOrderDiscount(Math.max(0, Math.min(v, cartSubtotal)))} style={{ maxWidth: 140 }} />
-                  </div>
-                )}
-
-                <div className="total-row">
-                  {totalDiscount > 0 && (
-                    <div style={{ fontSize: '0.85rem', color: '#16a34a', marginBottom: 4 }}>You're giving {fmt(totalDiscount)} off</div>
-                  )}
-                  {vatRate > 0 && (
-                    <div style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 400, marginBottom: 4 }}>
-                      Subtotal: {fmt(total)} &nbsp;·&nbsp; VAT ({vatRate}%): {fmt(vatAmt)}
-                    </div>
-                  )}
-                  <strong>Total: {fmt(grandTotal)}</strong>
+                    );
+                  })}
                 </div>
+                <button type="button" className="btn-ghost btn-sm" onClick={addItem}><Plus size={14} /> Add another product</button>
 
+                <DocTotals
+                  rows={[
+                    (vatRate > 0 || orderDiscount > 0) && { label: 'Subtotal', value: fmt(cartSubtotal) },
+                    tiersEnabled && {
+                      label: <label htmlFor="ns-discount">Discount</label>,
+                      value: <NumberInput id="ns-discount" className="dt-input" placeholder="0" value={orderDiscount}
+                                          onChange={v => setOrderDiscount(Math.max(0, Math.min(v, cartSubtotal)))} />,
+                    },
+                    vatRate > 0 && { label: `VAT (${vatRate}%)`, value: fmt(vatAmt) },
+                  ]}
+                  total={{ label: 'Total', value: fmt(grandTotal), tone: 'accent' }}
+                  after={[totalDiscount > 0 && { label: 'You are giving', value: `${fmt(totalDiscount)} off`, tone: 'good' }]} />
+
+                <h3 className="doc-section-title">Payment</h3>
                 <div className="grid-2">
                   <div className="form-group">
-                    <label>Payment Type</label>
-                    <select value={form.paymentTypeId} onChange={e => setForm(f => ({ ...f, paymentTypeId: e.target.value }))}>
-                      <option value="">— select —</option>
+                    <label htmlFor="ns-paytype">How they paid</label>
+                    <select id="ns-paytype" value={form.paymentTypeId} onChange={e => setForm(f => ({ ...f, paymentTypeId: e.target.value }))}>
+                      <option value="">Choose a payment method</option>
                       {payTypes?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
                   <div className="form-group">
-                    <label>Amount Paid (₦)</label>
-                    <NumberInput value={paidNow} onChange={v => setForm(f => ({ ...f, amountPaid: v }))} />
+                    <label htmlFor="ns-paid">Amount paid (₦)</label>
+                    <NumberInput id="ns-paid" value={paidNow} onChange={v => setForm(f => ({ ...f, amountPaid: v }))} />
                   </div>
                 </div>
                 {walkInDebt && (
@@ -519,7 +516,16 @@ export default function Sales() {
 
       {viewId && (
         <SaleDetail id={viewId} onClose={() => setViewId(null)} customerName={customerName} productName={productName}
-                    isAdmin={isAdmin} onVoidedReturn={refetch} customFieldDefs={saleFieldDefs} />
+                    isAdmin={isAdmin} onVoidedReturn={refetch} customFieldDefs={saleFieldDefs}
+                    actions={(() => {
+                      const row = rows?.find(r => r.id === viewId);
+                      if (!row || row.voided) return undefined;
+                      return {
+                        onPdf: () => downloadInvoice(row),
+                        onWhatsApp: () => sendWhatsAppReceipt(row),
+                        onPay: row.balance > 0 ? () => { setViewId(null); openPay(row); } : undefined,
+                      };
+                    })()} />
       )}
 
       {voidFor && (
@@ -570,7 +576,7 @@ export default function Sales() {
               <div className="form-group">
                 <label>Payment Type</label>
                 <select value={payType} onChange={e => setPayType(e.target.value)}>
-                  <option value="">— select —</option>
+                  <option value="">Choose a payment method</option>
                   {moneyTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
@@ -727,18 +733,13 @@ export function ReturnModal({ sale, customerName, productName, companyName, invo
 
             {active.length > 0 && (
               <>
-                <div className="total-row" style={{ marginBottom: '0.75rem' }}>
-                  {vatAmt > 0 && (
-                    <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: 4 }}>
-                      Subtotal: {fmt(subtotal)} &nbsp;·&nbsp; VAT: {fmt(vatAmt)}
-                    </div>
-                  )}
-                  <strong>Credit total: {fmt(total)}</strong>
-                  <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 4 }}>
-                    {Math.min(total, sale.balance) > 0 && <>Reduces balance owed by {fmt(Math.min(total, sale.balance))}. </>}
-                    {remainder > 0 && <>{fmt(remainder)} left over to {method === 'cash' ? 'refund' : 'credit'}.</>}
-                  </div>
-                </div>
+                <DocTotals
+                  rows={[vatAmt > 0 && { label: 'Subtotal', value: fmt(subtotal) }, vatAmt > 0 && { label: 'VAT', value: fmt(vatAmt) }]}
+                  total={{ label: 'Credit total', value: fmt(total), tone: 'accent' }}
+                  after={[
+                    Math.min(total, sale.balance) > 0 && { label: 'Off the balance owed', value: fmt(Math.min(total, sale.balance)) },
+                    remainder > 0 && { label: method === 'cash' ? 'Left to refund' : 'Left to credit', value: fmt(remainder) },
+                  ]} />
 
                 {remainder > 0 && (
                   <div className="form-group">
@@ -876,7 +877,8 @@ function CreateDeliveryModal({ sale, productName, customerAddress, onClose, onDo
 }
 
 // ---- Sale detail (fetches items + payments) ----
-function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedReturn, customFieldDefs: fieldDefs }: {
+function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedReturn, customFieldDefs: fieldDefs, actions }: {
+  actions?: { onPdf: () => void; onWhatsApp: () => void; onPay?: () => void };
   id: string; onClose: () => void;
   customerName: (id: string | null) => string;
   productName: (id: string) => string;
@@ -950,7 +952,7 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
     <>
     <Modal onClose={onClose}>
         <div className="modal-header">
-          <h2>Sale Detail</h2>
+          <h2>{data ? <>Sale <span className="sd-num">{data.doc_no ?? ''}</span></> : 'Sale'}</h2>
           <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div className="modal-body">
@@ -959,30 +961,35 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
           {data && (
             <>
               <div className="view-meta">
-                <div><span>Date</span><strong>{data.transaction_date}</strong></div>
+                <div><span>Date</span><strong>{prettyDate(data.transaction_date)}</strong></div>
                 <div><span>Customer</span><strong>{customerName(data.customer_id)}</strong></div>
                 {seesProfit && <div><span>Cost of goods</span><strong>{fmt(data.cogs)}</strong></div>}
-                {seesProfit && <div><span>Gross profit</span><strong style={{ color: '#16a34a' }}>{fmt(data.gross_profit)}</strong></div>}
+                {seesProfit && <div><span>Gross profit</span><strong className={data.gross_profit < 0 ? 'text-danger' : ''}>{fmt(data.gross_profit)}</strong></div>}
               </div>
               <table className="view-table">
-                <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead>
+                <thead><tr><th>Product</th><th className="r">Qty</th><th className="r">Price</th><th className="r">Amount</th></tr></thead>
                 <tbody>
                   {data.sale_items?.map((i: any) => (
                     <tr key={i.id}>
                       <td>{productName(i.finished_good_id)}</td>
-                      <td>{i.quantity}</td>
-                      <td>{fmt(i.unit_price)}</td>
-                      <td>{fmt(i.amount)}</td>
+                      <td className="r">{i.quantity}</td>
+                      <td className="r">{fmt(i.unit_price)}</td>
+                      <td className="r">{fmt(i.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="view-summary">
-                <div><span>Total</span><strong>{fmt(data.total_amount)}</strong></div>
-                {data.returned_total > 0 && <div><span>Returned</span><strong style={{ color: '#dc2626' }}>−{fmt(data.returned_total)}</strong></div>}
-                <div><span>Paid</span><strong>{fmt(data.amount_paid)}</strong></div>
-                <div className={data.balance > 0 ? 'text-danger' : ''}><span>Balance</span><strong>{fmt(data.balance)}</strong></div>
-              </div>
+              <DocTotals
+                rows={[
+                  data.vat_amount > 0 && { label: 'Subtotal', value: fmt(data.subtotal) },
+                  data.vat_amount > 0 && { label: `VAT (${data.vat_rate}%)`, value: fmt(data.vat_amount) },
+                  { label: 'Total', value: fmt(data.total_amount) },
+                  data.returned_total > 0 && { label: 'Returned', value: `−${fmt(data.returned_total)}`, tone: 'bad' },
+                  { label: 'Paid', value: fmt(data.amount_paid) },
+                ]}
+                total={data.balance > 0
+                  ? { label: 'Balance due', value: fmt(data.balance), tone: 'warn' }
+                  : { label: 'Paid in full', value: fmt(0), tone: 'good' }} />
               {creditNotes && creditNotes.length > 0 && (
                 <>
                   <h3 className="section-title">Credit Notes</h3>
@@ -991,9 +998,9 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
                     <tbody>
                       {creditNotes.map(r => (
                         <tr key={r.id} style={r.voided ? { opacity: 0.55 } : undefined}>
-                          <td>{r.return_date}</td>
+                          <td className="nowrap">{prettyDate(r.return_date)}</td>
                           <td>{r.doc_no}{r.voided && <span className="badge-gray" style={{ marginLeft: 6 }}>Voided</span>}</td>
-                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{r.reason || '—'}</td>
+                          <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{r.reason || <span className="text-muted">No reason given</span>}</td>
                           <td style={r.voided ? { textDecoration: 'line-through' } : undefined}>{fmt(r.total)}</td>
                           <td>
                             <button className="btn-ghost btn-sm" disabled={downloading === r.id} onClick={() => downloadCreditNote(r)}>
@@ -1021,7 +1028,7 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
                     <thead><tr><th>Date</th><th>Amount</th><th>Ref</th></tr></thead>
                     <tbody>
                       {data.sale_payments.map((p: any) => (
-                        <tr key={p.id}><td>{p.payment_date}</td><td>{fmt(p.amount_paid)}</td><td>{p.reference || '—'}</td></tr>
+                        <tr key={p.id}><td className="nowrap">{prettyDate(p.payment_date)}</td><td>{fmt(p.amount_paid)}</td><td>{p.reference || <span className="text-muted">None</span>}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -1042,6 +1049,13 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
             </>
           )}
         </div>
+        {actions && data && (
+          <div className="modal-footer sd-footer">
+            <button type="button" className="btn-ghost" onClick={actions.onPdf}><FileText size={15} /> Invoice PDF</button>
+            <button type="button" className="btn-secondary" onClick={actions.onWhatsApp}><MessageCircle size={15} /> WhatsApp</button>
+            {actions.onPay && <button type="button" className="btn-primary" onClick={actions.onPay}><Wallet size={15} /> Record payment</button>}
+          </div>
+        )}
     </Modal>
 
     {voidTarget && (

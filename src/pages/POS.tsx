@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, CheckCircle2, FileText, MessageCircle, X, CloudOff, ScanLine,
   Calculator, Delete, Undo2, Tag, ChevronUp, UserRound, AlertTriangle, PauseCircle, PlayCircle, Printer, HelpCircle,
+  Banknote, Landmark, CreditCard, Clock3, Wallet, ShieldCheck,
 } from 'lucide-react';
 import {
   sales as salesApi, finishedGoods as goodsApi, customers as customersApi, lookups, branding, stock, pricing, productUnits,
@@ -44,6 +45,10 @@ const IS_CASH = /cash/i;
 const IS_CREDIT = /credit/i;
 const IS_TRANSFER = /transfer/i;
 const PROVIDER_LABEL: Record<string, string> = { monnify: 'Moniepoint', paystack: 'Paystack', opay: 'OPay' };
+const IS_CARD = /pos|card/i;
+// One icon per kind of payment so the tiles read at a glance.
+const methodIcon = (name: string) =>
+  IS_CASH.test(name) ? Banknote : IS_TRANSFER.test(name) ? Landmark : IS_CARD.test(name) ? CreditCard : Wallet;
 
 // unitPrice defaults to the resolved list price; `manual` marks a line the
 // cashier has hand-priced, so switching the customer later re-prices
@@ -378,7 +383,32 @@ export default function POS() {
   const pickConfirmed = (provider: PaymentProvider) => {
     setConfirmedVia(provider); setPayMode('full'); setPayTypeId(transferTypeId); setTendered(0); setShowKeypad(false);
   };
+  // The transfer type the cashier may pick by hand (checked in their bank app).
+  // Hidden when the owner requires every transfer to be confirmed.
+  const manualTransferId = useMemo(() => payChips.find(p => IS_TRANSFER.test(p.name))?.id ?? '', [payChips]);
+  const defaultProvider = (liveProviders.find(p => p.is_default) ?? liveProviders[0])?.provider;
+  const transferOn = payMode !== 'credit' && (!!confirmedVia || (!!manualTransferId && payTypeId === manualTransferId));
+  const pickTransfer = () => {
+    if (transferOn) return;
+    if (defaultProvider) pickConfirmed(defaultProvider);
+    else if (manualTransferId) pickMethod(manualTransferId);
+  };
   const pickCredit = () => { setConfirmedVia(null); setPayMode('credit'); setPayTypeId(creditTypeId); setTendered(0); setShowKeypad(false); };
+  // Cash first, then one Transfer tile (whatever account it goes into),
+  // then the business's other methods, then Credit last.
+  const methodTiles = (() => {
+    const other = payChips.filter(p => !IS_TRANSFER.test(p.name));
+    const tiles = other.map(p => ({
+      key: p.id, label: p.name, title: p.name, icon: methodIcon(p.name),
+      on: payMode !== 'credit' && !confirmedVia && payTypeId === p.id, pick: () => pickMethod(p.id),
+    }));
+    if (manualTransferId || liveProviders.length > 0) {
+      const at = tiles.length && IS_CASH.test(tiles[0].label) ? 1 : 0;
+      tiles.splice(at, 0, { key: 'transfer', label: 'Transfer', title: 'Bank transfer', icon: Landmark, on: transferOn, pick: pickTransfer });
+    }
+    tiles.push({ key: 'credit', label: 'Credit', title: 'Pay later', icon: Clock3, on: payMode === 'credit', pick: pickCredit });
+    return tiles;
+  })();
 
   const applyLinePrice = (fgId: string, unitPrice: number, reason: string) => {
     setCart(c => c.map(l => l.good.id === fgId
@@ -992,36 +1022,57 @@ export default function POS() {
                       </button>
                     )}
                   </div>
-                  <div className="pay-chips" role="radiogroup" aria-labelledby="pos-pay-label">
-                    {payChips.map(p => (
-                      <button key={p.id} type="button" role="radio"
-                              aria-checked={payMode !== 'credit' && !confirmedVia && payTypeId === p.id}
-                              className={payMode !== 'credit' && !confirmedVia && payTypeId === p.id ? 'is-on' : ''}
-                              onClick={() => pickMethod(p.id)} disabled={!!paidTill}>
-                        {p.name}
-                      </button>
-                    ))}
-                    {liveProviders.map(lp => (
-                      <button key={lp.provider} type="button" role="radio" disabled={!!paidTill}
-                              aria-checked={confirmedVia === lp.provider}
-                              className={`is-confirmed${confirmedVia === lp.provider ? ' is-on' : ''}`}
-                              onClick={() => pickConfirmed(lp.provider)}
-                              title="The till checks the money arrived before the sale completes">
-                        {liveProviders.length === 1 ? 'Pay by transfer' : PROVIDER_LABEL[lp.provider]} ✓
-                      </button>
-                    ))}
-                    <button type="button" role="radio" aria-checked={payMode === 'credit'}
-                            className={`is-credit${payMode === 'credit' ? ' is-on' : ''}`} onClick={pickCredit}>
-                      Credit
-                    </button>
+                  <div className="pay-methods" role="radiogroup" aria-labelledby="pos-pay-label">
+                    {methodTiles.map(t => {
+                      const Icon = t.icon;
+                      return (
+                        <button key={t.key} type="button" role="radio" aria-checked={t.on} title={t.title}
+                                className={`pay-method${t.on ? ' is-on' : ''}${t.key === 'credit' ? ' is-credit' : ''}`}
+                                onClick={t.pick} disabled={!!paidTill}>
+                          <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
+                          <span>{t.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
+                  {transferOn && liveProviders.length > 0 && (
+                    <div className="pay-into">
+                      <span className="pay-into-label" id="pos-into-label">Transfer into</span>
+                      <div className="pay-into-list" role="radiogroup" aria-labelledby="pos-into-label">
+                        {liveProviders.map(lp => (
+                          <button key={lp.provider} type="button" role="radio" disabled={!!paidTill}
+                                  aria-checked={confirmedVia === lp.provider}
+                                  className={`pay-into-opt${confirmedVia === lp.provider ? ' is-on' : ''}`}
+                                  onClick={() => pickConfirmed(lp.provider)}>
+                            <ShieldCheck size={18} aria-hidden="true" />
+                            <span className="pio-text">
+                              <strong>{PROVIDER_LABEL[lp.provider]}</strong>
+                              <small>Confirmed for you</small>
+                            </span>
+                          </button>
+                        ))}
+                        {manualTransferId && (
+                          <button type="button" role="radio" disabled={!!paidTill}
+                                  aria-checked={!confirmedVia}
+                                  className={`pay-into-opt is-manual${!confirmedVia ? ' is-on' : ''}`}
+                                  onClick={() => pickMethod(manualTransferId)}>
+                            <Landmark size={18} aria-hidden="true" />
+                            <span className="pio-text">
+                              <strong>Bank account</strong>
+                              <small>Check it yourself</small>
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {liveProviders.length === 0 && profile?.role === 'admin' && integQ.data && (
                     <p className="co-help co-setup-tip">
                       Tired of fake transfer alerts? <Link to="/settings?tab=payments">Set up Pay by transfer</Link> with Moniepoint, OPay or Paystack.
                     </p>
                   )}
                   {confirmedVia && (
-                    <p className="co-help">The till shows an account number{confirmedVia === 'monnify' ? '' : ' or QR code'} for this sale and completes it only when {PROVIDER_LABEL[confirmedVia]} confirms the money.</p>
+                    <p className="co-help">Press the button below to show the customer an account number{confirmedVia === 'monnify' ? '' : ' or QR code'}. The sale completes once {PROVIDER_LABEL[confirmedVia]} confirms the money.</p>
                   )}
                   {payMode !== 'credit' && !confirmedVia && (
                     <label className="co-switch">

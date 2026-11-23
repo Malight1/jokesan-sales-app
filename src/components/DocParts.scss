@@ -1,0 +1,105 @@
+@use '../styles/variables' as *;
+
+// Same readable amber as the till's warnings (POS.scss).
+$warn-text: #b45309;
+
+.doc-totals {
+  display: grid;
+  gap: 0.35rem;
+  width: min(100%, 300px);
+  margin: 0.9rem 0 1rem auto;
+  font-variant-numeric: tabular-nums;
+
+  .dt-row, .dt-total { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+  .dt-row {
+    font-size: $font-size-sm;
+    dt { color: $gray-500; }
+    dd { color: $gray-800; font-weight: 500; }
+    &.is-good dd { color: $success; }
+    &.is-bad dd { color: $danger; font-weight: 600; }
+    &.is-muted dd { color: $gray-500; }
+  }
+  .dt-total {
+    margin-top: 0.3rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: $radius;
+    background: $gray-50;
+    dt { font-size: $font-size-sm; font-weight: 600; color: $gray-700; }
+    dd { font-size: $font-size-lg; font-weight: 700; color: $gray-900; }
+    &.is-accent { background: $primary-light; dt, dd { color: $primary-dark; } }
+    &.is-good { background: $success-light; dt, dd { color: darken($success, 6%); } }
+    &.is-warn { background: $warning-light; dt, dd { color: $warn-text; } }
+  }
+}
+
+// Product lines as one grid: labels once at the top, columns that line up.
+.doc-lines { display: grid; gap: 0.5rem; margin-bottom: 0.5rem; }
+.doc-line {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(70px, 0.8fr) minmax(96px, 1fr) minmax(90px, 1fr) 36px;
+  gap: 0.5rem;
+  align-items: start;
+
+  > select, > input, > .num-input { min-width: 0; }
+  .dl-amount {
+    align-self: start;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 38px;
+    text-align: right;
+    font-size: $font-size-sm;
+    font-weight: 600;
+    color: $gray-800;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .dl-product { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .dl-hint { font-size: $font-size-xs; color: $gray-500; }
+  .dl-hint.is-bad { color: $danger; font-weight: 500; }
+  .dl-remove {
+    align-self: start;
+    margin-top: 1px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px;
+    border: 0; border-radius: $radius-sm;
+    background: none; color: $gray-400;
+    cursor: pointer;
+    &:hover { color: $danger; background: $danger-light; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+  }
+  .dl-extra { grid-column: 1 / -1; }
+}
+.doc-line-head {
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $gray-500;
+  .r { text-align: right; }
+}
+@media (max-width: 560px) {
+  .doc-line { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(72px, auto) 36px; }
+  .doc-line .dl-product, .doc-line > select { grid-column: 1 / -1; }
+  .doc-line-head { display: none; }
+  .doc-lines { gap: 0.9rem; }
+}
+
+.doc-section-title {
+  margin: 1.25rem 0 0.6rem;
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $gray-800;
+}
+
+.doc-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: $primary;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  &:hover { text-decoration: underline; text-underline-offset: 2px; }
+  &:focus-visible { outline: none; box-shadow: $ring; border-radius: 3px; }
+}

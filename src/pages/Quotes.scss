@@ -34,46 +34,34 @@
     @media (max-width: 520px) { grid-template-columns: 1fr; }
   }
 
-  // Product lines: a real grid, so columns line up and labels aren't
-  // repeated on every row.
-  .q-lines { display: grid; gap: 0.5rem; margin-bottom: 0.5rem; }
-  .q-line {
-    display: grid;
-    grid-template-columns: minmax(0, 2.4fr) minmax(70px, 0.8fr) minmax(90px, 1fr) minmax(90px, 1fr) 36px;
-    gap: 0.5rem;
+  .q-view-title {
+    display: flex;
     align-items: center;
-    .q-line-amount { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: $gray-800; font-size: $font-size-sm; }
+    flex-wrap: wrap;
+    gap: 0.25rem 0.6rem;
+    min-width: 0;
+    .q-num { color: $gray-500; font-weight: 600; }
   }
-  .q-line-head {
-    font-size: $font-size-xs;
-    font-weight: 600;
-    color: $gray-500;
-    .r { text-align: right; }
-  }
-  @media (max-width: 560px) {
-    .q-line { grid-template-columns: 1fr 1fr 36px; }
-    .q-line select { grid-column: 1 / -1; }
-    .q-line .q-line-amount { grid-column: 1 / 3; text-align: left; }
-    .q-line-head { display: none; }
-  }
-
-  .q-subtotals { font-size: $font-size-sm; color: $gray-500; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
-  .total-row strong { font-size: $font-size-lg; font-variant-numeric: tabular-nums; }
 
   .q-meta {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 0.85rem 1rem;
+    border-radius: $radius;
+    background: $gray-50;
     gap: 0.75rem 1rem;
     margin-bottom: 1rem;
     dt { font-size: $font-size-xs; color: $gray-500; }
-    dd { font-size: $font-size-sm; font-weight: 600; color: $gray-900; }
+    dd { font-size: $font-size-sm; font-weight: 600; color: $gray-900; overflow-wrap: anywhere; }
+    @media (max-width: 520px) { grid-template-columns: 1fr 1fr; }
   }
   .q-items {
     width: 100%;
     border-collapse: collapse;
     font-size: $font-size-sm;
-    th { text-align: left; font-size: $font-size-xs; font-weight: 600; color: $gray-500; padding: 0.4rem 0; border-bottom: 1px solid $gray-200; }
-    td { padding: 0.55rem 0; border-bottom: 1px solid $gray-100; font-variant-numeric: tabular-nums; }
+    th { text-align: left; font-size: $font-size-xs; font-weight: 600; color: $gray-500; padding: 0.5rem 0.6rem; background: $gray-50; }
+    td { padding: 0.6rem; border-bottom: 1px solid $gray-100; font-variant-numeric: tabular-nums; color: $gray-800; }
+    td:last-child { font-weight: 600; }
     .r { text-align: right; }
   }
   .q-note { font-size: $font-size-sm; color: $gray-600; margin-top: 0.5rem; line-height: 1.5; }

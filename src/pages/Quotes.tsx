@@ -15,6 +15,7 @@ import Modal from '../components/Modal';
 import ApprovalModal from '../components/ApprovalModal';
 import NumberInput from '../components/NumberInput';
 import BankAccountCard from '../components/BankAccountCard';
+import { DocTotals, DocLink } from '../components/DocParts';
 import './Quotes.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -165,7 +166,7 @@ export default function Quotes() {
   };
 
   const columns: Column<Quote>[] = [
-    { key: 'doc_no', header: 'No.', value: q => q.doc_no ?? '', render: q => <span className="q-num">{q.doc_no}</span> },
+    { key: 'doc_no', header: 'No.', value: q => q.doc_no ?? '', render: q => <DocLink onClick={() => setViewId(q.id)} label={`Open ${q.doc_no}`}>{q.doc_no}</DocLink> },
     { key: 'kind', header: 'Type', value: q => kindName(q.kind), render: q => <span className="badge-gray">{q.kind === 'proforma' ? 'Proforma' : 'Quote'}</span> },
     { key: 'customer', header: 'Customer', value: q => customerName(q.customer_id) },
     { key: 'issue_date', header: 'Date', value: q => q.issue_date, render: q => fmtDate(q.issue_date) },
@@ -195,6 +196,8 @@ export default function Quotes() {
   const openValue = (rows ?? []).filter(q => isOpen(q) && !isExpired(q)).reduce((s, q) => s + q.total, 0);
   const openCount = (rows ?? []).filter(q => isOpen(q) && !isExpired(q)).length;
   const expiredCount = (rows ?? []).filter(isExpired).length;
+  const expiredValue = (rows ?? []).filter(isExpired).reduce((s, q) => s + q.total, 0);
+  const won = (rows ?? []).filter(q => q.status === 'converted');
 
   return (
     <div className="quotes-page">
@@ -211,7 +214,17 @@ export default function Quotes() {
           <div className="stat-card">
             <div className="stat-label">Waiting on customers</div>
             <div className="stat-value">{fmt(openValue)}</div>
-            <div className="stat-sub">{openCount} open {openCount === 1 ? 'quote' : 'quotes'}{expiredCount > 0 ? ` · ${expiredCount} expired` : ''}</div>
+            <div className="stat-sub">{openCount} open {openCount === 1 ? 'quote' : 'quotes'}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Expired</div>
+            <div className="stat-value">{fmt(expiredValue)}</div>
+            <div className="stat-sub">{expiredCount === 0 ? 'Nothing to follow up' : `${expiredCount} to follow up or renew`}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Turned into sales</div>
+            <div className="stat-value">{fmt(won.reduce((s, q) => s + q.total, 0))}</div>
+            <div className="stat-sub">{won.length} {won.length === 1 ? 'quote' : 'quotes'} won</div>
           </div>
         </div>
       )}
@@ -262,36 +275,33 @@ export default function Quotes() {
                 </div>
               </div>
 
-              <h3 className="section-title">Products</h3>
-              <div className="q-lines">
-                <div className="q-line q-line-head" aria-hidden="true">
+              <h3 className="doc-section-title">Products</h3>
+              <div className="doc-lines">
+                <div className="doc-line doc-line-head" aria-hidden="true">
                   <span>Product</span><span>Qty</span><span>Price (₦)</span><span className="r">Amount</span><span />
                 </div>
                 {form.items.map((item, idx) => (
-                  <div key={idx} className="q-line">
+                  <div key={idx} className="doc-line">
                     <select aria-label={`Product, line ${idx + 1}`} value={item.finished_good_id} onChange={e => updateItem(idx, 'finished_good_id', e.target.value)}>
                       <option value="">Choose a product</option>
                       {goods?.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                     <NumberInput aria-label={`Quantity, line ${idx + 1}`} placeholder="Qty" value={item.quantity} onChange={v => updateItem(idx, 'quantity', v)} />
                     <NumberInput aria-label={`Unit price, line ${idx + 1}`} placeholder="Price ₦" value={item.unit_price} onChange={v => updateItem(idx, 'unit_price', v)} />
-                    <span className="q-line-amount">{fmt(item.quantity * item.unit_price)}</span>
+                    <span className="dl-amount">{fmt(item.quantity * item.unit_price)}</span>
                     {form.items.length > 1
-                      ? <button type="button" className="remove-item" onClick={() => removeItem(idx)} aria-label={`Remove line ${idx + 1}`}><Trash2 size={15} /></button>
+                      ? <button type="button" className="dl-remove" onClick={() => removeItem(idx)} aria-label={`Remove line ${idx + 1}`}><Trash2 size={15} /></button>
                       : <span />}
                   </div>
                 ))}
               </div>
               <button type="button" className="btn-ghost btn-sm" onClick={addItem}><Plus size={14} /> Add another product</button>
 
-              <div className="total-row" style={{ marginTop: '1rem' }}>
-                {vatRate > 0 && (
-                  <div className="q-subtotals">Subtotal {fmt(subtotal)} · VAT ({vatRate}%) {fmt(vatAmt)}</div>
-                )}
-                <strong>Total {fmt(subtotal + vatAmt)}</strong>
-              </div>
+              <DocTotals
+                rows={[vatRate > 0 && { label: 'Subtotal', value: fmt(subtotal) }, vatRate > 0 && { label: `VAT (${vatRate}%)`, value: fmt(vatAmt) }]}
+                total={{ label: form.kind === 'proforma' ? 'Amount to pay' : 'Total', value: fmt(subtotal + vatAmt), tone: 'accent' }} />
 
-              <h3 className="section-title">Where the customer pays</h3>
+              <h3 className="doc-section-title">Where the customer pays</h3>
               <BankAccountCard />
 
               <div className="grid-2">
@@ -348,13 +358,15 @@ function QuoteViewModal({ quote, customerName, productName, onClose, onWhatsApp,
   return (
     <Modal onClose={onClose} maxWidth={560}>
       <div className="modal-header">
-        <h2>{kindName(quote.kind)} {quote.doc_no}</h2>
+        <div className="q-view-title">
+          <h2>{kindName(quote.kind)} <span className="q-num">{quote.doc_no}</span></h2>
+          <span className={st.cls}>{st.label}</span>
+        </div>
         <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
       </div>
       <div className="modal-body">
         <dl className="q-meta">
           <div><dt>Customer</dt><dd>{customerName}</dd></div>
-          <div><dt>Status</dt><dd><span className={st.cls}>{st.label}</span></dd></div>
           <div><dt>Date</dt><dd>{fmtDate(quote.issue_date)}</dd></div>
           <div><dt>Valid until</dt><dd>{quote.valid_until ? fmtDate(quote.valid_until) : 'No end date'}</dd></div>
         </dl>
@@ -373,13 +385,12 @@ function QuoteViewModal({ quote, customerName, productName, onClose, onWhatsApp,
             </tbody>
           </table>
         )}
-        <div className="total-row" style={{ marginTop: '0.75rem' }}>
-          {quote.vat_amount > 0 && <div className="q-subtotals">Subtotal {fmt(quote.subtotal)} · VAT ({quote.vat_rate}%) {fmt(quote.vat_amount)}</div>}
-          <strong>Total {fmt(quote.total)}</strong>
-        </div>
+        <DocTotals
+          rows={[quote.vat_amount > 0 && { label: 'Subtotal', value: fmt(quote.subtotal) }, quote.vat_amount > 0 && { label: `VAT (${quote.vat_rate}%)`, value: fmt(quote.vat_amount) }]}
+          total={{ label: quote.kind === 'proforma' ? 'Amount to pay' : 'Total', value: fmt(quote.total), tone: 'accent' }} />
         {quote.terms && <p className="q-note"><strong>Terms:</strong> {quote.terms}</p>}
         {quote.notes && <p className="q-note"><strong>Note:</strong> {quote.notes}</p>}
-        <h3 className="section-title">Where the customer pays</h3>
+        <h3 className="doc-section-title">Where the customer pays</h3>
         <BankAccountCard compact />
       </div>
       <div className="modal-footer q-view-footer">

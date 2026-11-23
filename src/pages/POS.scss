@@ -699,30 +699,102 @@ $warn-text: #b45309;
   &.is-warn { color: $warn-text; }
 }
 
-.pay-chips {
+.pay-methods {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   gap: 0.5rem;
+}
 
-  button {
-    min-height: 44px;
-    padding: 0.4rem 0.6rem;
-    border: 1.5px solid $gray-300;
-    border-radius: $radius;
-    background: $white;
-    color: $gray-700;
-    font-family: inherit;
+.pay-method {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 0;
+  min-height: 64px;
+  padding: 0.55rem 0.4rem;
+  border: 1px solid $gray-200;
+  border-radius: $radius;
+  background: $white;
+  color: $gray-600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s $ease, background-color 0.15s $ease, color 0.15s $ease, box-shadow 0.15s $ease;
+
+  span {
+    max-width: 100%;
     font-size: $font-size-sm;
     font-weight: 600;
-    line-height: 1.2;
-    cursor: pointer;
-    transition: border-color 0.15s $ease, background-color 0.15s $ease, color 0.15s $ease;
-
-    &:hover:not(.is-on) { border-color: $gray-400; }
-    &:focus-visible { outline: none; box-shadow: $ring; }
-    &.is-on { border-color: $primary; background: $primary-light; color: $primary-dark; }
-    &.is-credit.is-on { border-color: $warning; background: $warning-light; color: $warn-text; }
+    color: $gray-800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
+
+  &:hover:not(.is-on):not(:disabled) { border-color: $gray-300; background: $gray-50; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &:disabled { opacity: 0.55; cursor: not-allowed; }
+  &.is-on {
+    border-color: $primary;
+    background: $primary-light;
+    color: $primary;
+    box-shadow: inset 0 0 0 1px $primary;
+    span { color: $primary-dark; }
+  }
+  &.is-credit.is-on {
+    border-color: $warning;
+    background: $warning-light;
+    color: $warn-text;
+    box-shadow: inset 0 0 0 1px $warning;
+    span { color: $warn-text; }
+  }
+}
+
+.pay-into {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  padding: 0.65rem;
+  border-radius: $radius;
+  background: $gray-50;
+
+  .pay-into-label { font-size: $font-size-xs; font-weight: 600; color: $gray-500; }
+}
+
+.pay-into-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.4rem;
+}
+
+.pay-into-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid $gray-200;
+  border-radius: $radius-sm;
+  background: $white;
+  color: $success;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s $ease, box-shadow 0.15s $ease;
+
+  &.is-manual { color: $gray-500; }
+  svg { flex-shrink: 0; }
+  .pio-text { display: flex; flex-direction: column; min-width: 0; }
+  strong, small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  strong { font-size: $font-size-sm; font-weight: 600; color: $gray-900; }
+  small { font-size: $font-size-xs; color: $gray-500; }
+
+  &:hover:not(.is-on):not(:disabled) { border-color: $gray-300; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+  &.is-on { border-color: $primary; box-shadow: inset 0 0 0 1px $primary; }
 }
 
 .co-switch {
@@ -1166,14 +1238,6 @@ $warn-text: #b45309;
   margin-top: 0.5rem;
   font-size: 0.75rem;
   color: #92400e;
-}
-
-// Confirmed "Pay by transfer" chips (migration 0058): set apart from the
-// plain methods because the till itself checks the money arrived.
-.pay-chips button.is-confirmed {
-  border-color: #bfdbfe;
-  color: #1d4ed8;
-  &.is-on { background: #2563eb; border-color: #2563eb; color: #fff; }
 }
 
 .co-label-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
