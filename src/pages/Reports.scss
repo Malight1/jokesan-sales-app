@@ -51,3 +51,25 @@
   .aging-d60 dd, .aging-d90 dd, .aging-over dd { color: $danger; }
   .is-zero dd { color: $gray-400; font-weight: 500; }
 }
+
+// Balance sheet tab (0063).
+.bs-intro { color: $gray-500; font-size: 0.85rem; margin: 0 0 1rem; max-width: 72ch; line-height: 1.55; }
+.cf-row.bs-indent { padding-left: 0.75rem; color: $gray-600; }
+.cf-row.bs-sub { font-weight: 600; color: $gray-800; border-bottom-color: $gray-200; }
+.bs-note { display: block; font-size: $font-size-xs; color: #15803d; margin-top: 0.1rem; }
+.bs-neg { color: $danger; }
+.bs-equity {
+  margin-top: 1.25rem;
+  padding: 0.9rem 1rem 0.35rem;
+  border-radius: $radius;
+  background: $primary-light;
+  .cf-row { border-bottom-color: rgba($primary, 0.12); &:last-child { border-bottom: 0; } }
+  &.is-neg { background: $danger-light; .bs-equity-main strong { color: $danger; } }
+}
+.bs-equity-main {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem 1rem;
+  padding-bottom: 0.5rem;
+  font-size: $font-size-sm; font-weight: 600; color: $gray-800;
+  strong { font-size: $font-size-xl; color: $primary; font-variant-numeric: tabular-nums; }
+}
+.bs-foot { color: $gray-500; font-size: 0.8rem; margin: 0.75rem 0 0; line-height: 1.55; max-width: 80ch; }

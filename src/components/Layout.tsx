@@ -100,6 +100,7 @@ const MANUFACTURING_ONLY = new Set(['/production', '/inventory']);
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/money': 'Bank & Cash',
+  '/money/statements': 'Bank & Cash',
   '/pos': 'Point of Sale',
   '/match-payment': 'Match Bank Payment',
   '/money-received': 'Money Received',

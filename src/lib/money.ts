@@ -15,6 +15,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
   loan_in: 'Loans received',
   loan_repay: 'Loan repayments',
   other_in: 'Other money in',
+  vat_paid: 'VAT paid to the tax office',
   opening: 'Starting balance',
 };
 
@@ -27,6 +28,7 @@ export const ENTRY_KINDS: { id: MoneyEntryKind; label: string; hint: string; fro
   { id: 'loan_in', label: 'Loan received', hint: 'Money borrowed from a bank, cooperative or person. You will pay it back.', from: false, to: true },
   { id: 'loan_repay', label: 'Loan repayment', hint: 'Paying back a loan. Put any interest on the Expenses page.', from: true, to: false },
   { id: 'other_in', label: 'Other money in', hint: 'Money that isn’t from a sale, such as interest from the bank.', from: false, to: true },
+  { id: 'vat_paid', label: 'VAT paid to the tax office', hint: 'VAT you paid over to FIRS or the state. It lowers the VAT you owe and isn’t an expense.', from: true, to: false },
 ];
 
 export const naira = (n: number) => {

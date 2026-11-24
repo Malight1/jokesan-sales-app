@@ -1,0 +1,179 @@
+@use '../styles/variables' as *;
+
+// Bank statement check. Same flat white surfaces as Bank & Cash; money in
+// is green, everything else stays grey so the eye goes to what's left to do.
+$ok-text: #15803d;
+
+.rc-in { color: $ok-text; }
+.rc-muted { color: $gray-500; font-size: $font-size-xs; line-height: 1.5; }
+.rc-hint { margin: 0 0 0.85rem; font-size: $font-size-sm; color: $gray-600; line-height: 1.55; }
+.rc-intro { margin: 0 0 1rem; font-size: $font-size-sm; color: $gray-600; line-height: 1.55; }
+.rc-warn { padding: 0.7rem 0.9rem; border-radius: $radius; background: $warning-light; color: $gray-800; font-size: $font-size-sm; }
+.rc-empty { margin: 0; padding: 1.25rem 0.5rem; text-align: center; color: $gray-500; font-size: $font-size-sm; }
+.nowrap { white-space: nowrap; }
+
+// ---- upload ----
+.rc-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.rc-drop {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem;
+  min-height: 150px; padding: 1.5rem;
+  border: 1.5px dashed $gray-300; border-radius: $radius-lg;
+  background: $white; color: $gray-500; cursor: pointer; text-align: center;
+  transition: $transition-fast;
+  strong { color: $gray-800; font-size: $font-size-base; }
+  span { font-size: $font-size-sm; }
+  &:hover { border-color: $primary; color: $primary; }
+  &:focus-within { box-shadow: $ring; border-color: $primary; }
+}
+.rc-file-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.6rem 0.8rem; margin-bottom: 1rem;
+  border: 1px solid $gray-200; border-radius: $radius; color: $gray-600;
+}
+.rc-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: $font-size-sm; color: $gray-800; font-weight: 600; }
+.rc-change { position: relative; cursor: pointer; &:focus-within { box-shadow: $ring; } }
+.rc-sub { margin: 0 0 0.25rem; font-size: $font-size-base; }
+.rc-cols {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.rc-preview-sum {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.75rem; margin: 0 0 0.75rem;
+  div { display: flex; flex-direction: column; gap: 0.1rem; }
+  dt { font-size: $font-size-xs; color: $gray-500; }
+  dd { margin: 0; font-weight: 700; color: $gray-800; font-variant-numeric: tabular-nums; }
+}
+
+// ---- shared table ----
+.rc-table-wrap { overflow-x: auto; margin-bottom: 0.5rem; }
+.rc-table {
+  width: 100%; border-collapse: collapse; font-size: $font-size-sm; font-variant-numeric: tabular-nums;
+  th { text-align: left; padding: 0.45rem 0.6rem; font-size: $font-size-xs; font-weight: 600; color: $gray-500; background: $gray-50; border-bottom: 1px solid $gray-200; }
+  td { padding: 0.55rem 0.6rem; border-bottom: 1px solid $gray-100; color: $gray-700; vertical-align: top; }
+  tfoot td { font-weight: 700; color: $gray-900; border-bottom: 0; border-top: 1px solid $gray-200; }
+  .r { text-align: right; white-space: nowrap; }
+}
+
+// ---- the check page ----
+.rc {
+  .rc-back {
+    display: inline-flex; align-items: center; gap: 0.25rem; margin-bottom: 0.4rem;
+    font-size: $font-size-xs; color: $gray-500; text-decoration: none;
+    &:hover { color: $primary; }
+    &:focus-visible { outline: none; box-shadow: $ring; border-radius: $radius-sm; }
+  }
+  .page-title p { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+  .rc-head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+  .rc-summary {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 1rem;
+    background: $white; border: 1px solid $gray-200; border-radius: $radius-lg;
+    > div {
+      display: flex; flex-direction: column; gap: 0.2rem; padding: 1rem 1.25rem; min-width: 0;
+      & + div { border-left: 1px solid $gray-200; }
+    }
+    strong { font-size: $font-size-xl; font-weight: 800; color: $gray-900; font-variant-numeric: tabular-nums; }
+    .is-off strong { color: $danger; }
+    .is-ok strong { color: $ok-text; }
+  }
+  .rc-sum-label { font-size: $font-size-xs; color: $gray-500; }
+  .rc-sum-sub { font-size: $font-size-xs; color: $gray-500; }
+  .rc-bar {
+    display: block; height: 6px; margin-top: 0.35rem; border-radius: $radius-full; background: $gray-100; overflow: hidden;
+    span { display: block; height: 100%; background: $primary; border-radius: inherit; transition: width 0.3s $ease; }
+  }
+
+  .rc-lines-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;
+    h3 { margin: 0; }
+  }
+  .rc-chips {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    button {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      min-height: 34px; padding: 0.3rem 0.75rem;
+      border: 1px solid $gray-300; border-radius: $radius-full;
+      background: $white; color: $gray-600; font: inherit; font-size: $font-size-sm; cursor: pointer;
+      &:hover { border-color: $gray-400; }
+      &.is-on { border-color: $primary; background: $primary-light; color: $primary; font-weight: 600; }
+      &:focus-visible { outline: none; box-shadow: $ring; }
+    }
+  }
+  .rc-count { font-variant-numeric: tabular-nums; font-size: $font-size-xs; opacity: 0.8; }
+
+  .rc-list { list-style: none; margin: 0; padding: 0; }
+  .rc-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) 132px minmax(0, 1.4fr) 236px;
+    align-items: center; gap: 0.5rem 1rem;
+    padding: 0.75rem 0.25rem;
+    border-top: 1px solid $gray-100;
+    &:first-child { border-top: 0; }
+    &.is-ignored .rc-line-desc, &.is-ignored .rc-line-amt { color: $gray-400; }
+  }
+  .rc-line-what { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+  .rc-line-date { font-size: $font-size-xs; color: $gray-500; }
+  .rc-line-desc { font-size: $font-size-sm; color: $gray-800; overflow-wrap: anywhere; }
+  .rc-line-ref { font-size: $font-size-xs; color: $gray-500; }
+  .rc-line-amt { text-align: right; font-variant-numeric: tabular-nums; color: $gray-900; }
+  .rc-line-state { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; font-size: $font-size-sm; }
+  .rc-state-ok { display: inline-flex; align-items: center; gap: 0.25rem; color: $ok-text; font-weight: 600; }
+  .rc-state-detail { font-size: $font-size-xs; color: $gray-500; overflow-wrap: anywhere; }
+  .rc-state-todo { color: #b45309; font-weight: 600; }
+  .rc-state-skip { color: $gray-500; }
+  .rc-line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.35rem; }
+
+  .rc-missing { margin-top: 1rem; h3 { margin: 0 0 0.35rem; } }
+
+  @media (max-width: 900px) {
+    .rc-summary { grid-template-columns: repeat(2, minmax(0, 1fr));
+      > div:nth-child(3) { border-left: 0; }
+      > div:nth-child(n + 3) { border-top: 1px solid $gray-200; }
+    }
+  }
+  @media (max-width: 700px) {
+    .rc-line {
+      grid-template-columns: minmax(0, 1fr) auto;
+      .rc-line-state { grid-column: 1 / -1; }
+      .rc-line-actions { grid-column: 1 / -1; justify-content: flex-start; }
+    }
+  }
+}
+
+// ---- modals ----
+.rc-line-card {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 0.7rem 0.9rem; margin-bottom: 0.9rem;
+  border-radius: $radius; background: $gray-50;
+  font-size: $font-size-sm; color: $gray-700;
+  strong { font-variant-numeric: tabular-nums; white-space: nowrap; color: $gray-900; &.rc-in { color: $ok-text; } }
+}
+.rc-pick { display: flex; flex-direction: column; gap: 0.4rem; max-height: 360px; overflow-y: auto; }
+.rc-pick-row, .rc-kind {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid $gray-200; border-radius: $radius;
+  cursor: pointer; transition: $transition-fast;
+  &:hover { border-color: $gray-300; }
+  &.is-on { border-color: $primary; box-shadow: inset 0 0 0 1px $primary; }
+  &:focus-within { box-shadow: $ring; }
+  input { flex-shrink: 0; accent-color: $primary; }
+}
+.rc-pick-what {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; font-size: $font-size-sm; color: $gray-800;
+  small { font-size: $font-size-xs; color: $gray-500; }
+}
+.rc-pick-row strong { font-variant-numeric: tabular-nums; white-space: nowrap; color: $gray-900; &.rc-in { color: $ok-text; } }
+.rc-kinds {
+  border: 0; padding: 0; margin: 0 0 1rem; display: flex; flex-direction: column; gap: 0.4rem;
+  legend { padding: 0; margin-bottom: 0.45rem; font-size: $font-size-sm; font-weight: 600; color: $gray-700; }
+}
+.rc-kind {
+  align-items: flex-start;
+  input { margin-top: 0.2rem; }
+  span { display: flex; flex-direction: column; gap: 0.1rem; }
+  strong { font-size: $font-size-sm; color: $gray-800; font-weight: 600; }
+  small { font-size: $font-size-xs; color: $gray-500; line-height: 1.45; }
+}

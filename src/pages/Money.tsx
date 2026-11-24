@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, ArrowLeftRight, Banknote, Landmark, Wallet, Pencil, X, Ban } from 'lucide-react';
-import { money, MoneyAccount, MoneyAccountFlow, MoneyLine, MoneyEntryKind, CashFlow, PaymentTypeAccount } from '../lib/api';
+import { Link } from 'react-router-dom';
+import { Plus, ArrowLeftRight, Banknote, Landmark, Wallet, Pencil, X, Ban, FileCheck2 } from 'lucide-react';
+import { money, bank, BankStatementSummary, MoneyAccount, MoneyAccountFlow, MoneyLine, MoneyEntryKind, CashFlow, PaymentTypeAccount } from '../lib/api';
 import { CATEGORY_LABEL, ENTRY_KINDS, KIND_LABEL, naira } from '../lib/money';
 import { useQuery } from '../lib/hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -11,6 +12,7 @@ import DataTable, { Column } from '../components/DataTable';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
+import StatementUploadModal from '../components/StatementUploadModal';
 import './Money.scss';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -29,6 +31,8 @@ export default function Money() {
   const [editing, setEditing] = useState<Partial<MoneyAccount> | null>(null);
   const [entryKind, setEntryKind] = useState<MoneyEntryKind | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [uploadFor, setUploadFor] = useState<string | null | false>(false);
+  const statementsQ = useQuery<BankStatementSummary[]>(() => bank.list(), []);
 
   const accounts = flowQ.data?.accounts ?? [];
   const live = accounts.filter(a => a.is_active || showInactive);
@@ -37,7 +41,7 @@ export default function Money() {
   const byKind = (k: string) => accounts.filter(a => a.is_active && a.kind === k).reduce((s, a) => s + Number(a.closing || 0), 0);
   const needsStart = accounts.filter(a => a.is_active && !a.opening_date);
 
-  const refresh = () => { flowQ.refetch(); typesQ.refetch(); };
+  const refresh = () => { flowQ.refetch(); typesQ.refetch(); statementsQ.refetch(); };
 
   if (flowQ.loading && !flowQ.data) return <Loading label="Adding up your money…" />;
   if (flowQ.error) return <ErrorState message={flowQ.error} onRetry={flowQ.refetch} />;
@@ -107,10 +111,16 @@ export default function Money() {
         </button>
       )}
 
-      {current && <AccountLines account={current} onEdit={() => setEditing(current)} onChanged={refresh} />}
+      {current && <AccountLines account={current} onEdit={() => setEditing(current)} onChanged={refresh}
+                                onCheck={current.kind !== 'cash' ? () => setUploadFor(current.id) : undefined} />}
+
+      <Statements list={statementsQ.data ?? []} onUpload={() => setUploadFor(current && current.kind !== 'cash' ? current.id : null)} />
 
       <PaymentRouting types={typesQ.data ?? []} accounts={accounts.filter(a => a.is_active)} canEdit={isAdmin} onChanged={refresh} />
 
+      {uploadFor !== false && (
+        <StatementUploadModal accounts={accounts.filter(a => a.is_active)} defaultAccount={uploadFor} onClose={() => setUploadFor(false)} />
+      )}
       {editing && <AccountModal account={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); refresh(); }} />}
       {entryKind && (
         <EntryModal initialKind={entryKind} accounts={accounts.filter(a => a.is_active)} defaultFrom={current?.id ?? null}
@@ -120,7 +130,7 @@ export default function Money() {
   );
 }
 
-function AccountLines({ account, onEdit, onChanged }: { account: MoneyAccountFlow; onEdit: () => void; onChanged: () => void }) {
+function AccountLines({ account, onEdit, onChanged, onCheck }: { account: MoneyAccountFlow; onEdit: () => void; onChanged: () => void; onCheck?: () => void }) {
   const toast = useToast();
   const linesQ = useQuery<MoneyLine[]>(() => money.lines(account.id), [account.id, account.closing]);
   const [voidFor, setVoidFor] = useState<MoneyLine | null>(null);
@@ -169,7 +179,10 @@ function AccountLines({ account, onEdit, onChanged }: { account: MoneyAccountFlo
             {account.bank_name && account.kind !== 'cash' && <> {account.bank_name}{account.account_number ? ` ${account.account_number}` : ''}.</>}
           </p>
         </div>
-        <button type="button" className="btn-secondary btn-sm" onClick={onEdit}><Pencil size={14} /> Edit account</button>
+        <div className="money-lines-actions">
+          {onCheck && <button type="button" className="btn-secondary btn-sm" onClick={onCheck}><FileCheck2 size={14} /> Check statement</button>}
+          <button type="button" className="btn-secondary btn-sm" onClick={onEdit}><Pencil size={14} /> Edit account</button>
+        </div>
       </div>
       <DataTable
         columns={columns}
@@ -195,6 +208,41 @@ function AccountLines({ account, onEdit, onChanged }: { account: MoneyAccountFlo
           onConfirm={confirmVoid}
           onCancel={() => setVoidFor(null)}
         />
+      )}
+    </section>
+  );
+}
+
+// Bank statements uploaded for checking (migration 0063).
+function Statements({ list, onUpload }: { list: BankStatementSummary[]; onUpload: () => void }) {
+  return (
+    <section className="card money-statements">
+      <div className="money-lines-head">
+        <div>
+          <h3>Bank statements</h3>
+          <p>Upload a statement from your bank or Moniepoint app to check it against ProfixBook. Lost payments and charges nobody recorded show up straight away.</p>
+        </div>
+        <button type="button" className="btn-secondary btn-sm" onClick={onUpload}><FileCheck2 size={14} /> Check a statement</button>
+      </div>
+      {list.length === 0 ? (
+        <p className="money-muted">No statements checked yet.</p>
+      ) : (
+        <ul className="money-st-list">
+          {list.map(s => (
+            <li key={s.id}>
+              <Link to={`/money/statements/${s.id}`} className="money-st-row">
+                <span className="money-st-name">
+                  <strong>{s.account_name}</strong>
+                  <small>{prettyDate(s.period_from)} to {prettyDate(s.period_to)}{s.file_name ? ` · ${s.file_name}` : ''}</small>
+                </span>
+                {s.status === 'done'
+                  ? <span className="badge-success">Finished</span>
+                  : s.open > 0 ? <span className="badge-warning">{s.open} of {s.lines} to check</span>
+                  : <span className="badge-primary">Ready to finish</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

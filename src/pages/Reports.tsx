@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
          purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock,
-         StockCostRow, money as moneyApi, CashFlow } from '../lib/api';
+         StockCostRow, money as moneyApi, CashFlow, BalanceSheet } from '../lib/api';
 import { CATEGORY_LABEL, naira } from '../lib/money';
 import { AGING, agingKey, AgingKey, todayIso } from '../lib/debts';
 import { hasFeature } from '../lib/features';
@@ -22,10 +22,11 @@ import './Reports.scss';
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'cashflow' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
+type Tab = 'pnl' | 'cashflow' | 'balance' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
 const ALL_TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
   { id: 'cashflow', label: 'Cash flow' },
+  { id: 'balance', label: 'Balance sheet' },
   { id: 'sales', label: 'Sales' },
   { id: 'expenses', label: 'Expenses' },
   { id: 'stock', label: 'Stock' },
@@ -77,6 +78,8 @@ export default function Reports() {
   const extrasQ = useQuery(() => reportsApi.extras(from, to, branch || null).catch(() => null), [from, to, branch]);
   // Money that actually moved, by account and by kind (0061).
   const cashQ = useQuery<CashFlow | null>(() => moneyApi.cashFlow(from || null, to || null).catch(() => null), [from, to]);
+  // What the business owns and owes right now (0063).
+  const bsQ = useQuery<BalanceSheet | null>(() => reportsApi.balanceSheet().catch(() => null), []);
   // What stock on hand cost, per item (0060).
   const stockCostQ = useQuery(() => reportsApi.stockValue(branch || null).catch(() => [] as StockCostRow[]), [branch]);
 
@@ -399,6 +402,27 @@ export default function Reports() {
   const payTypeName = (id: string | null) => payTypesQ.data?.find(t => t.id === id)?.name ?? '';
   const M = (header: string, value: (r: any) => any, total = true): ExportColumn<any> => ({ header, value, money: true, total });
 
+  // Balance sheet: owns, owes, and the owner's share (the difference).
+  const bs = bsQ.data;
+  type BsRow = { label: string; value: number; note?: string; indent?: boolean; sub?: boolean };
+  const bsOwns: BsRow[] = bs ? [
+    ...bs.accounts.map(a => ({ label: a.name, value: Number(a.balance), note: a.checked_to ? `Checked against the bank to ${prettyDay(a.checked_to)}` : undefined, indent: true })),
+    { label: 'Cash and bank', value: Number(bs.cash_total), sub: true },
+    { label: 'Stock, at what it cost you', value: Number(bs.stock) },
+    { label: `Customers owe you${bs.debtor_count ? ` (${bs.debtor_count})` : ''}`, value: Number(bs.debtors) },
+    ...(Number(bs.vat_net) < 0 ? [{ label: 'VAT to claim back', value: -Number(bs.vat_net) }] : []),
+  ] : [];
+  const bsOwnsTotal = bs ? Number(bs.cash_total) + Number(bs.stock) + Number(bs.debtors) + Math.max(0, -Number(bs.vat_net)) : 0;
+  const bsOwes = bs ? [
+    { label: `You owe suppliers${bs.creditor_count ? ` (${bs.creditor_count})` : ''}`, value: Number(bs.creditors) },
+    ...(Number(bs.vat_net) > 0 ? [{ label: 'VAT owed to the tax office', value: Number(bs.vat_net) }] : []),
+    { label: 'Store credit customers can spend', value: Number(bs.store_credit) },
+    { label: 'Loans still to pay back', value: Number(bs.loans) },
+  ] : [];
+  const bsOwesTotal = bsOwes.reduce((s, r) => s + r.value, 0);
+  const bsEquity = bsOwnsTotal - bsOwesTotal;
+  const bsOwnerNet = bs ? Number(bs.owner_in) - Number(bs.owner_out) : 0;
+
   const doExport = async (kind: 'xlsx' | 'pdf') => {
     const base = { business: tenant?.name ?? undefined, subtitle };
     let docSpec: ExportDoc;
@@ -437,6 +461,23 @@ export default function Reports() {
       ], notes: [
         `Net change: ₦${(cashInTotal - cashOutTotal).toLocaleString('en-NG', { maximumFractionDigits: 2 })} (money in less money out).`,
         ...(movedBetween > 0 ? [`₦${movedBetween.toLocaleString('en-NG', { maximumFractionDigits: 2 })} was moved between your own accounts. It is shown in each account but left out of money in and money out.`] : []),
+      ] };
+    } else if (tab === 'balance') {
+      const row = (label: string, value: number, strong = false) => ({ label, value, strong });
+      docSpec = { ...base, subtitle: `As of ${prettyDay(bs?.as_of ?? todayIso())}, whole business`, name: 'balance-sheet', title: 'Balance sheet', tables: [
+        { heading: 'What the business owns', columns: [{ header: '', value: r => r.label }, M('Amount', r => r.value, false)],
+          rows: [...bsOwns.map(r => row(r.indent ? `   ${r.label}` : r.label, r.value, !!r.sub)), row('Total owned', bsOwnsTotal, true)], strong: (r: any) => r.strong },
+        { heading: 'What the business owes', columns: [{ header: '', value: r => r.label }, M('Amount', r => r.value, false)],
+          rows: [...bsOwes.map(r => row(r.label, r.value)), row('Total owed', bsOwesTotal, true)], strong: (r: any) => r.strong },
+        { heading: 'The owner\'s share', columns: [{ header: '', value: r => r.label }, M('Amount', r => r.value, false)],
+          rows: [
+            row('Money the owner put in, less what they took out', bsOwnerNet),
+            row('Profit kept in the business, and starting balances', bsEquity - bsOwnerNet),
+            row('Owner\'s share (owned less owed)', bsEquity, true),
+          ], strong: (r: any) => r.strong },
+      ], notes: [
+        'This is a snapshot of right now. The date and branch filters don\'t change it.',
+        'Stock is counted at what it cost you, not what it sells for.',
       ] };
     } else if (tab === 'sales') {
       docSpec = { ...base, name: 'sales-report', title: 'Sales', tables: [{ columns: [
@@ -682,6 +723,54 @@ export default function Reports() {
                 searchPlaceholder="Search accounts…"
                 emptyMessage="No money accounts yet."
               />
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'balance' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>Balance sheet</h3>
+          <p className="bs-intro">
+            What the business owns and what it owes, right now{bs ? `, ${prettyDay(bs.as_of)}` : ''}. The difference is the owner's share.
+            Banks ask for this when you apply for a loan. The date and branch filters don't change it.
+          </p>
+          {bsQ.loading && !bs ? <Loading label="Adding up what you own and owe…" /> : !bs ? (
+            <p style={{ color: '#64748b' }}>The balance sheet isn't available yet.</p>
+          ) : (
+            <>
+              <div className="cf-grid">
+                <div>
+                  <h4 className="cf-title">What the business owns</h4>
+                  {bsOwns.map(r => (
+                    <div key={r.label} className={`cf-row${r.indent ? ' bs-indent' : ''}${r.sub ? ' bs-sub' : ''}`}>
+                      <span>{r.label}{r.note && <small className="bs-note">{r.note}</small>}</span>
+                      <span className={r.value < 0 ? 'bs-neg' : undefined}>{naira(r.value)}</span>
+                    </div>
+                  ))}
+                  <div className="cf-row cf-total"><span>Total owned</span><span>{naira(bsOwnsTotal)}</span></div>
+                </div>
+                <div>
+                  <h4 className="cf-title">What the business owes</h4>
+                  {bsOwes.map(r => (
+                    <div key={r.label} className="cf-row"><span>{r.label}</span><span>{naira(r.value)}</span></div>
+                  ))}
+                  <div className="cf-row cf-total"><span>Total owed</span><span>{naira(bsOwesTotal)}</span></div>
+                </div>
+              </div>
+              <div className={`bs-equity${bsEquity < 0 ? ' is-neg' : ''}`}>
+                <div className="bs-equity-main">
+                  <span>{bsEquity >= 0 ? 'Owner\'s share: owned less owed' : 'The business owes more than it owns'}</span>
+                  <strong>{naira(bsEquity)}</strong>
+                </div>
+                <div className="cf-row"><span>Money the owner put in, less what they took out</span><span>{naira(bsOwnerNet)}</span></div>
+                <div className="cf-row"><span>Profit kept in the business, and starting balances</span><span>{naira(bsEquity - bsOwnerNet)}</span></div>
+              </div>
+              <p className="bs-foot">
+                Stock is counted at what it cost you, not what it sells for. Starting balances are what your accounts held, and what
+                customers and suppliers owed, when you started using ProfixBook.
+                {Number(bs.vat_paid) > 0 && <> VAT owed is after {naira(Number(bs.vat_paid))} you recorded as paid to the tax office.</>}
+              </p>
             </>
           )}
         </div>

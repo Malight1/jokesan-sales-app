@@ -44,7 +44,7 @@ Part 2.1 to 2.3 built 24 Nov (migration `0061_money_accounts.sql`, Bank & Cash p
 | 2.2 Transfers and owner money | "Record money": move money between accounts, owner put money in, owner took money out, loan received, loan repayment, other money in. Void instead of delete, activity log, closed-books date applies. |
 | 2.3 Cash flow report | Reports, Cash flow tab: money in and out by kind for the dates chosen, the net change, and each account's start, in, out and end. Money moved between your own accounts is shown but left out of the totals. Dashboard shows "Cash and bank" now. |
 
-Part 2.5 to 2.9 built 24 Nov (migration `0062_debts_statements_repeats.sql`), not yet deployed. Run 0062, then push.
+Part 2.5 to 2.9 built and live 24 Nov (migration `0062_debts_statements_repeats.sql`, commit a614777).
 
 | Item | What was done |
 |---|---|
@@ -53,6 +53,14 @@ Part 2.5 to 2.9 built 24 Nov (migration `0062_debts_statements_repeats.sql`), no
 | 2.7 Opening debts | "Owed before ProfixBook" on a customer or supplier (owner only): an OB-numbered document that owes money but adds nothing to sales, profit or purchases. It can be collected or paid like any invoice and shows on statements and aging. Starting cash and bank balances were done in 2.1. |
 | 2.8 Bad debts | Owner can write off all or part of an unpaid invoice. No money moves; the amount shows as "Bad debts written off" on the P&L; undo from the sale. |
 | 2.9 Repeat expenses | "Repeat every month / week" when logging an expense. Each date is logged automatically when the owner or accounts opens the dashboard or Expenses (no scheduler needed); month ends handled; closed-books dates skipped; pause and resume. |
+
+Part 2.4 and 2.10 built 24 Nov (migration `0063_reconcile_balance_sheet.sql`), not yet deployed. Run 0063, then push.
+
+| Item | What was done |
+|---|---|
+| 2.4 Bank reconciliation | Bank & Cash, "Check statement": upload a bank or Moniepoint statement (CSV or Excel). ProfixBook finds the table, guesses the date, description, money in/out (or amount) and balance columns, and shows a preview before uploading. Each line is matched automatically to a movement in that account with the same amount within 3 days. What's left: Match by hand, Add it to ProfixBook (bank charge as an expense, owner money, loan, other income, VAT paid), or Skip. A second list shows what ProfixBook recorded that the bank doesn't show. The statement's closing balance sits beside ProfixBook's, with the difference. Finish when every line is done; only the owner can reopen. Re-uploading overlapping files skips lines already uploaded. |
+| 2.10 Balance sheet | Reports, Balance sheet tab (and Excel/PDF): owns (each account, stock at cost, customers owe, VAT to claim back), owes (suppliers, VAT owed, store credit, loans), and the owner's share split into owner money in less taken out, and profit kept plus starting balances. A snapshot of right now. Accounts checked against a statement show the date they were checked to. |
+| VAT paid | New "VAT paid to the tax office" money entry. It lowers VAT owed on the balance sheet and is not an expense. |
 
 ---
 

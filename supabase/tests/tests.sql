@@ -4334,4 +4334,144 @@ begin
   perform t_su();
 end $$;
 
+-- ---------- 29. bank reconciliation and balance sheet (0063) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_bank uuid; v_owner uuid; v_exp uuid; v_vat uuid;
+  v_r jsonb; v_st uuid; v_view jsonb; v_charge uuid; v_odd uuid; v_in uuid; v_bs jsonb; v_n int; v_cash numeric;
+begin
+  perform t_su();
+  select id into v_bank from money_accounts where tenant_id = v_t and is_default;
+  update money_accounts set opening_date = current_date - 30 where id = v_bank;
+  insert into money_entries (tenant_id, kind, to_account, amount, entry_date, note)
+  values (v_t, 'owner_in', v_bank, 50000, current_date - 2, 'Recon test top-up') returning id into v_owner;
+  insert into expenses (tenant_id, expense_date, description, amount, money_account_id)
+  values (v_t, current_date - 1, 'Recon test diesel', 3000, v_bank) returning id into v_exp;
+
+  -- VAT paid is money out, not an expense.
+  insert into money_entries (tenant_id, kind, from_account, amount, entry_date)
+  values (v_t, 'vat_paid', v_bank, 1000, current_date) returning id into v_vat;
+  perform t_rec('VAT paid leaves the bank with its own label',
+    (select amount = -1000 and category = 'vat_paid' and description = 'VAT paid to the tax office'
+       from money_ledger where source_table = 'money_entries' and source_id = v_vat));
+  perform t_err('VAT paid needs the account it came out of',
+    format('insert into money_entries (tenant_id, kind, to_account, amount) values (%L, ''vat_paid'', %L, 10)', v_t, v_bank),
+    'came out of');
+
+  -- Upload: two lines match what is recorded, two don't.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_r := public.bank_import_statement(v_bank, 'gtb-nov.csv', jsonb_build_array(
+    jsonb_build_object('date', current_date,     'description', 'TRF FROM OWNER',  'amount', 50000),
+    jsonb_build_object('date', current_date - 1, 'description', 'POS DIESEL',      'amount', -3000),
+    jsonb_build_object('date', current_date - 1, 'description', 'SMS ALERT CHARGE', 'amount', -163.25),
+    jsonb_build_object('date', current_date,     'description', 'UNKNOWN CREDIT',  'amount', 7777),
+    jsonb_build_object('date', current_date,     'description', 'blank row',       'amount', 0)), 120000);
+  v_st := (v_r->>'id')::uuid;
+  perform t_rec('an upload keeps lines with an amount and matches what it can',
+    (v_r->>'lines')::int = 4 and (v_r->>'matched')::int = 2, v_r::text);
+  perform t_rec('a match is the same amount within 3 days, in that account',
+    (select match_table = 'money_entries' and match_id = v_owner and matched_how = 'auto'
+       from bank_statement_lines where statement_id = v_st and amount = 50000)
+    and (select match_table = 'expenses' and match_id = v_exp from bank_statement_lines where statement_id = v_st and amount = -3000));
+  perform t_err('uploading the same file again adds nothing',
+    format('select public.bank_import_statement(%L::uuid, ''again.csv'', %L::jsonb)', v_bank,
+      jsonb_build_array(jsonb_build_object('date', current_date - 1, 'description', 'POS DIESEL', 'amount', -3000))),
+    'uploaded before');
+  perform t_err('lines dated in the future are refused',
+    format('select public.bank_import_statement(%L::uuid, ''x.csv'', %L::jsonb)', v_bank,
+      jsonb_build_array(jsonb_build_object('date', current_date + 30, 'amount', 10))),
+    'future');
+
+  v_view := public.bank_statement_view(v_st);
+  perform t_rec('the view shows the statement closing next to the ProfixBook balance',
+    (v_view->>'statement_closing')::numeric = 120000 and (v_view->>'book_closing') is not null);
+  perform t_rec('matched movements are not listed as missing from the statement', not exists (
+    select 1 from jsonb_array_elements(v_view->'missing') m where (m->>'id')::uuid in (v_owner, v_exp)));
+  perform t_rec('a recorded movement the statement doesn''t show is listed as missing', exists (
+    select 1 from jsonb_array_elements(v_view->'missing') m where (m->>'id')::uuid = v_vat));
+
+  select id into v_charge from bank_statement_lines where statement_id = v_st and amount = -163.25;
+  select id into v_odd    from bank_statement_lines where statement_id = v_st and amount = 7777;
+  perform t_rec('the hand-match list offers the right direction only', not exists (
+    select 1 from jsonb_array_elements(public.bank_candidates(v_charge)) c where (c->>'amount')::numeric > 0));
+  perform t_err('one movement can''t match two statement lines',
+    format('select public.bank_match_line(%L::uuid, ''money_entries'', %L::uuid)', v_odd, v_owner), 'already matched');
+
+  -- A bank charge nobody recorded becomes an expense on that account.
+  perform public.bank_add_from_line(v_charge, 'expense', null, null);
+  perform t_rec('adding a bank charge makes an expense from that account and matches it', exists (
+    select 1 from bank_statement_lines l join expenses e on e.id = l.match_id
+     where l.id = v_charge and l.matched_how = 'added' and e.amount = 163.25 and e.money_account_id = v_bank
+       and e.source = 'bank_statement' and e.description = 'SMS ALERT CHARGE'));
+  perform t_err('money in can''t be added as an expense',
+    format('select public.bank_add_from_line(%L::uuid, ''expense'')', v_odd), 'can''t be an expense');
+
+  -- Finishing.
+  perform t_err('a statement can''t be finished with lines left',
+    format('select public.bank_finish_statement(%L::uuid)', v_st), '1 still to do');
+  perform public.bank_add_from_line(v_odd, 'other_in', null, 'Interest');
+  select id into v_in from money_entries where tenant_id = v_t and kind = 'other_in' and note = 'Interest';
+  perform t_rec('money in can be added as other income', v_in is not null and
+    (select status = 'matched' and match_id = v_in from bank_statement_lines where id = v_odd));
+  perform public.bank_unmatch_line(v_odd);
+  perform public.bank_ignore_line(v_odd, true);
+  perform t_su();
+
+  -- A matched movement that gets voided is open again.
+  update money_entries set voided = true where id = v_owner;
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_view := public.bank_statement_view(v_st);
+  perform t_rec('voiding a matched movement reopens its line', exists (
+    select 1 from jsonb_array_elements(v_view->'lines') l where (l->>'amount')::numeric = 50000 and l->>'status' = 'open'));
+  perform t_err('and finishing notices it', format('select public.bank_finish_statement(%L::uuid)', v_st), '1 still to do');
+  perform public.bank_ignore_line((select id from bank_statement_lines where statement_id = v_st and amount = 50000), true);
+  perform public.bank_finish_statement(v_st);
+  perform t_rec('a statement with every line done can be finished',
+    (select status = 'done' and finished_at is not null from bank_statements where id = v_st));
+  perform t_err('a finished statement can''t be changed',
+    format('select public.bank_unmatch_line(%L::uuid)', v_charge), 'finished');
+  perform t_err('a finished statement can''t be removed', format('select public.bank_delete_statement(%L::uuid)', v_st), 'can''t be removed');
+  perform t_err('only the owner can reopen it', format('select public.bank_reopen_statement(%L::uuid)', v_st), 'Only the owner');
+  perform t_rec('the list shows it as done with nothing open', exists (
+    select 1 from jsonb_array_elements(public.bank_statements_list()) s
+     where (s->>'id')::uuid = v_st and s->>'status' = 'done' and (s->>'open')::int = 0 and (s->>'lines')::int = 4));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.bank_reopen_statement(v_st);
+  perform t_su();
+  perform t_rec('the owner can reopen it', (select status = 'open' from bank_statements where id = v_st));
+
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a cashier can''t upload statements',
+    format('select public.bank_import_statement(%L::uuid, ''x.csv'', %L::jsonb)', v_bank,
+      jsonb_build_array(jsonb_build_object('date', current_date, 'amount', 10))), 'owner or accounts');
+  perform t_rec('a cashier can''t read statement lines', not exists (select 1 from bank_statement_lines));
+  perform t_su();
+
+  -- Balance sheet.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_bs := public.report_balance_sheet();
+  select coalesce(sum((x->>'balance')::numeric), 0) into v_cash from jsonb_array_elements(v_bs->'accounts') x;
+  perform t_rec('balance sheet cash equals the sum of its accounts', abs(v_cash - (v_bs->>'cash_total')::numeric) < 0.01);
+  perform t_rec('balance sheet stock equals the stock value report',
+    abs((v_bs->>'stock')::numeric - (select coalesce(sum(value_at_cost), 0) from public.report_stock_value())) < 0.05,
+    (v_bs->>'stock') || ' vs ' || (select coalesce(sum(value_at_cost), 0) from public.report_stock_value())::text);
+  perform t_su();
+  perform t_rec('balance sheet cash is every account''s balance', abs((v_bs->>'cash_total')::numeric - (
+    select coalesce(sum(g.amount), 0) from money_ledger g join money_accounts a on a.id = g.account_id
+     where g.tenant_id = v_t and g.entry_date <= current_date and (a.opening_date is null or g.entry_date >= a.opening_date))) < 0.01);
+  perform t_rec('customers owe = unpaid invoice balances', (v_bs->>'debtors')::numeric =
+    (select coalesce(sum(balance), 0) from sales_orders where tenant_id = v_t and not voided and balance > 0.005));
+  perform t_rec('suppliers owed = unpaid bill balances', (v_bs->>'creditors')::numeric =
+    (select coalesce(sum(balance), 0) from purchase_orders where tenant_id = v_t and not voided and balance > 0.005));
+  perform t_rec('VAT owed is charged less claimable less paid',
+    (v_bs->>'vat_net')::numeric = (v_bs->>'vat_charged')::numeric - (v_bs->>'vat_claimable')::numeric - (v_bs->>'vat_paid')::numeric
+    and (v_bs->>'vat_paid')::numeric >= 1000);
+  perform t_rec('a voided owner top-up isn''t counted as owner money', (v_bs->>'owner_in')::numeric =
+    (select coalesce(sum(amount), 0) from money_entries where tenant_id = v_t and kind = 'owner_in' and not voided));
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('the storekeeper can''t see the balance sheet', 'select public.report_balance_sheet()', 'Only the owner or accounts');
+  perform t_su();
+end $$;
+
 select name, pass, detail from t_results order by n;

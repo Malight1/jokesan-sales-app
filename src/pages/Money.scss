@@ -129,4 +129,24 @@ $ok-text: #15803d;
     .money-total-value { font-size: $font-size-2xl; }
     .money-routing-row { grid-template-columns: 1fr; gap: 0.25rem; }
   }
+
+}
+
+.money {
+  .money-lines-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .money-statements { margin-top: 1rem; }
+  .money-st-list { list-style: none; margin: 0; padding: 0; }
+  .money-st-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 0.7rem 0.5rem; border-top: 1px solid $gray-100;
+    color: inherit; text-decoration: none; border-radius: $radius-sm;
+    &:hover { background: $gray-50; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+  }
+  .money-st-list li:first-child .money-st-row { border-top: 0; }
+  .money-st-name {
+    display: flex; flex-direction: column; gap: 0.1rem; min-width: 0;
+    strong { font-size: $font-size-sm; color: $gray-800; }
+    small { font-size: $font-size-xs; color: $gray-500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  }
 }

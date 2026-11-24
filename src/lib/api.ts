@@ -899,7 +899,7 @@ export interface MoneyLine {
   id: number; account_id: string; entry_date: string; amount: number; category: string;
   source_table: string; source_id: string; description: string | null; created_at: string;
 }
-export type MoneyEntryKind = 'transfer' | 'owner_in' | 'owner_out' | 'loan_in' | 'loan_repay' | 'other_in';
+export type MoneyEntryKind = 'transfer' | 'owner_in' | 'owner_out' | 'loan_in' | 'loan_repay' | 'other_in' | 'vat_paid';
 export interface PaymentTypeAccount { id: string; name: string; method_group: string; money_account_id: string | null; }
 
 export const money = {
@@ -918,6 +918,53 @@ export const money = {
   setPaymentTypeAccount: (id: string, accountId: string | null) =>
     run<PaymentTypeAccount>(supabase.from('payment_types').update({ money_account_id: accountId }).eq('id', id).select('id, name, method_group, money_account_id').single()),
 };
+
+// ============================================================
+// BANK RECONCILIATION (migration 0063): upload a statement, match each
+// line to what ProfixBook recorded, deal with what is left over.
+// ============================================================
+export interface BankMatch { table: string; id: string; date: string; amount: number; category: string; description: string | null; }
+export interface BankLine {
+  id: string; date: string; description: string | null; reference: string | null; amount: number; balance: number | null;
+  status: 'open' | 'matched' | 'ignored'; matched_how: 'auto' | 'manual' | 'added' | null; match: BankMatch | null;
+}
+export interface BankStatementView {
+  id: string; status: 'open' | 'done'; file_name: string | null; period_from: string; period_to: string;
+  account: { id: string; name: string; kind: MoneyKind; bank_name: string | null; account_number: string | null };
+  statement_closing: number | null; book_closing: number;
+  lines: BankLine[]; missing: BankMatch[];
+}
+export interface BankStatementSummary {
+  id: string; account_id: string; account_name: string; file_name: string | null; period_from: string; period_to: string;
+  status: 'open' | 'done'; created_at: string; finished_at: string | null; lines: number; open: number;
+}
+export type BankAddKind = 'expense' | 'owner_in' | 'loan_in' | 'other_in' | 'owner_out' | 'loan_repay' | 'vat_paid';
+export const bank = {
+  list: () => rpc<BankStatementSummary[]>('bank_statements_list'),
+  view: (id: string) => rpc<BankStatementView>('bank_statement_view', { p_statement: id }),
+  upload: (accountId: string, fileName: string, lines: { date: string; description: string; reference: string; amount: number; balance: number | null }[], closing: number | null) =>
+    rpc<{ id: string; lines: number; skipped: number; matched: number }>('bank_import_statement',
+      { p_account: accountId, p_file: fileName, p_lines: lines, p_closing: closing }),
+  candidates: (lineId: string) => rpc<BankMatch[]>('bank_candidates', { p_line: lineId }),
+  match: (lineId: string, m: { table: string; id: string }) => rpcVoid('bank_match_line', { p_line: lineId, p_table: m.table, p_id: m.id }),
+  unmatch: (lineId: string) => rpcVoid('bank_unmatch_line', { p_line: lineId }),
+  ignore: (lineId: string, ignore: boolean) => rpcVoid('bank_ignore_line', { p_line: lineId, p_ignore: ignore }),
+  add: (lineId: string, kind: BankAddKind, expenseType?: string | null, note?: string | null) =>
+    rpcVoid('bank_add_from_line', { p_line: lineId, p_kind: kind, p_expense_type: expenseType || null, p_note: note || null }),
+  finish: (id: string) => rpcVoid('bank_finish_statement', { p_statement: id }),
+  reopen: (id: string) => rpcVoid('bank_reopen_statement', { p_statement: id }),
+  remove: (id: string) => rpcVoid('bank_delete_statement', { p_statement: id }),
+};
+
+// Balance sheet (migration 0063): right now, the whole business.
+export interface BalanceSheet {
+  as_of: string;
+  accounts: { id: string; name: string; kind: MoneyKind; balance: number; checked_to: string | null }[];
+  cash_total: number; stock: number;
+  debtors: number; debtor_count: number; creditors: number; creditor_count: number;
+  vat_charged: number; vat_claimable: number; vat_paid: number; vat_net: number;
+  store_credit: number; loans: number; owner_in: number; owner_out: number;
+}
 
 // ============================================================
 // DEBTS (migration 0062): due dates, what was owed before ProfixBook,
@@ -972,6 +1019,7 @@ export const reports = {
   extras: (from?: string, to?: string, branchId?: string | null) =>
     rpc<ReportExtras>('report_extras', { p_from: from || null, p_to: to || null, p_branch: branchId || null }),
   // What stock on hand cost, per item, from the FIFO layers (0060).
+  balanceSheet: () => rpc<BalanceSheet>('report_balance_sheet'),
   stockValue: (branchId?: string | null) =>
     rpc<StockCostRow[]>('report_stock_value', { p_branch: branchId || null }),
   purchaseSummary: () => runAll<any>((f, t) => supabase.from('purchase_orders').select('purchase_date,total_amount,balance').order('purchase_date').range(f, t)),

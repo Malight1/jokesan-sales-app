@@ -59,6 +59,7 @@ const SupportThread = lazy(() => import('./pages/SupportThread'));
 const MatchPayment = lazy(() => import('./pages/MatchPayment'));
 const MoneyReceived = lazy(() => import('./pages/MoneyReceived'));
 const Money = lazy(() => import('./pages/Money'));
+const Reconcile = lazy(() => import('./pages/Reconcile'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Transfers = lazy(() => import('./pages/Transfers'));
 const Batches = lazy(() => import('./pages/Batches'));
@@ -136,6 +137,7 @@ export default function App() {
                         <Route path="/match-payment" element={<MatchPayment />} />
                         <Route path="/money-received" element={<MoneyReceived />} />
                         <Route path="/money" element={<Money />} />
+                        <Route path="/money/statements/:id" element={<Reconcile />} />
                         <Route path="/transfers" element={<Transfers />} />
                         <Route path="/batches" element={<Batches />} />
                         <Route path="/profile" element={<Profile />} />
