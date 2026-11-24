@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, X, Pencil, Ban } from 'lucide-react';
-import { expenses as expensesApi, lookups, Expense, Lookup } from '../lib/api';
+import { expenses as expensesApi, lookups, money as moneyApi, Expense, Lookup, MoneyAccount } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -14,7 +14,7 @@ const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumF
 
 const blankForm = () => ({
   expense_date: new Date().toISOString().split('T')[0],
-  expense_type_id: '', description: '', amount: 0, payment_type_id: '', vat_amount: 0,
+  expense_type_id: '', description: '', amount: 0, payment_type_id: '', vat_amount: 0, money_account_id: '',
 });
 
 const SOURCE_LABEL: Record<string, string> = { till_pay_out: 'From the till', payment_fee: 'Automatic' };
@@ -25,6 +25,8 @@ export default function Expenses() {
   const { data: rows, loading, error, refetch } = useQuery<Expense[]>(() => expensesApi.list(), []);
   const { data: expTypes } = useQuery<Lookup[]>(() => lookups.expenseTypes(), []);
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
+  // Which account paid (0061). Optional: the payment method decides otherwise.
+  const { data: moneyAccounts } = useQuery<MoneyAccount[]>(() => moneyApi.accounts().catch(() => []), []);
   const createMut = useMutation(expensesApi.create);
   const updateMut = useMutation((id: string, e: Partial<Expense>) => expensesApi.update(id, e));
   const voidMut = useMutation(expensesApi.void);
@@ -55,7 +57,7 @@ export default function Expenses() {
     setForm({
       expense_date: x.expense_date, expense_type_id: x.expense_type_id ?? '',
       description: x.description ?? '', amount: x.amount, payment_type_id: x.payment_type_id ?? '',
-      vat_amount: Number(x.vat_amount ?? 0),
+      vat_amount: Number(x.vat_amount ?? 0), money_account_id: x.money_account_id ?? '',
     });
     setShowModal(true);
   };
@@ -64,7 +66,8 @@ export default function Expenses() {
     e.preventDefault();
     if (form.amount <= 0) { toast.error('Enter an amount greater than zero.'); return; }
     if (form.vat_amount < 0 || form.vat_amount > form.amount) { toast.error('The VAT has to be part of the amount, so it can\u2019t be more than it.'); return; }
-    const payload = { ...form, vat_amount: Number(form.vat_amount) || 0, expense_type_id: form.expense_type_id || null, payment_type_id: form.payment_type_id || null };
+    const payload = { ...form, vat_amount: Number(form.vat_amount) || 0, expense_type_id: form.expense_type_id || null, payment_type_id: form.payment_type_id || null,
+      money_account_id: form.money_account_id || null };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     if (res) {
       toast.success(editRow ? 'Expense updated.' : 'Expense logged.');
@@ -184,6 +187,15 @@ export default function Expenses() {
                     </select>
                   </div>
                 </div>
+                {(moneyAccounts ?? []).length > 0 && (
+                  <div className="form-group">
+                    <label htmlFor="exp-from">Paid from</label>
+                    <select id="exp-from" value={form.money_account_id} onChange={e => setForm(f => ({ ...f, money_account_id: e.target.value }))}>
+                      <option value="">Based on the payment method</option>
+                      {(moneyAccounts ?? []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 {showVat && (
                   <div className="form-group">
                     <label htmlFor="exp-vat">VAT included in that amount (₦)</label>

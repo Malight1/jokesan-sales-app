@@ -3,7 +3,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
          purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock,
-         StockCostRow } from '../lib/api';
+         StockCostRow, money as moneyApi, CashFlow } from '../lib/api';
+import { CATEGORY_LABEL, naira } from '../lib/money';
 import { hasFeature } from '../lib/features';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
@@ -13,15 +14,17 @@ import { useToast } from '../lib/ToastContext';
 import { whatsappLink, paymentRequestMessage } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column } from '../components/DataTable';
-import { exportExcel, exportPDF, ExportColumn } from '../lib/exporters';
+import { exportReport, ExportColumn, ExportDoc } from '../lib/exporters';
 import { isRetail, label } from '../retail';
+import './Reports.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
+type Tab = 'pnl' | 'cashflow' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
 const ALL_TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
+  { id: 'cashflow', label: 'Cash flow' },
   { id: 'sales', label: 'Sales' },
   { id: 'expenses', label: 'Expenses' },
   { id: 'stock', label: 'Stock' },
@@ -55,6 +58,7 @@ export default function Reports() {
   const goodsQ = useQuery(() => goodsApi.list(), []);
   const custQ = useQuery(() => customersApi.list(), []);
   const expTypesQ = useQuery(() => lookups.expenseTypes(), []);
+  const payTypesQ = useQuery(() => lookups.paymentTypes(), []);
   const purchQ = useQuery(() => purchasesApi.list(), []);
   const suppQ = useQuery(() => suppliersApi.list(), []);
   // Aggregated server-side, so it re-runs when the date range changes.
@@ -70,6 +74,8 @@ export default function Reports() {
   const levelsQ = useQuery(() => stock.levels(null), []);
   // Stock losses, till short/over and store credit owed (0060).
   const extrasQ = useQuery(() => reportsApi.extras(from, to, branch || null).catch(() => null), [from, to, branch]);
+  // Money that actually moved, by account and by kind (0061).
+  const cashQ = useQuery<CashFlow | null>(() => moneyApi.cashFlow(from || null, to || null).catch(() => null), [from, to]);
   // What stock on hand cost, per item (0060).
   const stockCostQ = useQuery(() => reportsApi.stockValue(branch || null).catch(() => [] as StockCostRow[]), [branch]);
 
@@ -223,6 +229,24 @@ export default function Reports() {
   const vatDueTotal = vatRows.reduce((s, r) => s + r.due, 0);
   const monthName = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
+  const cash = cashQ.data;
+  const cashCats = (cash?.categories ?? []).filter(c => c.category !== 'transfer');
+  const cashIn = cashCats.filter(c => Number(c.money_in) > 0).map(c => ({ label: CATEGORY_LABEL[c.category] ?? c.category, value: Number(c.money_in) }))
+    .sort((a, b) => b.value - a.value);
+  const cashOut = cashCats.filter(c => Number(c.money_out) > 0).map(c => ({ label: CATEGORY_LABEL[c.category] ?? c.category, value: Number(c.money_out) }))
+    .sort((a, b) => b.value - a.value);
+  const cashInTotal = cashIn.reduce((s, r) => s + r.value, 0);
+  const cashOutTotal = cashOut.reduce((s, r) => s + r.value, 0);
+  const movedBetween = Number((cash?.categories ?? []).find(c => c.category === 'transfer')?.money_in || 0);
+  const cashAccounts = (cash?.accounts ?? []).filter(a => a.is_active || Number(a.movements) > 0);
+  const cashAccountCols: Column<any>[] = [
+    { key: 'name', header: 'Account', value: r => r.name, render: r => <strong>{r.name}</strong> },
+    { key: 'start', header: 'At the start', align: 'right', value: r => Number(r.start), render: r => naira(r.start) },
+    { key: 'money_in', header: 'In', align: 'right', value: r => Number(r.money_in), render: r => naira(r.money_in) },
+    { key: 'money_out', header: 'Out', align: 'right', value: r => Number(r.money_out), render: r => naira(r.money_out) },
+    { key: 'closing', header: 'At the end', align: 'right', value: r => Number(r.closing), render: r => <strong>{naira(r.closing)}</strong> },
+  ];
+
   const productProfit = prodProfitQ.data ?? [];
   const productRevenue = productProfit.reduce((sum, r) => sum + Number(r.total_revenue || 0), 0);
   const productProfitTotal = productProfit.reduce((sum, r) => sum + Number(r.profit || 0), 0);
@@ -341,115 +365,149 @@ export default function Reports() {
   ];
 
   // ---- Exports per tab ----
+  // Each export carries the business name, the dates and branch it covers,
+  // the same breakdown as the screen, and a Total row (lib/exporters).
+  const prettyDay = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const periodText = from || to
+    ? `${from ? prettyDay(from) : 'The start'} to ${to ? prettyDay(to) : 'today'}`
+    : 'All dates';
+  const branchText = branch ? nameOf(branch) : (multi ? 'All branches' : '');
+  const subtitle = [periodText, branchText].filter(Boolean).join(' · ');
+  const asOfText = [`Unpaid ${to ? `as of ${prettyDay(to)}` : 'today'}, however old`, branchText].filter(Boolean).join(' · ');
+  const STATUS: Record<string, string> = { full: 'Paid', part: 'Part paid', unpaid: 'Unpaid' };
+  const payTypeName = (id: string | null) => payTypesQ.data?.find(t => t.id === id)?.name ?? '';
+  const M = (header: string, value: (r: any) => any, total = true): ExportColumn<any> => ({ header, value, money: true, total });
+
   const doExport = async (kind: 'xlsx' | 'pdf') => {
-    let cols: ExportColumn<any>[] = [];
-    let rows: any[] = [];
-    let name: string = tab;
-    let title = '';
+    const base = { business: tenant?.name ?? undefined, subtitle };
+    let docSpec: ExportDoc;
 
     if (tab === 'pnl') {
-      cols = [{ header: 'Item', value: r => r.item }, { header: 'Amount (₦)', value: r => r.amount }];
-      rows = [
-        { item: 'Sales (before VAT)', amount: grossSales },
-        { item: 'Less returns', amount: -returnsExVat },
-        { item: 'Revenue', amount: totalSales },
-        { item: 'Cost of Goods Sold (COGS)', amount: -totalCogs },
-        { item: 'Gross Profit', amount: grossProfit },
-        { item: 'Operating Expenses', amount: -totalExpenses },
+      const lines = [
+        ...(returnsExVat !== 0 ? [
+          { item: 'Sales (before VAT)', amount: grossSales },
+          { item: 'Less returns', amount: -returnsExVat },
+        ] : []),
+        { item: 'Revenue', amount: totalSales, strong: true },
+        { item: 'Cost of goods sold', amount: -totalCogs },
+        { item: 'Gross profit', amount: grossProfit, strong: true },
+        ...[...expenseByType].sort((a, b) => b.value - a.value).map(e => ({ item: `Expenses: ${e.name}`, amount: -e.value })),
+        { item: 'Total expenses', amount: -totalExpenses, strong: true },
         ...(stockLoss !== 0 ? [{ item: 'Stock written off or lost (at cost)', amount: -stockLoss }] : []),
         ...(tillShort !== 0 ? [{ item: tillShort > 0 ? 'Till cash short' : 'Till cash over', amount: -tillShort }] : []),
-        { item: 'Net Profit', amount: netProfit },
-        ...(vatCollected !== 0 ? [{ item: 'VAT collected (owed to the tax office, not income)', amount: vatCollected }] : []),
+        { item: 'Net profit', amount: netProfit, strong: true },
       ];
-      name = 'profit-and-loss'; title = 'Profit & Loss' + rangeLabel;
+      docSpec = { ...base, name: 'profit-and-loss', title: 'Profit & Loss',
+        // A statement, not a list: subtotals are lines of their own, so no Total row.
+        tables: [{ columns: [{ header: '', value: r => r.item }, M('Amount', r => r.amount, false)], rows: lines, strong: (r: any) => !!r.strong }],
+        notes: [
+          'Amounts in brackets reduce profit.',
+          ...(vatCollected !== 0 ? [`VAT collected in this period: ₦${vatCollected.toLocaleString('en-NG', { maximumFractionDigits: 2 })}. It is owed to the tax office, so it is not counted as revenue.`] : []),
+        ] };
+    } else if (tab === 'cashflow') {
+      docSpec = { ...base, name: 'cash-flow', title: 'Cash flow', tables: [
+        { heading: 'Money in', columns: [{ header: 'Kind', value: r => r.label }, M('Amount', r => r.value)], rows: cashIn, totalLabel: 'Total money in' },
+        { heading: 'Money out', columns: [{ header: 'Kind', value: r => r.label }, M('Amount', r => r.value)], rows: cashOut, totalLabel: 'Total money out' },
+        { heading: 'By account', columns: [
+            { header: 'Account', value: r => r.name },
+            M('At the start', r => Number(r.start)), M('In', r => Number(r.money_in)), M('Out', r => Number(r.money_out)), M('At the end', r => Number(r.closing)),
+          ], rows: cashAccounts },
+      ], notes: [
+        `Net change: ₦${(cashInTotal - cashOutTotal).toLocaleString('en-NG', { maximumFractionDigits: 2 })} (money in less money out).`,
+        ...(movedBetween > 0 ? [`₦${movedBetween.toLocaleString('en-NG', { maximumFractionDigits: 2 })} was moved between your own accounts. It is shown in each account but left out of money in and money out.`] : []),
+      ] };
     } else if (tab === 'sales') {
-      cols = [
+      docSpec = { ...base, name: 'sales-report', title: 'Sales', tables: [{ columns: [
+        { header: 'Invoice', value: r => r.doc_no ?? '' },
         { header: 'Date', value: r => r.transaction_date },
         { header: 'Customer', value: r => custName(r.customer_id) },
-        { header: 'Total', value: r => r.total_amount },
-        { header: 'Paid', value: r => r.amount_paid },
-        { header: 'Balance', value: r => r.balance },
-        { header: 'COGS', value: r => r.cogs },
-        { header: 'Profit', value: r => r.gross_profit },
-        { header: 'Status', value: r => r.payment_status },
-      ];
-      rows = sales; name = 'sales-report'; title = 'Sales Report' + rangeLabel;
+        ...(multi && !branch ? [{ header: 'Branch', value: (r: any) => nameOf(r.branch_id) } as ExportColumn<any>] : []),
+        M('Before VAT', r => exVat(r)), M('VAT', r => Number(r.vat_amount || 0)), M('Total', r => r.total_amount),
+        M('Paid', r => r.amount_paid), M('Balance', r => r.balance), M('Cost of goods', r => r.cogs), M('Profit', r => r.gross_profit),
+        { header: 'Status', value: r => STATUS[r.payment_status] ?? r.payment_status },
+      ], rows: sales }],
+      notes: returnsExVat !== 0 ? [`Returns in this period took ₦${returnsExVat.toLocaleString('en-NG', { maximumFractionDigits: 2 })} (before VAT) off sales. See the Returns report.`] : undefined };
     } else if (tab === 'expenses') {
-      cols = [
-        { header: 'Date', value: r => r.expense_date },
-        { header: 'Type', value: r => typeName(r.expense_type_id) },
-        { header: 'Description', value: r => r.description ?? '' },
-        { header: 'Amount', value: r => r.amount },
-        { header: 'VAT included', value: r => Number(r.vat_amount || 0) },
-      ];
-      rows = expenses; name = 'expenses-report'; title = 'Expenses Report' + rangeLabel;
+      const byType = Object.values(expenses.reduce<Record<string, { name: string; count: number; amount: number; vat: number }>>((m, e) => {
+        const n = typeName(e.expense_type_id);
+        m[n] = m[n] || { name: n, count: 0, amount: 0, vat: 0 };
+        m[n].count += 1; m[n].amount += Number(e.amount || 0); m[n].vat += Number(e.vat_amount || 0);
+        return m;
+      }, {})).sort((a, b) => b.amount - a.amount);
+      docSpec = { ...base, name: 'expenses-report', title: 'Expenses', tables: [
+        { heading: 'By type', columns: [
+            { header: 'Type', value: r => r.name }, { header: 'Count', value: r => r.count, total: true, align: 'right' },
+            M('Amount', r => r.amount), M('VAT included', r => r.vat), M('Cost (without VAT)', r => r.amount - r.vat),
+          ], rows: byType },
+        { heading: 'Every expense', columns: [
+            { header: 'Date', value: r => r.expense_date }, { header: 'Type', value: r => typeName(r.expense_type_id) },
+            { header: 'Description', value: r => r.description ?? '' },
+            ...(multi && !branch ? [{ header: 'Branch', value: (r: any) => nameOf(r.branch_id) } as ExportColumn<any>] : []),
+            { header: 'Paid by', value: r => payTypeName(r.payment_type_id) },
+            M('Amount', r => r.amount), M('VAT included', r => Number(r.vat_amount || 0)),
+          ], rows: expenses },
+      ], notes: ['Voided expenses are left out.'] };
     } else if (tab === 'stock') {
-      cols = [
-        { header: 'Product', value: r => r.name },
-        { header: 'Qty', value: r => r.qty_balance },
-        { header: 'Value at cost', value: r => costOf.get(r.id) ?? 0 },
-        { header: 'At selling price', value: r => r.selling_price * Math.max(0, r.qty_balance) },
-      ];
-      rows = goods; name = 'stock-report'; title = 'Stock Value Report' + (branch ? ` — ${nameOf(branch)}` : '');
+      const materials = (levelsQ.data ?? []).filter(l => l.product_kind === 'material' && (!branch || l.branch_id === branch));
+      const matRows = Object.values(materials.reduce<Record<string, { id: string; name: string; unit: string | null; qty: number }>>((m, l) => {
+        m[l.product_id] = m[l.product_id] || { id: l.product_id, name: l.name, unit: l.unit, qty: 0 };
+        m[l.product_id].qty += Number(l.qty || 0);
+        return m;
+      }, {})).filter(r => r.qty !== 0);
+      const matCost = new Map(costRows.filter(r => r.product_kind === 'material').map(r => [r.product_id, Number(r.value_at_cost || 0)]));
+      docSpec = { ...base, subtitle: [`On hand ${prettyDay(new Date().toISOString().slice(0, 10))}`, branchText].filter(Boolean).join(' · '),
+        name: 'stock-report', title: 'Stock value', tables: [
+        { heading: label(retail, 'Finished goods', 'Products'), columns: [
+            { header: 'Product', value: r => r.name }, { header: 'Qty', value: r => r.qty_balance, align: 'right' },
+            M('Value at cost', r => costOf.get(r.id) ?? 0), M('Selling price', r => r.selling_price, false),
+            M('At selling price', r => r.selling_price * Math.max(0, r.qty_balance)),
+          ], rows: goods },
+        ...(matRows.length ? [{ heading: 'Raw materials', columns: [
+            { header: 'Material', value: (r: any) => r.name }, { header: 'Qty', value: (r: any) => r.qty, align: 'right' as const },
+            { header: 'Unit', value: (r: any) => r.unit ?? '' }, M('Value at cost', (r: any) => matCost.get(r.id) ?? 0),
+          ], rows: matRows }] : []),
+      ], notes: ['Value at cost is what the stock on hand cost you (first in, first out). That is the figure an accountant uses.'] };
     } else if (tab === 'debtors') {
-      cols = [
-        { header: 'Customer', value: r => r.name },
-        { header: 'Invoices', value: r => r.count },
-        { header: 'Total', value: r => r.total },
-        { header: 'Paid', value: r => r.paid },
-        { header: 'Outstanding', value: r => r.balance },
-      ];
-      rows = debtors; name = 'debtors-report'; title = `Owed to you, invoices ${asOfLabel}` + (branch ? ` — ${nameOf(branch)}` : '');
+      docSpec = { ...base, subtitle: asOfText, name: 'debtors-report', title: 'Owed to you', tables: [{ columns: [
+        { header: 'Customer', value: r => r.name }, { header: 'Phone', value: r => r.phone ?? '' },
+        { header: 'Invoices', value: r => r.count, total: true, align: 'right' },
+        M('Invoiced', r => r.total), M('Paid', r => r.paid), M('Owed', r => r.balance),
+      ], rows: debtors }],
+      notes: Number(extras?.store_credit_owed || 0) > 0
+        ? [`You also owe ${extras?.store_credit_customers} customer(s) ₦${Number(extras?.store_credit_owed).toLocaleString('en-NG', { maximumFractionDigits: 2 })} in store credit.`] : undefined };
     } else if (tab === 'creditors') {
-      cols = [
-        { header: 'Supplier', value: r => r.name },
-        { header: 'Bills', value: r => r.count },
-        { header: 'Total', value: r => r.total },
-        { header: 'Paid', value: r => r.paid },
-        { header: 'Owed', value: r => r.balance },
-      ];
-      rows = creditors; name = 'creditors-report'; title = `You owe suppliers, bills ${asOfLabel}` + (branch ? ` — ${nameOf(branch)}` : '');
+      docSpec = { ...base, subtitle: asOfText, name: 'creditors-report', title: 'You owe suppliers', tables: [{ columns: [
+        { header: 'Supplier', value: r => r.name }, { header: 'Bills', value: r => r.count, total: true, align: 'right' },
+        M('Billed', r => r.total), M('Paid', r => r.paid), M('Owed', r => r.balance),
+      ], rows: creditors }] };
     } else if (tab === 'products') {
-      cols = [
-        { header: 'Product', value: r => r.product_name },
-        { header: 'Qty Sold', value: r => r.qty_sold },
-        { header: 'Revenue', value: r => r.total_revenue },
-        { header: 'COGS', value: r => r.total_cogs },
-        { header: 'Gross Profit', value: r => r.profit },
-        { header: 'Margin %', value: r => r.margin_pct },
-      ];
-      rows = productProfit; name = 'product-profitability'; title = 'Product Profitability' + rangeLabel;
+      docSpec = { ...base, name: 'product-profitability', title: 'Product profit', tables: [{ columns: [
+        { header: 'Product', value: r => r.product_name }, { header: 'Qty sold', value: r => Number(r.qty_sold), align: 'right' },
+        M('Revenue', r => Number(r.total_revenue)), M('Cost of goods', r => Number(r.total_cogs)), M('Gross profit', r => Number(r.profit)),
+        { header: 'Margin %', value: r => r.margin_pct === null || r.margin_pct === undefined ? '' : Number(r.margin_pct), align: 'right' },
+      ], rows: productProfit }],
+      notes: productRevenue > 0 ? [`Overall margin: ${((productProfitTotal / productRevenue) * 100).toFixed(1)}%.`] : undefined };
     } else if (tab === 'returns') {
-      cols = [
-        { header: 'Product', value: r => r.product_name },
-        { header: 'Qty Returned', value: r => r.qty_returned },
-        { header: 'Value', value: r => r.value_returned },
-        { header: 'Resellable Qty', value: r => r.resellable_qty },
-        { header: 'Written Off', value: r => r.loss_value },
-      ];
-      rows = returnsData; name = 'returns-report'; title = 'Returns' + rangeLabel;
+      docSpec = { ...base, name: 'returns-report', title: 'Returns', tables: [{ columns: [
+        { header: 'Product', value: r => r.product_name }, { header: 'Qty returned', value: r => Number(r.qty_returned), align: 'right' },
+        { header: 'Put back for sale', value: r => Number(r.resellable_qty), align: 'right' },
+        M('Value returned', r => Number(r.value_returned)), M('Written off', r => Number(r.loss_value)),
+      ], rows: returnsData }] };
     } else if (tab === 'vat') {
-      cols = [
+      docSpec = { ...base, name: 'vat-report', title: 'VAT', tables: [{ columns: [
         { header: 'Month', value: r => monthName(r.month) },
-        { header: 'VAT charged on sales', value: r => r.sales },
-        { header: 'VAT paid to suppliers', value: r => r.purchases },
-        { header: 'VAT on expenses', value: r => r.expenses },
-        { header: 'VAT to pay', value: r => r.due },
-      ];
-      rows = vatRows; name = 'vat-report'; title = 'VAT' + rangeLabel;
+        M('VAT charged on sales', r => r.sales), M('VAT paid to suppliers', r => r.purchases), M('VAT on expenses', r => r.expenses), M('VAT to pay', r => r.due),
+      ], rows: vatRows }],
+      notes: ['A negative "VAT to pay" is VAT you can claim back.', ...(tenant?.tin ? [`TIN: ${tenant.tin}`] : [])] };
     } else {
-      cols = [
-        { header: 'Reason', value: r => r.reason },
-        { header: 'Lines', value: r => r.line_count },
-        { header: 'Qty', value: r => r.qty },
-        { header: 'Discount Given', value: r => r.discount_value },
-      ];
-      rows = discountsData; name = 'discounts-report'; title = 'Discounts' + rangeLabel;
+      docSpec = { ...base, name: 'discounts-report', title: 'Discounts', tables: [{ columns: [
+        { header: 'Reason', value: r => r.reason }, { header: 'Lines', value: r => r.line_count, total: true, align: 'right' },
+        { header: 'Qty', value: r => r.qty, align: 'right' }, M('Discount given', r => r.discount_value),
+      ], rows: discountsData }] };
     }
 
     try {
-      if (kind === 'xlsx') await exportExcel(cols, rows, name);
-      else await exportPDF(cols, rows, name, title);
+      await exportReport(kind, docSpec);
     } catch {
       window.alert('Could not build the export file. Please try again.');
     }
@@ -548,6 +606,56 @@ export default function Reports() {
             <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.75rem' }}>
               VAT collected in this period: <strong>{fmt(vatCollected)}</strong>. It is owed to the tax office, so it isn't counted as revenue.
             </p>
+          )}
+        </div>
+      )}
+
+      {tab === 'cashflow' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>Cash flow{rangeLabel}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem', maxWidth: '72ch' }}>
+            Money that actually came in and went out, on the day it moved. Profit is different: a sale counts as profit when you make it,
+            even if the customer hasn't paid yet, and the stock you buy only counts when it sells.{multi && branch ? ' This report covers every branch.' : ''}
+          </p>
+          {cashQ.loading && !cash ? <Loading label="Adding up money in and out…" /> : !cash ? (
+            <p style={{ color: '#64748b' }}>The cash flow report isn't available yet.</p>
+          ) : (
+            <>
+              <div className="cf-grid">
+                <div>
+                  <h4 className="cf-title">Money in</h4>
+                  {cashIn.length === 0 ? <p className="cf-empty">Nothing came in.</p> : cashIn.map(r => (
+                    <div key={r.label} className="cf-row"><span>{r.label}</span><span>{naira(r.value)}</span></div>
+                  ))}
+                  <div className="cf-row cf-total"><span>Total in</span><span>{naira(cashInTotal)}</span></div>
+                </div>
+                <div>
+                  <h4 className="cf-title">Money out</h4>
+                  {cashOut.length === 0 ? <p className="cf-empty">Nothing went out.</p> : cashOut.map(r => (
+                    <div key={r.label} className="cf-row"><span>{r.label}</span><span>{naira(r.value)}</span></div>
+                  ))}
+                  <div className="cf-row cf-total"><span>Total out</span><span>{naira(cashOutTotal)}</span></div>
+                </div>
+              </div>
+              <div className={`cf-net${cashInTotal - cashOutTotal < 0 ? ' is-neg' : ''}`}>
+                <span>{cashInTotal - cashOutTotal >= 0 ? 'You have more money than at the start' : 'You have less money than at the start'}</span>
+                <strong>{naira(cashInTotal - cashOutTotal)}</strong>
+              </div>
+              {movedBetween > 0 && (
+                <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.5rem 0 0' }}>
+                  {naira(movedBetween)} was moved between your own accounts. That isn't money in or out, so it's left out of the totals.
+                </p>
+              )}
+              <h4 className="cf-title" style={{ marginTop: '1.5rem' }}>By account</h4>
+              <DataTable
+                columns={cashAccountCols}
+                rows={cashAccounts}
+                getRowKey={r => r.id}
+                searchKeys={[r => r.name]}
+                searchPlaceholder="Search accounts…"
+                emptyMessage="No money accounts yet."
+              />
+            </>
           )}
         </div>
       )}

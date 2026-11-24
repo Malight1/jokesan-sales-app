@@ -118,6 +118,8 @@ export interface Expense {
   voided?: boolean; voided_at?: string | null;
   vat_amount?: number;
   source?: 'till_pay_out' | 'payment_fee' | null;
+  // Which money account paid it; otherwise worked out from the payment method (0061).
+  money_account_id?: string | null;
 }
 export interface StockMovement {
   id: number; product_kind: string; product_id: string; movement_type: string;
@@ -866,6 +868,49 @@ export interface ProductProfit {
   fg_id: string; product_name: string; qty_sold: number;
   total_revenue: number; total_cogs: number; profit: number; margin_pct: number;
 }
+
+// ============================================================
+// MONEY ACCOUNTS (migration 0061): where the money sits, every movement
+// in and out, and the cash flow report.
+// ============================================================
+export type MoneyKind = 'cash' | 'bank' | 'wallet';
+export interface MoneyAccount {
+  id: string; name: string; kind: MoneyKind; branch_id: string | null;
+  is_till: boolean; is_default: boolean; provider: string | null;
+  bank_name: string | null; account_number: string | null;
+  opening_balance: number; opening_date: string | null; is_active: boolean;
+}
+export interface MoneyAccountFlow extends MoneyAccount {
+  start: number; money_in: number; money_out: number; closing: number; movements: number;
+}
+export interface CashFlow {
+  from: string | null; to: string;
+  accounts: MoneyAccountFlow[];
+  categories: { category: string; money_in: number; money_out: number }[];
+}
+export interface MoneyLine {
+  id: number; account_id: string; entry_date: string; amount: number; category: string;
+  source_table: string; source_id: string; description: string | null; created_at: string;
+}
+export type MoneyEntryKind = 'transfer' | 'owner_in' | 'owner_out' | 'loan_in' | 'loan_repay' | 'other_in';
+export interface PaymentTypeAccount { id: string; name: string; method_group: string; money_account_id: string | null; }
+
+export const money = {
+  accounts: () => run<MoneyAccount[]>(supabase.from('money_accounts').select('*').eq('is_active', true).order('kind').order('name')),
+  cashFlow: (from?: string | null, to?: string | null) =>
+    rpc<CashFlow>('report_cash_flow', { p_from: from || null, p_to: to || null }),
+  lines: (accountId: string) => runAll<MoneyLine>((f, t) => supabase.from('money_ledger').select('*')
+    .eq('account_id', accountId).order('entry_date', { ascending: false }).order('id', { ascending: false }).range(f, t)),
+  saveAccount: (a: Partial<MoneyAccount>) => a.id
+    ? run<MoneyAccount>(supabase.from('money_accounts').update(a).eq('id', a.id).select().single())
+    : run<MoneyAccount>(supabase.from('money_accounts').insert(a).select().single()),
+  addEntry: (e: { kind: MoneyEntryKind; from_account?: string | null; to_account?: string | null; amount: number; entry_date: string; note?: string | null }) =>
+    run<{ id: string }>(supabase.from('money_entries').insert(e).select('id').single()),
+  voidEntry: (id: string) => run<{ id: string }>(supabase.from('money_entries').update({ voided: true }).eq('id', id).select('id').single()),
+  paymentTypes: () => run<PaymentTypeAccount[]>(supabase.from('payment_types').select('id, name, method_group, money_account_id').order('name')),
+  setPaymentTypeAccount: (id: string, accountId: string | null) =>
+    run<PaymentTypeAccount>(supabase.from('payment_types').update({ money_account_id: accountId }).eq('id', id).select('id, name, method_group, money_account_id').single()),
+};
 
 export interface ReportExtras {
   stock_loss: number; stock_loss_count: number;

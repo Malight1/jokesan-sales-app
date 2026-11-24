@@ -9,7 +9,7 @@ import {
   AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  dashboard, customers as customersApi, batches as batchesApi, reports as reportsApi, DashboardSummary, LowStockItem, ExpiryOverview,
+  dashboard, customers as customersApi, batches as batchesApi, reports as reportsApi, money as moneyApi, DashboardSummary, LowStockItem, ExpiryOverview,
 } from '../lib/api';
 import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -474,6 +474,9 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
   const stockLoss = num(extrasQ.data?.stock_loss);
   const tillShort = num(extrasQ.data?.till_short) - num(extrasQ.data?.till_over);
   const net = monthProfit - num(d.month_expenses) - stockLoss - tillShort;
+  // Money in every cash drawer, bank and wallet right now (0061).
+  const moneyQ = useQuery(() => moneyApi.cashFlow(null, null).catch(() => null), []);
+  const moneyNow = (moneyQ.data?.accounts ?? []).filter(a => a.is_active).reduce((s, a) => s + num(a.closing), 0);
   const trend = (d.month_trend ?? []).map(m => ({ month: m.label, sales: num(m.total) }));
   const now = new Date();
   const period = `1 to ${now.getDate()} ${now.toLocaleDateString('en-GB', { month: 'long' })}`;
@@ -548,6 +551,12 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
         )}
         <span className="db-aside-sep" aria-hidden="true" />
         Profit after costs <strong className={`db-num${net < 0 ? ' is-neg' : ''}`}>{naira(net)}</strong>
+        {moneyQ.data && (
+          <>
+            <span className="db-aside-sep" aria-hidden="true" />
+            <Link to="/money" className="db-aside-link">Cash and bank <strong className="db-num">{naira(moneyNow)}</strong></Link>
+          </>
+        )}
       </p>
 
       <div className="db-grid db-grid-wide">

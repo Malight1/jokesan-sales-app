@@ -4012,4 +4012,178 @@ begin
     not has_function_privilege('authenticated', 'public.record_payment_fee(uuid, text, text, numeric, uuid)', 'execute'));
 end $$;
 
+-- ---------- 27. money accounts and cash flow (0061) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos'); v_abuja uuid := t_id('abuja');
+  v_drawer_l uuid; v_drawer_a uuid; v_bank uuid; v_safe uuid; v_cash uuid; v_transfer uuid; v_soap uuid;
+  v_sale uuid; v_entry uuid; v_bal numeric; v_bal2 numeric; v_cf jsonb; v_n int; v_reg uuid; v_shift uuid; v_expected numeric;
+begin
+  perform t_su();
+  select id into v_drawer_l from money_accounts where tenant_id = v_t and is_till and branch_id = v_lagos;
+  select id into v_drawer_a from money_accounts where tenant_id = v_t and is_till and branch_id = v_abuja;
+  select id into v_bank from money_accounts where tenant_id = v_t and is_default;
+  perform t_rec('every branch has its own cash drawer and there is a main bank account',
+    v_drawer_l is not null and v_drawer_a is not null and v_drawer_l <> v_drawer_a
+    and (select kind = 'bank' from money_accounts where id = v_bank));
+  perform t_rec('every business got its accounts', not exists (
+    select 1 from tenants t where not exists (select 1 from money_accounts a where a.tenant_id = t.id and a.is_default)));
+  perform t_rec('a connected payment provider has its own wallet',
+    not exists (select 1 from payment_integrations pi where not exists (
+      select 1 from money_accounts a where a.tenant_id = pi.tenant_id and a.provider = pi.provider)));
+
+  -- The ledger agrees with the records it is built from.
+  select count(*) into v_n from (
+    select t.id,
+      coalesce((select sum(sp.amount_paid) from sale_payments sp join sales_orders so on so.id = sp.sales_order_id
+                 where sp.tenant_id = t.id and not so.voided and coalesce(sp.reference, '') <> 'STORE_CREDIT'), 0) as recs,
+      coalesce((select sum(amount) from money_ledger where tenant_id = t.id and source_table = 'sale_payments'), 0) as ledger
+    from tenants t) x where abs(recs - ledger) > 0.005;
+  perform t_rec('customer money in the ledger equals payments taken (no voided sales, no store credit)', v_n = 0, v_n || ' businesses differ');
+  select count(*) into v_n from (
+    select t.id,
+      coalesce((select sum(pp.amount_paid) from purchase_payments pp join purchase_orders po on po.id = pp.purchase_order_id
+                 where pp.tenant_id = t.id and not po.voided), 0) as recs,
+      coalesce((select -sum(amount) from money_ledger where tenant_id = t.id and source_table = 'purchase_payments'), 0) as ledger
+    from tenants t) x where abs(recs - ledger) > 0.005;
+  perform t_rec('supplier payments in the ledger equal payments made', v_n = 0, v_n || ' businesses differ');
+  select count(*) into v_n from (
+    select t.id,
+      coalesce((select sum(amount) from expenses where tenant_id = t.id and not voided), 0) as recs,
+      coalesce((select -sum(amount) from money_ledger where tenant_id = t.id and source_table = 'expenses'), 0) as ledger
+    from tenants t) x where abs(recs - ledger) > 0.005;
+  perform t_rec('expenses in the ledger equal expenses not voided', v_n = 0, v_n || ' businesses differ');
+  perform t_rec('a confirmed transfer lands in that provider''s wallet', not exists (
+    select 1 from money_ledger l join sale_payments sp on sp.id = l.source_id and l.source_table = 'sale_payments'
+      join incoming_payments ip on ip.id = sp.incoming_payment_id
+      join money_accounts a on a.id = l.account_id
+     where exists (select 1 from money_accounts w where w.tenant_id = l.tenant_id and w.provider = ip.provider)
+       and a.provider is distinct from ip.provider));
+  perform t_rec('paying from store credit moves no money', not exists (
+    select 1 from money_ledger l join sale_payments sp on sp.id = l.source_id where l.source_table = 'sale_payments' and sp.reference = 'STORE_CREDIT'));
+
+  -- Cash at a branch goes into that branch's drawer; a transfer into the bank.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(v_lagos);
+  select id into v_soap from finished_goods where name = 'Ledger Soap' and tenant_id = v_t;
+  select id into v_cash from payment_types where tenant_id = v_t and method_group = 'cash' limit 1;
+  select id into v_transfer from payment_types where tenant_id = v_t and method_group = 'transfer' limit 1;
+  execute format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_cash, t_items(v_soap, 1, 100)) into v_sale;
+  perform t_su();
+  perform t_rec('a cash sale at Lagos goes into the Lagos drawer',
+    (select account_id = v_drawer_l and amount > 0 from money_ledger l join sale_payments sp on sp.id = l.source_id
+      where sp.sales_order_id = v_sale and l.source_table = 'sale_payments'));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.void_sale(v_sale);
+  perform t_su();
+  perform t_rec('voiding the sale takes its money back out of the figures',
+    not exists (select 1 from money_ledger l join sale_payments sp on sp.id = l.source_id where sp.sales_order_id = v_sale and l.source_table = 'sale_payments'));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(null, current_date, %L::uuid, 100, %L::jsonb)', v_transfer, t_items(v_soap, 1, 100)) into v_sale;
+  perform t_su();
+  perform t_rec('a bank transfer sale goes into the main bank account',
+    (select account_id = v_bank from money_ledger l join sale_payments sp on sp.id = l.source_id where sp.sales_order_id = v_sale and l.source_table = 'sale_payments'));
+
+  -- Pointing "Bank Transfer" at another account moves its history there.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  insert into money_accounts (name, kind, bank_name) values ('Zenith Bank', 'bank', 'Zenith') returning id into v_safe;
+  update payment_types set money_account_id = v_safe where id = v_transfer;
+  perform t_su();
+  perform t_rec('choosing where a payment method lands re-files its payments',
+    (select account_id = v_safe from money_ledger l join sale_payments sp on sp.id = l.source_id where sp.sales_order_id = v_sale and l.source_table = 'sale_payments'));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  update payment_types set money_account_id = null where id = v_transfer;
+
+  -- Expenses can say which account paid.
+  insert into expenses (tenant_id, branch_id, expense_date, amount, money_account_id, description)
+  values (v_t, v_lagos, current_date, 1234, v_safe, 'Bank charges') returning id into v_entry;
+  perform t_su();
+  perform t_rec('an expense paid from a chosen account comes out of that account',
+    (select account_id = v_safe and amount = -1234 and category = 'expense' from money_ledger where source_table = 'expenses' and source_id = v_entry));
+
+  -- Moving money, owner money, loans.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform t_err('moving money needs two different accounts',
+    format('insert into money_entries (kind, from_account, to_account, amount) values (''transfer'', %L, %L, 100)', v_bank, v_bank), 'different');
+  perform t_err('money put in needs an account',
+    'insert into money_entries (kind, amount) values (''owner_in'', 100)', 'went into');
+  insert into money_entries (kind, from_account, to_account, amount, note) values ('transfer', v_drawer_l, v_bank, 5000, 'Banked Monday takings') returning id into v_entry;
+  perform t_su();
+  perform t_rec('moving money takes it out of one account and into the other, and nets to zero',
+    (select count(*) = 2 and sum(amount) = 0 and bool_or(account_id = v_drawer_l and amount = -5000) and bool_or(account_id = v_bank and amount = 5000)
+       from money_ledger where source_table = 'money_entries' and source_id = v_entry));
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  delete from money_entries where id = v_entry;
+  perform t_rec('a money entry cannot be deleted', exists (select 1 from money_entries where id = v_entry));
+  update money_entries set voided = true where id = v_entry;
+  perform t_su();
+  perform t_rec('voiding a money entry removes it from the balances',
+    not exists (select 1 from money_ledger where source_table = 'money_entries' and source_id = v_entry));
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  insert into money_entries (kind, to_account, amount) values ('owner_in', v_bank, 200000);
+  insert into money_entries (kind, from_account, amount) values ('owner_out', v_bank, 50000);
+  insert into money_entries (kind, to_account, amount, note) values ('loan_in', v_bank, 1000000, 'LAPO loan');
+  insert into money_entries (kind, from_account, amount) values ('loan_repay', v_bank, 100000);
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_cf := public.report_cash_flow(current_date, current_date);
+  perform t_su();
+  perform t_rec('the cash flow report shows owner money and loans in and out',
+    exists (select 1 from jsonb_array_elements(v_cf->'categories') c where c->>'category' = 'owner_in' and (c->>'money_in')::numeric >= 200000)
+    and exists (select 1 from jsonb_array_elements(v_cf->'categories') c where c->>'category' = 'loan_repay' and (c->>'money_out')::numeric >= 100000), v_cf::text);
+  perform t_rec('each account''s start + in - out = end',
+    not exists (select 1 from jsonb_array_elements(v_cf->'accounts') a
+      where abs((a->>'start')::numeric + (a->>'money_in')::numeric - (a->>'money_out')::numeric - (a->>'closing')::numeric) > 0.005));
+  perform t_rec('an account''s end balance is the sum of its movements',
+    (select (a->>'closing')::numeric from jsonb_array_elements(v_cf->'accounts') a where a->>'id' = v_bank::text)
+    = (select sum(amount) from money_ledger where account_id = v_bank and entry_date <= current_date));
+
+  -- Starting balance: history before the start date is left out.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  update money_accounts set opening_balance = 750000, opening_date = current_date where id = v_bank;
+  v_cf := public.report_cash_flow(null, current_date);
+  perform t_su();
+  select (a->>'closing')::numeric into v_bal from jsonb_array_elements(v_cf->'accounts') a where a->>'id' = v_bank::text;
+  perform t_rec('a starting balance replaces everything before its date',
+    v_bal = 750000 + (select coalesce(sum(amount), 0) from money_ledger where account_id = v_bank and entry_date >= current_date and category <> 'opening'), v_bal::text);
+
+  -- Till: pay in, banked cash and the difference at close land in the drawer.
+  select id into v_reg from registers where branch_id = v_abuja limit 1;
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  v_shift := public.current_open_shift();
+  if v_shift is null then v_shift := public.open_shift(v_reg, 1000); end if;
+  perform public.add_cash_movement('drop', 300, 'To the bank');
+  perform t_su();
+  perform t_rec('cash banked from the till leaves the drawer and reaches the bank',
+    (select count(*) = 2 and bool_or(l.account_id = v_drawer_a and l.amount = -300) and bool_or(l.account_id = v_bank and l.amount = 300)
+       from money_ledger l join cash_movements cm on cm.id = l.source_id where l.source_table = 'cash_movements' and cm.shift_id = v_shift and cm.kind = 'drop'));
+  perform t_su('00000000-0000-0000-0000-000000000002');
+  select (public.shift_expected(v_shift)->>'cash')::numeric into v_expected;
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform public.close_shift(v_expected + 150);
+  perform t_su();
+  perform t_rec('a till that closes ₦150 over adds ₦150 to the drawer',
+    (select amount = 150 and account_id = v_drawer_a from money_ledger where source_table = 'shifts' and source_id = v_shift));
+
+  -- Who can see it.
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_rec('a cashier sees no money accounts or movements',
+    (select count(*) from money_accounts) = 0 and (select count(*) from money_ledger) = 0);
+  perform t_err('a cashier cannot run the cash flow report', 'select public.report_cash_flow()', 'owner or accounts');
+  perform t_err('a cashier cannot add a money account', 'insert into money_accounts (name, kind) values (''Mine'', ''cash'')', 'row-level security');
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform t_rec('the bookkeeper sees the accounts', (select count(*) >= 3 from money_accounts));
+  perform t_err('the app cannot write the ledger directly',
+    format('insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id) values (%L, %L, current_date, 1, ''x'', ''x'', %L)', v_t, v_bank, v_t),
+    'row-level security');
+  perform t_su();
+
+  -- A new branch gets its own drawer.
+  insert into branches (tenant_id, name, created_at) values (v_t, 'Kano', now() + interval '2 minutes');
+  perform t_rec('a new branch gets its own cash drawer',
+    exists (select 1 from money_accounts a join branches b on b.id = a.branch_id where b.name = 'Kano' and a.is_till));
+end $$;
+
 select name, pass, detail from t_results order by n;

@@ -7,7 +7,7 @@ export const ROLE_ROUTES: Record<Role, string[]> = {
   inventory: ['/dashboard', '/profile', '/inventory', '/finished-goods', '/production', '/batches', '/purchases', '/suppliers', '/stock-movement', '/stock-alerts', '/transfers', '/import', '/insights', '/assistant', '/support'],
   // Till only. The database enforces the rest (migration 0054).
   cashier: ['/pos', '/profile'],
-  accounts: ['/dashboard', '/profile', '/expenses', '/reports', '/sales', '/quotes', '/deliveries', '/purchases', '/batches', '/stock-alerts', '/insights', '/match-payment', '/money-received', '/assistant', '/support'],
+  accounts: ['/dashboard', '/profile', '/money', '/expenses', '/reports', '/sales', '/quotes', '/deliveries', '/purchases', '/batches', '/stock-alerts', '/insights', '/match-payment', '/money-received', '/assistant', '/support'],
 };
 
 export function canAccess(role: Role | undefined, path: string): boolean {

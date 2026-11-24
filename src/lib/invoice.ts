@@ -33,12 +33,12 @@ const M = 16; // page margin, mm
 type BankDetails = { bank_name?: string; account_name?: string; account_number?: string } | null;
 
 // ---------------- fonts ----------------
-const FONT_FILES = {
+export const FONT_FILES = {
   regular: 'PlusJakartaSans-Regular.ttf',
   semibold: 'PlusJakartaSans-SemiBold.ttf',
   bold: 'PlusJakartaSans-Bold.ttf',
 } as const;
-type Weight = keyof typeof FONT_FILES;
+export type Weight = keyof typeof FONT_FILES;
 let fontCache: Promise<Record<Weight, string> | null> | null = null;
 
 function toBase64(buf: ArrayBuffer): string {
@@ -48,7 +48,7 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-function loadFonts(): Promise<Record<Weight, string> | null> {
+export function loadFonts(): Promise<Record<Weight, string> | null> {
   if (!fontCache) {
     const base = (typeof process !== 'undefined' && process.env?.PUBLIC_URL) || '';
     fontCache = Promise.all((Object.keys(FONT_FILES) as Weight[]).map(async w => {

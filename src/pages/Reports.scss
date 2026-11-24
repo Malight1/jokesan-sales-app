@@ -1,0 +1,36 @@
+@use '../styles/variables' as *;
+
+// Cash flow tab (0061): money in beside money out, then the net change.
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem 2.5rem;
+}
+.cf-title { margin: 0 0 0.5rem; font-size: $font-size-sm; font-weight: 700; color: $gray-800; }
+.cf-empty { font-size: $font-size-sm; color: $gray-500; margin: 0 0 0.5rem; }
+.cf-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid $gray-100;
+  font-size: $font-size-sm;
+  color: $gray-700;
+  span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  &.cf-total { border-bottom: none; border-top: 2px solid $gray-200; font-weight: 700; color: $gray-900; }
+}
+.cf-net {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: $radius;
+  background: $success-light;
+  color: $gray-800;
+  font-size: $font-size-sm;
+  strong { font-size: $font-size-lg; color: #15803d; font-variant-numeric: tabular-nums; }
+  &.is-neg { background: $danger-light; strong { color: $danger; } }
+}

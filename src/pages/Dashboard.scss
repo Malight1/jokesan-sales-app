@@ -193,6 +193,7 @@ $bad-text: $danger;
   strong { color: $gray-900; }
   .is-neg { color: $bad-text; }
 }
+.db-aside-link { color: $gray-600; text-decoration: none; &:hover { color: $primary; strong { color: $primary; } } }
 .db-aside-sep { width: 1px; height: 14px; margin: 0 0.5rem; background: $gray-300; }
 
 // ---------- layout ----------

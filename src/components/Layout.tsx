@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, Package, Truck,
-  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, BadgeCheck, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2, MessageSquare
+  FlaskConical, DollarSign, Users, UserCheck, BarChart2, ArrowLeftRight, Bell, LogOut, Settings as SettingsIcon, Lightbulb, Monitor, Upload, ShieldCheck, Landmark, BadgeCheck, CloudOff, WifiOff, AlertTriangle, XCircle, Menu, UserCircle, MapPin, Repeat, Layers, Receipt, Send, Sparkles, LifeBuoy, Building2, MessageSquare, Wallet
 } from 'lucide-react';
 import { stock, branches as branchesApi, support as supportApi, platform as platformApi, StockLevel } from '../lib/api';
 import { useQuery } from '../lib/hooks';
@@ -67,6 +67,7 @@ const navItems = [
   {
     section: 'Finance',
     items: [
+      { to: '/money', label: 'Bank & Cash', icon: Wallet },
       { to: '/expenses', label: 'Expenses', icon: DollarSign },
       { to: '/reports', label: 'Reports', icon: BarChart2 },
       { to: '/insights', label: 'Smart Insights', icon: Lightbulb },
@@ -98,6 +99,7 @@ const MANUFACTURING_ONLY = new Set(['/production', '/inventory']);
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
+  '/money': 'Bank & Cash',
   '/pos': 'Point of Sale',
   '/match-payment': 'Match Bank Payment',
   '/money-received': 'Money Received',

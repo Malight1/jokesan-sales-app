@@ -36,6 +36,14 @@ Part 1 is built (migration `0060_accounting_fixes.sql`, payments-webhook update,
 | 1.10 VAT | Expenses have "VAT included"; purchases have "Add supplier's VAT" (added on top, stock cost stays ex-VAT); new VAT tab by month; P&L counts expenses without claimable VAT. |
 | **Extra bug found** | A customer or supplier payment made after a return recomputed the balance as total minus paid, which undid the return (customer shown owing more, supplier owed more). Payments now reduce the balance; 0060 repairs any balances already affected and logs each repair as `balance_corrected` in the activity log. |
 
+Part 2.1 to 2.3 built 24 Nov (migration `0061_money_accounts.sql`, Bank & Cash page, Cash flow report tab), not yet deployed. Run 0061, then push.
+
+| Item | What was done |
+|---|---|
+| 2.1 Money accounts | Every business gets a cash drawer per branch, a main bank account (from the bank details in Settings) and a wallet per connected provider. More can be added (safe, second bank, POS wallet). Each has a starting balance on a chosen day; movements before that day are history the starting balance already covers. Customer payments, refunds, supplier payments, expenses, till pay in/out, banked cash and till short/over all land in an account automatically (cash to the branch drawer, confirmed transfers to the provider's wallet, everything else to the main account, or wherever the owner points each payment method). Store credit moves no money. Voided sales and purchases drop out. |
+| 2.2 Transfers and owner money | "Record money": move money between accounts, owner put money in, owner took money out, loan received, loan repayment, other money in. Void instead of delete, activity log, closed-books date applies. |
+| 2.3 Cash flow report | Reports, Cash flow tab: money in and out by kind for the dates chosen, the net change, and each account's start, in, out and end. Money moved between your own accounts is shown but left out of the totals. Dashboard shows "Cash and bank" now. |
+
 ---
 
 ## Part 1: Numbers that are wrong or incomplete today (fix first)

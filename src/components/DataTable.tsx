@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, Download, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, FileDown, MoreVertical } from 'lucide-react';
 import { Loading, ErrorState, Empty } from './DataStates';
 import { exportExcel, exportCSV, exportPDF, ExportColumn } from '../lib/exporters';
+import { useAuth } from '../lib/AuthContext';
 import './DataTable.scss';
 
 export interface Column<T> {
@@ -12,7 +13,15 @@ export interface Column<T> {
   value?: (row: T) => string | number;          // plain value for sort/search/export
   sortable?: boolean;                            // default true
   align?: 'left' | 'right' | 'center';
+  // Exports: print as ₦ / add up in the Total row. Left unset, a numeric
+  // column whose header names money is treated as money, and added up
+  // unless it is a per-unit figure (price, rate, margin).
+  money?: boolean;
+  total?: boolean;
 }
+
+const MONEY_HEADER = /amount|total|paid|balance|owe|value|price|cost|profit|revenue|vat|outstanding|refund|discount|spent|^in$|^out$|fee|charge|\(₦\)/i;
+const PER_UNIT = /unit|price|rate|margin|%|each/i;
 
 export interface RowAction<T> {
   icon: React.ReactNode;
@@ -34,6 +43,10 @@ interface Props<T> {
   rowActions?: RowAction<T>[];
   exportName?: string;
   exportTitle?: string;
+  // Printed under the title: the dates or filter the list covers.
+  exportSubtitle?: string;
+  // Whose list it is. Defaults to the business name; false leaves it off.
+  exportBusiness?: string | false;
   pageSize?: number;
   emptyMessage?: string;
   toolbarExtra?: React.ReactNode;
@@ -43,9 +56,10 @@ const val = <T,>(col: Column<T>, row: T): any => (col.value ? col.value(row) : (
 
 export default function DataTable<T>({
   columns, rows, getRowKey, loading, error, onRetry,
-  searchKeys, searchPlaceholder = 'Search…', rowActions, exportName, exportTitle,
+  searchKeys, searchPlaceholder = 'Search…', rowActions, exportName, exportTitle, exportSubtitle, exportBusiness,
   pageSize = 15, emptyMessage = 'Nothing here yet.', toolbarExtra,
 }: Props<T>) {
+  const { tenant } = useAuth();
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -133,12 +147,24 @@ export default function DataTable<T>({
   // swallowed into an alert rather than an unhandled rejection.
   const doExport = async (fmt: 'xlsx' | 'csv' | 'pdf') => {
     setExportOpen(false);
-    const cols: ExportColumn<T>[] = columns.map(c => ({ header: c.header, value: (r: T) => val(c, r) ?? '' }));
+    const numeric = (c: Column<T>) => filtered.length > 0 && filtered.every(r => { const v = val(c, r); return v === null || v === '' || typeof v === 'number'; });
+    const cols: ExportColumn<T>[] = columns.filter(c => c.header.trim()).map(c => {
+      const money = c.money ?? (MONEY_HEADER.test(c.header) && numeric(c));
+      return {
+        header: c.header, value: (r: T) => val(c, r) ?? '', money,
+        total: c.total ?? (money && !PER_UNIT.test(c.header)),
+        align: c.align === 'right' ? 'right' as const : undefined,
+      };
+    });
     const name = exportName ?? 'export';
+    const meta = {
+      business: exportBusiness === false ? undefined : (exportBusiness ?? tenant?.name ?? undefined),
+      subtitle: [exportSubtitle, search.trim() ? `Search: "${search.trim()}"` : ''].filter(Boolean).join(' · ') || undefined,
+    };
     try {
-      if (fmt === 'xlsx') await exportExcel(cols, filtered, name);
-      else if (fmt === 'csv') await exportCSV(cols, filtered, name);
-      else await exportPDF(cols, filtered, name, exportTitle ?? name);
+      if (fmt === 'xlsx') await exportExcel(cols, filtered, name, exportTitle ?? name, meta);
+      else if (fmt === 'csv') await exportCSV(cols, filtered, name, exportTitle ?? name, meta);
+      else await exportPDF(cols, filtered, name, exportTitle ?? name, meta);
     } catch {
       window.alert('Could not build the export file. Please try again.');
     }

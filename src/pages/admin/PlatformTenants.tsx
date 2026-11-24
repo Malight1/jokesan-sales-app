@@ -67,7 +67,7 @@ function TenantsPanel() {
           <DataTable
             columns={columns} rows={filtered} getRowKey={t => t.id} rowActions={rowActions}
             searchKeys={[t => t.name]} searchPlaceholder="Search tenants…"
-            exportName="tenants" exportTitle="ProfixBook Tenants"
+            exportBusiness={false} exportName="tenants" exportTitle="ProfixBook Tenants"
             toolbarExtra={
               <select value={planFilter} onChange={e => setPlanFilter(e.target.value)}>
                 <option value="">All plans</option>
