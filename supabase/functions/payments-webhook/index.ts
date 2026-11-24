@@ -60,14 +60,17 @@ async function handlePaystack(req: Request, raw: string, event: any, admin: any)
   const c = event.data.customer ?? {};
   const payerName = [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
 
+  const fee = Number(event.data.fees ?? 0) / 100;
   if (event.data.metadata?.till) {
     await admin.rpc('record_till_payment', { p_provider: 'paystack', p_provider_ref: reference, p_amount: amount, p_payer_name: payerName, p_channel: event.data.channel ?? null, p_raw: event });
+    await recordFee(admin, { kind: 'till', tenant_id: tenantId }, 'paystack', reference, fee);
     return ok();
   }
   await recordInvoice(admin, {
     tenant_id: tenantId, provider: 'paystack', provider_ref: reference, amount, payer_name: payerName,
     channel: event.data.channel ?? null, raw: event, sales_order_id: event.data.metadata?.sales_order_id ?? null,
   });
+  await recordFee(admin, { kind: 'link', tenant_id: tenantId, sales_order_id: event.data.metadata?.sales_order_id ?? null }, 'paystack', reference, fee);
   return ok();
 }
 
@@ -138,7 +141,24 @@ async function settle(admin: any, target: Target, v: Verified | null, notificati
       raw: { notification, verified: v.raw }, sales_order_id: target.sales_order_id ?? null,
     });
   }
+  await recordFee(admin, target, v.provider, v.reference, v.fee ?? 0);
   return ok();
+}
+
+// The provider keeps a charge and pays the shop the rest, so the bank sees
+// less than the sale. The charge is recorded once as a "Payment charges"
+// expense (migration 0060); a repeated notification adds nothing.
+async function recordFee(admin: any, target: Target, provider: string, reference: string, fee: number) {
+  if (!(fee > 0)) return;
+  let branch: string | null = null;
+  if (target.kind === 'till') {
+    const { data } = await admin.from('till_payments').select('branch_id').eq('provider', provider).eq('provider_ref', reference).maybeSingle();
+    branch = data?.branch_id ?? null;
+  } else if (target.sales_order_id) {
+    const { data } = await admin.from('sales_orders').select('branch_id').eq('id', target.sales_order_id).maybeSingle();
+    branch = data?.branch_id ?? null;
+  }
+  await admin.rpc('record_payment_fee', { p_tenant: target.tenant_id, p_provider: provider, p_ref: reference, p_fee: Math.round(fee * 100) / 100, p_branch: branch });
 }
 
 async function recordInvoice(admin: any, row: Record<string, unknown>) {
@@ -147,7 +167,7 @@ async function recordInvoice(admin: any, row: Record<string, unknown>) {
   await admin.from('payment_links').update({ status: 'paid' }).eq('provider', row.provider).eq('provider_ref', row.provider_ref);
 }
 
-interface Verified { provider: string; reference: string; paid: boolean; amount: number; payerName?: string | null; payerAccount?: string | null; channel?: string | null; raw?: unknown }
+interface Verified { provider: string; reference: string; paid: boolean; amount: number; fee?: number; payerName?: string | null; payerAccount?: string | null; channel?: string | null; raw?: unknown }
 
 async function verify(provider: string, reference: string, prov: any, secret: string): Promise<Verified | null> {
   if (provider === 'monnify') {
@@ -161,7 +181,10 @@ async function verify(provider: string, reference: string, prov: any, secret: st
     const tx = j?.responseBody;
     if (!r.ok || j.requestSuccessful !== true || !tx || tx.paymentReference !== reference) return null;
     const src = Array.isArray(tx.paymentSourceInformation) ? tx.paymentSourceInformation[0] : null;
-    return { provider, reference, paid: ['PAID', 'OVERPAID'].includes(tx.paymentStatus), amount: Number(tx.amountPaid),
+    // Monnify reports what it settles to the shop; the difference is its charge.
+    const settled = Number(tx.settlementAmount);
+    const fee = Number.isFinite(settled) && settled > 0 ? Math.max(0, Number(tx.amountPaid) - settled) : 0;
+    return { provider, reference, paid: ['PAID', 'OVERPAID'].includes(tx.paymentStatus), amount: Number(tx.amountPaid), fee,
       payerName: src?.accountName ?? tx.customerDTO?.name ?? null, payerAccount: src?.accountNumber ?? null, channel: tx.paymentMethod ?? null, raw: tx };
   }
   if (provider === 'opay') {
@@ -174,7 +197,9 @@ async function verify(provider: string, reference: string, prov: any, secret: st
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.code !== '00000' || j.data?.reference !== reference) return null;
-    return { provider, reference, paid: j.data.status === 'SUCCESS', amount: Number(j.data.amount?.total ?? 0) / 100, channel: 'OPay', raw: j.data };
+    const opayFee = Number(j.data.fee?.total ?? 0) / 100;
+    return { provider, reference, paid: j.data.status === 'SUCCESS', amount: Number(j.data.amount?.total ?? 0) / 100,
+      fee: Number.isFinite(opayFee) ? opayFee : 0, channel: 'OPay', raw: j.data };
   }
   return null;
 }

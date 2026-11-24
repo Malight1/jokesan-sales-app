@@ -3825,4 +3825,191 @@ begin
     not has_function_privilege('authenticated', 'public.mark_payment_webhook_seen(uuid, text)', 'execute'));
 end $$;
 
+-- ---------- 26. accounting fixes (0060) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos'); v_abuja uuid := t_id('abuja');
+  v_soap uuid; v_cust uuid; v_sale uuid; v_item uuid; v_cash uuid; v_bal numeric;
+  v_po uuid; v_pi uuid; v_exp_type uuid; v_exp uuid; v_x jsonb; v_x2 jsonb; v_reg uuid; v_shift uuid;
+  v_expected numeric; v_old_sale uuid; v_before numeric; v_after numeric; v_n int;
+begin
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(v_lagos);
+  insert into finished_goods (tenant_id, name, unit, min_stock_level, selling_price, default_markup)
+  values (v_t, 'Ledger Soap', 'pcs', 1, 100, 1.5) returning id into v_soap;
+  perform public.adjust_stock(v_lagos, 'finished_good', v_soap, 40, 40, 'Opening balance');
+  perform public.adjust_stock(v_abuja, 'finished_good', v_soap, 10, 40, 'Opening balance');
+  v_cust := t_id('return_cust');
+  select id into v_cash from payment_types where tenant_id = v_t and method_group = 'cash' limit 1;
+  select id into v_exp_type from expense_types where tenant_id = v_t order by name limit 1;
+
+  -- A. a payment after a return no longer undoes the return
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_cust, t_items(v_soap, 10, 100)) into v_sale;
+  select id into v_item from sale_items where sales_order_id = v_sale;
+  perform public.create_sale_return(v_sale, jsonb_build_array(jsonb_build_object('sale_item_id', v_item, 'qty', 2, 'condition', 'resellable')), 'too many');
+  select balance into v_bal from sales_orders where id = v_sale;
+  perform public.record_sale_payment(v_sale, 300, v_cash);
+  perform t_rec('a customer payment after a return keeps the return off the balance',
+    (select balance = v_bal - 300 and balance = total_amount - returned_total - 300 and payment_status = 'part'
+       from sales_orders where id = v_sale));
+  perform public.record_sale_payment(v_sale, v_bal - 300, v_cash);
+  perform t_rec('paying the rest marks it paid in full',
+    (select balance = 0 and payment_status = 'full' from sales_orders where id = v_sale));
+
+  -- Every sale in this test company agrees with the formula the repair uses.
+  perform t_su();
+  select count(*) into v_n from sales_orders so
+   where not so.voided and so.returned_total > 0
+     and abs(so.balance - greatest(0, so.total_amount - so.returned_total
+           - coalesce((select sum(sp.amount_paid) from sale_payments sp where sp.sales_order_id = so.id), 0)
+           + coalesce((select sum(sr.to_store_credit) from sale_returns sr where sr.sales_order_id = so.id and not sr.voided), 0))) > 0.005;
+  perform t_rec('the balance repair formula matches every sale with a return', v_n = 0, v_n || ' differ');
+
+  -- B. the same for suppliers
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select public.create_purchase(null, current_date, null, 0,
+    jsonb_build_array(jsonb_build_object('material_id', t_id('caustic'), 'qty', 10, 'cost_price', 100))) into v_po;
+  select id into v_pi from purchase_items where purchase_order_id = v_po;
+  perform public.create_purchase_return(v_po, jsonb_build_array(jsonb_build_object('purchase_item_id', v_pi, 'qty', 2)), 'torn');
+  perform public.record_purchase_payment(v_po, 500, v_cash);
+  perform t_rec('a supplier payment after a return keeps the return off what you owe (1000 - 200 - 500)',
+    (select balance = 300 and payment_status = 'part' from purchase_orders where id = v_po));
+  perform t_su();
+  select count(*) into v_n from purchase_orders po
+   where not po.voided and po.returned_total > 0
+     and abs(po.balance - (po.total_amount - po.returned_total
+           - coalesce((select sum(pp.amount_paid) from purchase_payments pp where pp.purchase_order_id = po.id), 0))) > 0.005;
+  perform t_rec('the supplier balance repair formula matches every purchase with a return', v_n = 0, v_n || ' differ');
+
+  -- C. supplier VAT on top of a purchase
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform public.set_purchase_vat(v_po, 60);
+  perform t_rec('adding supplier VAT raises the bill and what you owe, not the stock cost',
+    (select vat_amount = 60 and total_amount = 1060 and balance = 360 from purchase_orders where id = v_po)
+    and (select cost_price = 100 from purchase_items where id = v_pi));
+  perform public.set_purchase_vat(v_po, 75);
+  perform t_rec('changing the VAT moves the total by the difference',
+    (select total_amount = 1075 and balance = 375 from purchase_orders where id = v_po));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a cashier cannot change a purchase''s VAT', format('select public.set_purchase_vat(%L::uuid, 10)', v_po), 'owner or accounts');
+  perform t_su();
+
+  -- D. stock losses reach the reports
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_x := public.report_extras(current_date, current_date, v_lagos);
+  perform public.adjust_stock(v_lagos, 'finished_good', v_soap, -3, null, 'Damaged');
+  v_x2 := public.report_extras(current_date, current_date, v_lagos);
+  perform t_rec('stock written off shows as a loss at cost (3 x 40)',
+    (v_x2->>'stock_loss')::numeric - (v_x->>'stock_loss')::numeric = 120, v_x2::text);
+  perform t_rec('adding stock is not counted as a loss',
+    (select (public.report_extras(current_date, current_date, v_abuja)->>'stock_loss')::numeric) =
+    (select coalesce(sum(total_cost), 0) from stock_adjustments where branch_id = v_abuja and qty_delta < 0
+       and (created_at at time zone 'Africa/Lagos')::date = current_date));
+  perform t_rec('stock value at cost per product',
+    (select value_at_cost = (select sum(qty_remaining * unit_cost) from fg_batches where finished_good_id = v_soap and branch_id = v_lagos)
+       from public.report_stock_value(v_lagos) where product_id = v_soap));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_err('a cashier cannot see the money reports', 'select public.report_extras()', 'owner or accounts');
+  perform t_su();
+
+  -- E. till pay outs become expenses; shortages reach the reports
+  select id into v_reg from registers where branch_id = v_abuja limit 1;
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  v_shift := public.current_open_shift();
+  if v_shift is null then v_shift := public.open_shift(v_reg, 2000); end if;
+  perform t_ok('a cashier pays fuel out of the till as an expense',
+    format('select public.add_cash_movement(''pay_out'', 500, ''Fuel for the bike'', null, %L::uuid)', v_exp_type));
+  perform t_err('money paid in cannot be an expense',
+    format('select public.add_cash_movement(''pay_in'', 100, ''Change'', null, %L::uuid)', v_exp_type), 'Only money paid out');
+  perform t_ok('a pay out that is not spending still works', 'select public.add_cash_movement(''pay_out'', 100, ''To the safe'')');
+  perform t_su();
+  perform t_rec('the till pay out is an expense at the till''s branch, paid in cash',
+    (select count(*) = 1 from expenses e join cash_movements cm on cm.expense_id = e.id
+      where cm.shift_id = v_shift and e.amount = 500 and e.branch_id = v_abuja and e.source = 'till_pay_out'
+        and e.payment_type_id = v_cash and e.created_by = '00000000-0000-0000-0000-000000000002'));
+  perform t_rec('the plain pay out made no expense',
+    (select expense_id is null from cash_movements where shift_id = v_shift and amount = 100 and kind = 'pay_out'));
+
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_x := public.report_extras(current_date, current_date, v_abuja);
+  perform t_su('00000000-0000-0000-0000-000000000002');
+  select (public.shift_expected(v_shift)->>'cash')::numeric into v_expected;
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform public.close_shift(v_expected - 200);
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_x2 := public.report_extras(current_date, current_date, v_abuja);
+  perform t_rec('a till that closed ₦200 short shows in the reports',
+    (v_x2->>'till_short')::numeric - (v_x->>'till_short')::numeric = 200, v_x2::text);
+
+  -- F. expenses: void, never delete; every change logged; dashboard skips voids
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select (public.dashboard_summary()->>'month_expenses')::numeric into v_before;
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  insert into expenses (tenant_id, branch_id, expense_date, expense_type_id, description, amount, vat_amount)
+  values (v_t, v_lagos, current_date, v_exp_type, 'Generator repair', 10750, 750) returning id into v_exp;
+  perform t_err('an expense cannot be deleted', format('delete from expenses where id = %L', v_exp), 'Void it instead');
+  perform t_rec('the delete really did nothing', (select count(*) = 1 from expenses where id = v_exp));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_rec('the dashboard counts the expense without its VAT',
+    (public.dashboard_summary()->>'month_expenses')::numeric - v_before = 10000);
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  update expenses set amount = 11000, vat_amount = 0 where id = v_exp;
+  update expenses set voided = true where id = v_exp;
+  perform t_rec('voiding stamps who and when',
+    (select voided and voided_at is not null and voided_by = '00000000-0000-0000-0000-000000000004' from expenses where id = v_exp));
+  perform t_err('a voided expense cannot be changed', format('update expenses set amount = 1 where id = %L', v_exp), 'was voided');
+  perform t_su();
+  perform t_rec('creating, editing and voiding the expense are all in the activity log',
+    (select count(*) >= 3 from audit_logs where entity = 'expenses' and entity_id = v_exp::text));
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_rec('the dashboard leaves out the voided expense',
+    (public.dashboard_summary()->>'month_expenses')::numeric = v_before);
+  perform t_su();
+  perform t_err('VAT cannot be more than the expense',
+    format('insert into expenses (tenant_id, amount, vat_amount) values (%L, 100, 200)', v_t), 'expenses_vat_check');
+
+  -- G. books closed up to a date
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(%L::uuid, current_date - 20, null, 0, %L::jsonb)', v_cust, t_items(v_soap, 1, 100)) into v_old_sale;
+  perform t_err('the books cannot be closed up to today',
+    format('update tenants set books_closed_until = current_date where id = %L', v_t), 'before today');
+  update tenants set books_closed_until = current_date - 10 where id = v_t;
+  perform t_err('a sale cannot be dated inside closed books',
+    format('select public.create_sale(null, current_date - 12, null, 0, %L::jsonb)', t_items(v_soap, 1, 100)), 'books are closed');
+  perform t_err('an old sale cannot be voided once its month is closed',
+    format('select public.void_sale(%L::uuid)', v_old_sale), 'books are closed');
+  perform t_ok('an old invoice can still be paid today',
+    format('select public.record_sale_payment(%L::uuid, 50, %L::uuid)', v_old_sale, v_cash));
+  perform t_ok('a sale dated after the closing date still works',
+    format('select public.create_sale(null, current_date - 5, null, 0, %L::jsonb)', t_items(v_soap, 1, 100)));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform t_err('an expense cannot be dated inside closed books',
+    format('insert into expenses (tenant_id, branch_id, expense_date, amount) values (%L, %L, current_date - 11, 100)', v_t, v_lagos), 'books are closed');
+  perform t_ok('an expense dated after the closing date is fine',
+    format('insert into expenses (tenant_id, branch_id, expense_date, amount) values (%L, %L, current_date - 3, 100)', v_t, v_lagos));
+  perform t_su();
+  perform t_rec('closing the books is in the activity log',
+    exists (select 1 from audit_logs where entity = 'tenants' and entity_id = v_t::text and meta ? 'books_closed_until'));
+  update tenants set books_closed_until = null where id = v_t;
+
+  -- H. payment provider charges (server only)
+  perform t_rec('the first provider charge notice makes an expense', public.record_payment_fee(v_t, 'monnify', 'MN-FEE-1', 75) is not null);
+  perform t_rec('a repeated notice makes nothing new', public.record_payment_fee(v_t, 'monnify', 'MN-FEE-1', 75) is null);
+  perform t_rec('provider charges become one expense, even if the notice comes twice',
+ (select count(*) = 1 and sum(e.amount) = 75 from expenses e join expense_types et on et.id = e.expense_type_id
+          where e.source = 'payment_fee' and e.source_ref = 'monnify:MN-FEE-1' and et.name = 'Payment charges'));
+  perform t_rec('only the server can record provider charges',
+    not has_function_privilege('authenticated', 'public.record_payment_fee(uuid, text, text, numeric, uuid)', 'execute'));
+end $$;
+
 select name, pass, detail from t_results order by n;

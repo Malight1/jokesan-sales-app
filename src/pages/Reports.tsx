@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Download, MessageCircle } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
-         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock } from '../lib/api';
+         purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock,
+         StockCostRow } from '../lib/api';
 import { hasFeature } from '../lib/features';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
@@ -18,7 +19,7 @@ import { isRetail, label } from '../retail';
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts';
+type Tab = 'pnl' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
 const ALL_TABS: { id: Tab; label: string }[] = [
   { id: 'pnl', label: 'Profit & Loss' },
   { id: 'sales', label: 'Sales' },
@@ -29,6 +30,7 @@ const ALL_TABS: { id: Tab; label: string }[] = [
   { id: 'products', label: 'Product Profit' },
   { id: 'returns', label: 'Returns' },
   { id: 'discounts', label: 'Discounts' },
+  { id: 'vat', label: 'VAT' },
 ];
 
 export default function Reports() {
@@ -36,7 +38,8 @@ export default function Reports() {
   const toast = useToast();
   const retail = isRetail(tenant);
   const tiersEnabled = hasFeature(tenant, 'price_tiers');
-  const TABS = ALL_TABS.filter(t => t.id !== 'discounts' || tiersEnabled);
+  const vatOn = !!tenant?.vat_enabled;
+  const TABS = ALL_TABS.filter(t => (t.id !== 'discounts' || tiersEnabled) && (t.id !== 'vat' || vatOn));
   const [tab, setTab] = useState<Tab>('pnl');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -65,6 +68,10 @@ export default function Reports() {
   const discountsQ = useQuery(() => tiersEnabled ? pricing.discountReport(from, to, branch || null) : Promise.resolve([]), [from, to, branch, tiersEnabled]);
   // Per-branch quantities for the Stock tab when a branch is chosen.
   const levelsQ = useQuery(() => stock.levels(null), []);
+  // Stock losses, till short/over and store credit owed (0060).
+  const extrasQ = useQuery(() => reportsApi.extras(from, to, branch || null).catch(() => null), [from, to, branch]);
+  // What stock on hand cost, per item (0060).
+  const stockCostQ = useQuery(() => reportsApi.stockValue(branch || null).catch(() => [] as StockCostRow[]), [branch]);
 
   const loading = salesQ.loading || expQ.loading || goodsQ.loading || returnTotalsQ.loading;
   const error = salesQ.error || expQ.error || goodsQ.error || returnTotalsQ.error;
@@ -80,7 +87,12 @@ export default function Reports() {
 
   // Voided sales are excluded from every report.
   const sales = (salesQ.data ?? []).filter(s => !s.voided && inRange(s.transaction_date) && inBranch(s.branch_id));
-  const expenses = (expQ.data ?? []).filter(e => inRange(e.expense_date) && inBranch(e.branch_id));
+  // Voided expenses never count (0060).
+  const expenses = (expQ.data ?? []).filter(e => !e.voided && inRange(e.expense_date) && inBranch(e.branch_id));
+  // Debts are "as of" the To date: every unpaid invoice up to then, however
+  // old. A From date must not hide a customer who has owed since August.
+  const upTo = (d: string | null) => !d || !to || d <= to;
+  const salesOwing = (salesQ.data ?? []).filter(s => !s.voided && s.balance > 0 && upTo(s.transaction_date) && inBranch(s.branch_id));
   // With a branch chosen, stock is what THAT branch holds, not the company total.
   const branchQty = qtyByProduct((levelsQ.data ?? []).filter(l => l.product_kind === 'finished_good'), branch);
   const goods = (goodsQ.data ?? []).map(g => branch ? { ...g, qty_balance: branchQty.get(g.id) ?? 0 } : g);
@@ -98,10 +110,20 @@ export default function Reports() {
   const grossProfit = totalSales - totalCogs;
   const vatCollected = sales.reduce((s, t) => s + (t.vat_amount || 0), 0)
     - returnDays.reduce((s, r) => s + Number(r.vat_amount || 0), 0);
-  const totalOutstanding = sales.reduce((s, t) => s + (t.balance || 0), 0);
-  const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const netProfit = grossProfit - totalExpenses;
-  const stockValue = goods.reduce((s, g) => s + g.selling_price * g.qty_balance, 0);
+  const totalOutstanding = salesOwing.reduce((s, t) => s + (t.balance || 0), 0);
+  // VAT you can claim back on a receipt isn't a cost.
+  const expenseCost = (e: { amount: number; vat_amount?: number }) => (e.amount || 0) - Number(e.vat_amount || 0);
+  const totalExpenses = expenses.reduce((s, e) => s + expenseCost(e), 0);
+  const extras = extrasQ.data;
+  const stockLoss = Number(extras?.stock_loss || 0);
+  // Positive = the tills came up short overall.
+  const tillShort = Number(extras?.till_short || 0) - Number(extras?.till_over || 0);
+  const netProfit = grossProfit - totalExpenses - stockLoss - tillShort;
+  const costRows = stockCostQ.data ?? [];
+  const costOf = new Map(costRows.filter(r => r.product_kind === 'finished_good').map(r => [r.product_id, Number(r.value_at_cost || 0)]));
+  const stockValue = goods.reduce((s, g) => s + (costOf.get(g.id) ?? 0), 0);
+  const stockAtPrice = goods.reduce((s, g) => s + g.selling_price * Math.max(0, g.qty_balance), 0);
+  const materialsAtCost = costRows.filter(r => r.product_kind === 'material').reduce((s, r) => s + Number(r.value_at_cost || 0), 0);
 
   // Sales vs expenses, bucketed by day, month or year — sorted on a
   // zero-padded ISO-shaped key so it's chronological regardless of how the
@@ -135,7 +157,7 @@ export default function Reports() {
     if (!e.expense_date) return;
     const { key, label } = periodBucket(e.expense_date);
     periodMap[key] = periodMap[key] || { label, sales: 0, expenses: 0 };
-    periodMap[key].expenses += e.amount || 0;
+    periodMap[key].expenses += expenseCost(e);
   });
   const monthlySales = Object.entries(periodMap)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -144,7 +166,7 @@ export default function Reports() {
   // Expense by type
   const typeName = (id: string | null) => expTypesQ.data?.find(t => t.id === id)?.name ?? 'Other';
   const expTypeMap: Record<string, number> = {};
-  expenses.forEach(e => { const n = typeName(e.expense_type_id); expTypeMap[n] = (expTypeMap[n] || 0) + (e.amount || 0); });
+  expenses.forEach(e => { const n = typeName(e.expense_type_id); expTypeMap[n] = (expTypeMap[n] || 0) + expenseCost(e); });
   const expenseByType = Object.entries(expTypeMap).map(([name, value]) => ({ name, value }));
 
   // Debtors: customers with outstanding balances
@@ -153,7 +175,7 @@ export default function Reports() {
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Unknown' : 'Walk-in';
   };
   const debtorMap: Record<string, { id: string | null; name: string; phone: string | null; total: number; paid: number; balance: number; count: number }> = {};
-  sales.filter(s => s.balance > 0).forEach(s => {
+  salesOwing.forEach(s => {
     const key = s.customer_id ?? 'walkin';
     const phone = custQ.data?.find(c => c.id === s.customer_id)?.phone ?? null;
     debtorMap[key] = debtorMap[key] || { id: s.customer_id, name: custName(s.customer_id), phone, total: 0, paid: 0, balance: 0, count: 0 };
@@ -170,8 +192,9 @@ export default function Reports() {
     return x ? `${x.first_name ?? ''} ${x.last_name ?? ''}`.trim() || x.company_store || 'Unknown' : 'No supplier';
   };
   const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date) && inBranch(pu.branch_id));
+  const purchasesOwing = (purchQ.data ?? []).filter(pu => !pu.voided && pu.balance > 0 && upTo(pu.purchase_date) && inBranch(pu.branch_id));
   const creditorMap: Record<string, { key: string; name: string; total: number; paid: number; balance: number; count: number }> = {};
-  purchases.filter(pu => pu.balance > 0).forEach(pu => {
+  purchasesOwing.forEach(pu => {
     const key = pu.supplier_id ?? 'none';
     creditorMap[key] = creditorMap[key] || { key, name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0 };
     creditorMap[key].total += pu.total_amount;
@@ -181,6 +204,24 @@ export default function Reports() {
   });
   const creditors = Object.values(creditorMap).sort((a, b) => b.balance - a.balance);
   const totalOwed = creditors.reduce((sum, c) => sum + c.balance, 0);
+
+  const asOfLabel = to ? `up to ${to}` : 'up to today';
+
+  // VAT by month: charged on sales (less returns) against VAT paid to
+  // suppliers and on expenses that can be claimed back.
+  const vatMonths: Record<string, { month: string; sales: number; purchases: number; expenses: number }> = {};
+  const vatRow = (d: string) => {
+    const k = d.slice(0, 7);
+    return (vatMonths[k] = vatMonths[k] || { month: k, sales: 0, purchases: 0, expenses: 0 });
+  };
+  sales.forEach(t => { if (t.transaction_date && t.vat_amount) vatRow(t.transaction_date).sales += Number(t.vat_amount); });
+  returnDays.forEach(r => { if (Number(r.vat_amount || 0)) vatRow(r.return_date).sales -= Number(r.vat_amount); });
+  purchases.forEach(pu => { if (Number(pu.vat_amount || 0)) vatRow(pu.purchase_date).purchases += Number(pu.vat_amount); });
+  expenses.forEach(e => { if (Number(e.vat_amount || 0)) vatRow(e.expense_date).expenses += Number(e.vat_amount); });
+  const vatRows = Object.values(vatMonths).sort((a, b) => b.month.localeCompare(a.month))
+    .map(r => ({ ...r, due: r.sales - r.purchases - r.expenses }));
+  const vatDueTotal = vatRows.reduce((s, r) => s + r.due, 0);
+  const monthName = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
   const productProfit = prodProfitQ.data ?? [];
   const productRevenue = productProfit.reduce((sum, r) => sum + Number(r.total_revenue || 0), 0);
@@ -223,9 +264,21 @@ export default function Reports() {
   const stockCols: Column<any>[] = [
     { key: 'name', header: 'Product', value: r => r.name, render: r => <strong>{r.name}</strong> },
     { key: 'qty_balance', header: 'Qty', align: 'right', value: r => r.qty_balance, render: r => r.qty_balance.toLocaleString() },
-    { key: 'selling_price', header: 'Unit Price', align: 'right', value: r => r.selling_price, render: r => fmt(r.selling_price) },
-    { key: 'stock_value', header: 'Stock Value', align: 'right', value: r => r.selling_price * r.qty_balance,
-      render: r => <strong>{fmt(r.selling_price * r.qty_balance)}</strong> },
+    { key: 'cost_value', header: 'Value at cost', align: 'right', value: r => costOf.get(r.id) ?? 0,
+      render: r => <strong>{fmt(costOf.get(r.id) ?? 0)}</strong> },
+    { key: 'price_value', header: 'At selling price', align: 'right', value: r => r.selling_price * Math.max(0, r.qty_balance),
+      render: r => fmt(r.selling_price * Math.max(0, r.qty_balance)) },
+  ];
+
+  const vatCols: Column<any>[] = [
+    { key: 'month', header: 'Month', value: r => r.month, render: r => <strong>{monthName(r.month)}</strong> },
+    { key: 'sales', header: 'VAT charged on sales', align: 'right', value: r => r.sales, render: r => fmt(r.sales) },
+    { key: 'purchases', header: 'VAT paid to suppliers', align: 'right', value: r => r.purchases, render: r => fmt(r.purchases) },
+    { key: 'expenses', header: 'VAT on expenses', align: 'right', value: r => r.expenses, render: r => fmt(r.expenses) },
+    { key: 'due', header: 'VAT to pay', align: 'right', value: r => r.due,
+      render: r => r.due < 0
+        ? <strong style={{ color: '#16a34a' }}>{fmt(-r.due)} to claim back</strong>
+        : <strong>{fmt(r.due)}</strong> },
   ];
 
   const debtorCols: Column<any>[] = [
@@ -303,6 +356,8 @@ export default function Reports() {
         { item: 'Cost of Goods Sold (COGS)', amount: -totalCogs },
         { item: 'Gross Profit', amount: grossProfit },
         { item: 'Operating Expenses', amount: -totalExpenses },
+        ...(stockLoss !== 0 ? [{ item: 'Stock written off or lost (at cost)', amount: -stockLoss }] : []),
+        ...(tillShort !== 0 ? [{ item: tillShort > 0 ? 'Till cash short' : 'Till cash over', amount: -tillShort }] : []),
         { item: 'Net Profit', amount: netProfit },
         ...(vatCollected !== 0 ? [{ item: 'VAT collected (owed to the tax office, not income)', amount: vatCollected }] : []),
       ];
@@ -325,16 +380,17 @@ export default function Reports() {
         { header: 'Type', value: r => typeName(r.expense_type_id) },
         { header: 'Description', value: r => r.description ?? '' },
         { header: 'Amount', value: r => r.amount },
+        { header: 'VAT included', value: r => Number(r.vat_amount || 0) },
       ];
       rows = expenses; name = 'expenses-report'; title = 'Expenses Report' + rangeLabel;
     } else if (tab === 'stock') {
       cols = [
         { header: 'Product', value: r => r.name },
         { header: 'Qty', value: r => r.qty_balance },
-        { header: 'Unit Price', value: r => r.selling_price },
-        { header: 'Stock Value', value: r => r.selling_price * r.qty_balance },
+        { header: 'Value at cost', value: r => costOf.get(r.id) ?? 0 },
+        { header: 'At selling price', value: r => r.selling_price * Math.max(0, r.qty_balance) },
       ];
-      rows = goods; name = 'stock-report'; title = 'Stock Value Report';
+      rows = goods; name = 'stock-report'; title = 'Stock Value Report' + (branch ? ` — ${nameOf(branch)}` : '');
     } else if (tab === 'debtors') {
       cols = [
         { header: 'Customer', value: r => r.name },
@@ -343,7 +399,7 @@ export default function Reports() {
         { header: 'Paid', value: r => r.paid },
         { header: 'Outstanding', value: r => r.balance },
       ];
-      rows = debtors; name = 'debtors-report'; title = 'Outstanding Debtors' + rangeLabel;
+      rows = debtors; name = 'debtors-report'; title = `Owed to you, invoices ${asOfLabel}` + (branch ? ` — ${nameOf(branch)}` : '');
     } else if (tab === 'creditors') {
       cols = [
         { header: 'Supplier', value: r => r.name },
@@ -352,7 +408,7 @@ export default function Reports() {
         { header: 'Paid', value: r => r.paid },
         { header: 'Owed', value: r => r.balance },
       ];
-      rows = creditors; name = 'creditors-report'; title = 'Outstanding Creditors' + rangeLabel;
+      rows = creditors; name = 'creditors-report'; title = `You owe suppliers, bills ${asOfLabel}` + (branch ? ` — ${nameOf(branch)}` : '');
     } else if (tab === 'products') {
       cols = [
         { header: 'Product', value: r => r.product_name },
@@ -372,6 +428,15 @@ export default function Reports() {
         { header: 'Written Off', value: r => r.loss_value },
       ];
       rows = returnsData; name = 'returns-report'; title = 'Returns' + rangeLabel;
+    } else if (tab === 'vat') {
+      cols = [
+        { header: 'Month', value: r => monthName(r.month) },
+        { header: 'VAT charged on sales', value: r => r.sales },
+        { header: 'VAT paid to suppliers', value: r => r.purchases },
+        { header: 'VAT on expenses', value: r => r.expenses },
+        { header: 'VAT to pay', value: r => r.due },
+      ];
+      rows = vatRows; name = 'vat-report'; title = 'VAT' + rangeLabel;
     } else {
       cols = [
         { header: 'Reason', value: r => r.reason },
@@ -431,7 +496,7 @@ export default function Reports() {
         <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value">{fmt(totalSales)}</div></div>
         <div className="stat-card"><div className="stat-label">Gross Profit</div><div className="stat-value" style={{ color: '#16a34a' }}>{fmt(grossProfit)}</div></div>
         <div className="stat-card"><div className="stat-label">Net Profit</div><div className="stat-value" style={{ color: netProfit >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(netProfit)}</div></div>
-        <div className="stat-card"><div className="stat-label">Outstanding Debt</div><div className="stat-value" style={{ color: '#dc2626' }}>{fmt(totalOutstanding)}</div></div>
+        <div className="stat-card"><div className="stat-label">Owed to you</div><div className="stat-value" style={{ color: '#dc2626' }}>{fmt(totalOutstanding)}</div></div>
       </div>
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
@@ -458,6 +523,8 @@ export default function Reports() {
             { label: 'Cost of Goods Sold (COGS)', value: -totalCogs },
             { label: 'Gross Profit', value: grossProfit, strong: true },
             { label: 'Operating Expenses', value: -totalExpenses },
+            ...(stockLoss !== 0 ? [{ label: 'Stock written off or lost (at cost)', value: -stockLoss }] : []),
+            ...(tillShort !== 0 ? [{ label: tillShort > 0 ? 'Till cash short' : 'Till cash over', value: -tillShort }] : []),
             { label: 'Net Profit', value: netProfit, strong: true, final: true },
           ].map(row => (
             <div key={row.label} style={{
@@ -472,6 +539,11 @@ export default function Reports() {
               </span>
             </div>
           ))}
+          {stockLoss !== 0 && (
+            <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.75rem' }}>
+              Stock was taken off without a sale {extras?.stock_loss_count} time{extras?.stock_loss_count === 1 ? '' : 's'} in this period (expired, damaged, or a stock count came up short). It is counted at what it cost you.
+            </p>
+          )}
           {vatCollected !== 0 && (
             <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.75rem' }}>
               VAT collected in this period: <strong>{fmt(vatCollected)}</strong>. It is owed to the tax office, so it isn't counted as revenue.
@@ -567,7 +639,11 @@ export default function Reports() {
 
       {tab === 'stock' && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>{label(retail, 'Finished Goods', 'Products')} Stock Value — total {fmt(stockValue)}</h3>
+          <h3 style={{ marginBottom: '0.35rem' }}>{label(retail, 'Finished Goods', 'Products')} stock at cost: {fmt(stockValue)}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            What the stock on hand cost you{branch ? ` at ${nameOf(branch)}` : ''}. At today's selling prices it would bring in {fmt(stockAtPrice)}.
+            {materialsAtCost > 0 && <> Raw materials on hand cost {fmt(materialsAtCost)}.</>}
+          </p>
           <DataTable
             columns={stockCols}
             rows={goods}
@@ -581,28 +657,35 @@ export default function Reports() {
 
       {tab === 'debtors' && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Outstanding Debtors — total {fmt(totalOutstanding)}</h3>
+          <h3 style={{ marginBottom: '0.35rem' }}>Owed to you: {fmt(totalOutstanding)}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Every unpaid invoice dated {asOfLabel}, however old. The From date doesn't hide older debts.
+            {Number(extras?.store_credit_owed || 0) > 0 && <> You also owe {extras?.store_credit_customers} customer{extras?.store_credit_customers === 1 ? '' : 's'} {fmt(Number(extras?.store_credit_owed))} in store credit.</>}
+          </p>
           <DataTable
             columns={debtorCols}
             rows={debtors}
             getRowKey={d => d.id ?? 'walkin'}
             searchKeys={[d => d.name]}
             searchPlaceholder="Search customers…"
-            emptyMessage="No outstanding balances. 🎉"
+            emptyMessage="Nobody owes you anything right now."
           />
         </div>
       )}
 
       {tab === 'creditors' && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Outstanding Creditors — total {fmt(totalOwed)}</h3>
+          <h3 style={{ marginBottom: '0.35rem' }}>You owe suppliers: {fmt(totalOwed)}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Every unpaid bill dated {asOfLabel}, however old.
+          </p>
           <DataTable
             columns={creditorCols}
             rows={creditors}
             getRowKey={c => c.key}
             searchKeys={[c => c.name]}
             searchPlaceholder="Search suppliers…"
-            emptyMessage="You don't owe any supplier right now. 🎉"
+            emptyMessage="You don't owe any supplier right now."
           />
         </div>
       )}
@@ -681,6 +764,30 @@ export default function Reports() {
           {discountsData.length > 0 && (
             <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
               <strong style={{ color: '#dc2626' }}>{fmt(discountedValue)}</strong> given away across {discountsData.length} reason{discountsData.length !== 1 ? 's' : ''}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {tab === 'vat' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '0.35rem' }}>VAT{rangeLabel}</h3>
+          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
+            VAT you charged customers, less the VAT you paid suppliers and on expenses, month by month. Add a supplier's VAT on the purchase, and an expense's VAT when you log it, so it counts here.
+          </p>
+          <DataTable
+            columns={vatCols}
+            rows={vatRows}
+            getRowKey={r => r.month}
+            searchKeys={[r => monthName(r.month)]}
+            searchPlaceholder="Search months…"
+            emptyMessage="No VAT in this period."
+          />
+          {vatRows.length > 0 && (
+            <p style={{ marginTop: '0.9rem', fontSize: '0.9rem', color: '#475569' }}>
+              {vatDueTotal >= 0
+                ? <>VAT to pay for this period: <strong>{fmt(vatDueTotal)}</strong>.</>
+                : <>You paid <strong style={{ color: '#16a34a' }}>{fmt(-vatDueTotal)}</strong> more VAT than you charged in this period.</>}
             </p>
           )}
         </div>

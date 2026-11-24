@@ -773,6 +773,11 @@ function BusinessTab() {
   const [vatEnabled, setVatEnabled] = useState(tenant?.vat_enabled ?? false);
   const [vatRate, setVatRate] = useState(tenant?.vat_rate ?? 7.5);
   const [tin, setTin] = useState(tenant?.tin ?? '');
+  // Books closed up to a date (migration 0060). Only offered once the
+  // database has the column.
+  const hasBooksClosed = tenant?.books_closed_until !== undefined;
+  const [booksClosed, setBooksClosed] = useState(tenant?.books_closed_until ?? '');
+  const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
   // E-invoicing (NRS) readiness (migration 0035, Phase 7c).
   const hasEinvoiceFields = tenant?.rc_number !== undefined;
   const [rcNumber, setRcNumber] = useState(tenant?.rc_number ?? '');
@@ -833,8 +838,10 @@ function BusinessTab() {
     if (!tenant) return;
     const days = Math.round(Number(warnDays) || 0);
     if (hasExpirySettings && (days < 1 || days > 730)) { toast.error('Expiry warning must be between 1 and 730 days.'); return; }
+    if (hasBooksClosed && booksClosed && booksClosed > yesterday) { toast.error('Close the books up to yesterday at the latest.'); return; }
     const res = await saveBiz.mutate(tenant.id, {
       name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null,
+      ...(hasBooksClosed ? { books_closed_until: booksClosed || null } : {}),
       ...(hasExpirySettings ? { expiry_warning_days: days, allow_expired_sale: allowExpired } : {}),
       ...(hasReturnPolicy ? { cashier_returns: cashierReturns } : {}),
       ...(hasShiftRules ? {
@@ -959,6 +966,20 @@ function BusinessTab() {
                 TIN, RC number and this address are the master data Nigeria's e-invoicing (NRS) rollout will want — see Settings → E-Invoicing for readiness.
               </small>
             </div>
+          )}
+
+          {hasBooksClosed && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label htmlFor="books-closed">Books closed up to</label>
+                <input id="books-closed" type="date" value={booksClosed} max={yesterday}
+                       onChange={e => setBooksClosed(e.target.value)} />
+                <small style={{ color: '#64748b', fontSize: '0.75rem' }}>
+                  Once a month is finished and your VAT is filed or your accountant has the figures, close it here. Nobody can then add, change or void a sale, purchase, payment or expense dated on or before this day. Clear the date to open them again. Every change is in the activity log.
+                </small>
+              </div>
+            </>
           )}
 
           {!codeQ.loading && codeQ.data && (

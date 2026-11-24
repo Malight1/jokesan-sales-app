@@ -359,9 +359,20 @@ $warn-text: #b45309;
   }
   .is-right { text-align: right; }
   tfoot td { border-bottom: none; font-weight: 700; color: $gray-900; }
+  tfoot tr.pur-sub-row td { font-weight: 500; color: $gray-600; padding-top: 0.25rem; padding-bottom: 0.25rem; }
   tr.is-voided td { color: $gray-400; }
   .strike { text-decoration: line-through; }
 }
+
+.pur-vat-btn { margin: -0.4rem 0 0.75rem auto; display: flex; }
+.pur-vat-edit {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem;
+  padding: 0.85rem 1rem; margin-bottom: 1rem;
+  border: 1px solid $gray-200; border-radius: $radius; background: $gray-50;
+  .form-group { flex: 1 1 240px; }
+  small { display: block; margin-top: 0.3rem; font-size: $font-size-xs; color: $gray-500; line-height: 1.45; }
+}
+.pur-vat-actions { display: flex; gap: 0.5rem; }
 
 .pur-sub-title {
   margin: 1.1rem 0 0.5rem;

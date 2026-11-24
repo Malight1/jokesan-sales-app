@@ -1148,7 +1148,11 @@ function PurchaseDetail({ id, retail, onClose, supplierName, productName, payTyp
   onReturn?: (po: PurchaseOrder) => void;
 }) {
   const toast = useToast();
+  const { tenant, profile } = useAuth();
   const { data, loading, error, refetch } = useQuery<any>(() => purchasesApi.detail(id), [id]);
+  // Supplier VAT (migration 0060): owner or accounts, once all goods are in.
+  const [vatEdit, setVatEdit] = useState<number | null>(null);
+  const [vatSaving, setVatSaving] = useState(false);
   const { data: returnNotes, refetch: refetchReturns } = useQuery(() => returnsApi.purchases.forPurchase(id), [id]);
   const voidMut = useMutation(returnsApi.purchases.void);
   const [voidTarget, setVoidTarget] = useState<{ id: string; doc_no: string | null } | null>(null);
@@ -1171,6 +1175,23 @@ function PurchaseDetail({ id, retail, onClose, supplierName, productName, payTyp
   const items = po?.purchase_items ?? [];
   const payments = po?.purchase_payments ?? [];
   const status = po ? (po.voided ? { label: 'Voided', cls: 'badge-gray' } : statusMap[po.payment_status]) : null;
+  const vat = Number(po?.vat_amount || 0);
+  const canSetVat = !!(po && !po.voided && (po.status ?? 'received') === 'received'
+    && (profile?.role === 'admin' || profile?.role === 'accounts') && (tenant?.vat_enabled || vat > 0));
+  const saveVat = async () => {
+    if (!po || vatEdit === null) return;
+    setVatSaving(true);
+    try {
+      await purchasesApi.setVat(po.id, vatEdit);
+      toast.success(vatEdit > 0 ? 'Supplier VAT saved.' : 'Supplier VAT removed.');
+      setVatEdit(null);
+      refetch();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not save the VAT.');
+    } finally {
+      setVatSaving(false);
+    }
+  };
   const canReturnHere = !!(po && onReturn && !po.voided && po.status !== 'ordered' && po.status !== 'cancelled' && items.some(i => unusedQty(i) > 0));
 
   return (
@@ -1219,9 +1240,33 @@ function PurchaseDetail({ id, retail, onClose, supplierName, productName, payTyp
                   ))}
                 </tbody>
                 <tfoot>
+                  {vat > 0 && (
+                    <>
+                      <tr className="pur-sub-row"><td colSpan={4} className="is-right">Goods</td><td className="is-right">{fmt(po.total_amount - vat)}</td></tr>
+                      <tr className="pur-sub-row"><td colSpan={4} className="is-right">Supplier's VAT</td><td className="is-right">{fmt(vat)}</td></tr>
+                    </>
+                  )}
                   <tr><td colSpan={4} className="is-right">Total</td><td className="is-right">{fmt(po.total_amount)}</td></tr>
                 </tfoot>
               </table>
+
+              {canSetVat && (vatEdit === null ? (
+                <button type="button" className="btn-ghost btn-sm pur-vat-btn" onClick={() => setVatEdit(vat)}>
+                  {vat > 0 ? 'Change supplier\u2019s VAT' : 'Add supplier\u2019s VAT'}
+                </button>
+              ) : (
+                <div className="pur-vat-edit">
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="pur-vat">VAT on the supplier's invoice (₦)</label>
+                    <NumberInput id="pur-vat" value={vatEdit} onChange={setVatEdit} autoFocus />
+                    <small>Added on top of the goods, so what you owe the supplier goes up and the VAT shows on the VAT report. Item costs stay without VAT.</small>
+                  </div>
+                  <div className="pur-vat-actions">
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setVatEdit(null)} disabled={vatSaving}>Cancel</button>
+                    <button type="button" className="btn-primary btn-sm" onClick={saveVat} disabled={vatSaving}>{vatSaving ? 'Saving…' : 'Save VAT'}</button>
+                  </div>
+                </div>
+              ))}
 
               {payments.length > 0 && (
                 <>

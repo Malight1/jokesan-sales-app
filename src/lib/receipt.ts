@@ -154,7 +154,7 @@ const PROVIDER_LABEL: Record<string, string> = { monnify: 'Moniepoint', paystack
 // Keys of `expected` that are cash workings, not payment methods.
 const CASH_KEYS = new Set(['cash', 'opening_float', 'cash_sales', 'pay_in', 'pay_out', 'drop']);
 const METHOD_LABEL: Record<string, string> = { transfer: 'Transfer', card: 'Card (POS)', store_credit: 'Store credit / other' };
-const MOVE_LABEL = { pay_in: 'Pay-in', pay_out: 'Pay-out', drop: 'Drop' } as const;
+const MOVE_LABEL = { pay_in: 'Pay-in', pay_out: 'Pay-out', drop: 'To bank or safe' } as const;
 
 // Short enough to fit a 58mm roll next to its label.
 const when = (iso?: string | null) => iso

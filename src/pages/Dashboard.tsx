@@ -9,7 +9,7 @@ import {
   AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  dashboard, customers as customersApi, batches as batchesApi, DashboardSummary, LowStockItem, ExpiryOverview,
+  dashboard, customers as customersApi, batches as batchesApi, reports as reportsApi, DashboardSummary, LowStockItem, ExpiryOverview,
 } from '../lib/api';
 import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -468,7 +468,12 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
   const monthSales = num(d.month_sales);
   const monthProfit = num(d.month_profit);
   const margin = monthSales > 0 ? (monthProfit / monthSales) * 100 : null;
-  const net = monthProfit - num(d.month_expenses);
+  // Stock written off and till shortages are costs too (0060).
+  const monthStart = useMemo(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`; }, []);
+  const extrasQ = useQuery(() => reportsApi.extras(monthStart).catch(() => null), [monthStart]);
+  const stockLoss = num(extrasQ.data?.stock_loss);
+  const tillShort = num(extrasQ.data?.till_short) - num(extrasQ.data?.till_over);
+  const net = monthProfit - num(d.month_expenses) - stockLoss - tillShort;
   const trend = (d.month_trend ?? []).map(m => ({ month: m.label, sales: num(m.total) }));
   const now = new Date();
   const period = `1 to ${now.getDate()} ${now.toLocaleDateString('en-GB', { month: 'long' })}`;
@@ -529,8 +534,20 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
       </div>
       <p className="db-aside">
         Expenses this month <strong className="db-num">{naira(d.month_expenses)}</strong>
+        {stockLoss > 0 && (
+          <>
+            <span className="db-aside-sep" aria-hidden="true" />
+            Stock written off <strong className="db-num">{naira(stockLoss)}</strong>
+          </>
+        )}
+        {tillShort !== 0 && (
+          <>
+            <span className="db-aside-sep" aria-hidden="true" />
+            Till cash {tillShort > 0 ? 'short' : 'over'} <strong className="db-num">{naira(Math.abs(tillShort))}</strong>
+          </>
+        )}
         <span className="db-aside-sep" aria-hidden="true" />
-        Profit after expenses <strong className={`db-num${net < 0 ? ' is-neg' : ''}`}>{naira(net)}</strong>
+        Profit after costs <strong className={`db-num${net < 0 ? ' is-neg' : ''}`}>{naira(net)}</strong>
       </p>
 
       <div className="db-grid db-grid-wide">

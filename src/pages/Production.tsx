@@ -227,6 +227,9 @@ export default function Production() {
                   <div className="form-group">
                     <label>Additional Expenses (₦)</label>
                     <NumberInput value={form.expenses} onChange={v => setForm(f => ({ ...f, expenses: v }))} />
+                    <small style={{ display: 'block', marginTop: 4, color: '#64748b', fontSize: '0.75rem', lineHeight: 1.45 }}>
+                      Gas, labour and other costs for this batch. They become part of the product's cost and reach your profit when it sells, so don't also log them on the Expenses page.
+                    </small>
                   </div>
                 </div>
                 <div className="grid-2">

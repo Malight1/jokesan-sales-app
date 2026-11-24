@@ -36,6 +36,8 @@ export interface Tenant {
   plan_expires_at: string | null;
   // Cashiers must use confirmed transfers at the till (migration 0058).
   require_confirmed_transfer?: boolean;
+  // Nothing dated on or before this can be added, changed or voided (0060).
+  books_closed_until?: string | null;
   // Set false by the platform owner's suspend button. Was never selected,
   // so the app could not tell a suspended tenant from a live one.
   is_active: boolean;

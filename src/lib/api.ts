@@ -83,6 +83,8 @@ export interface PurchaseOrder {
   // Balance can go negative once returned_total exceeds it: the supplier
   // owes YOU (migration 0023).
   returned_total?: number;
+  // Supplier VAT on top of the goods (migration 0060).
+  vat_amount?: number;
   // Ordered before received (migration 0029). Optional so a screen still
   // works against a database that hasn't run it — every purchase defaults
   // to 'received' either way, matching the immediate-receipt "Quick
@@ -111,6 +113,11 @@ export interface Expense {
   id: string; expense_date: string; expense_type_id: string | null;
   description: string | null; amount: number; payment_type_id: string | null;
   branch_id: string | null;
+  // Migration 0060: voided instead of deleted; VAT included in amount that
+  // can be claimed back; where an automatic expense came from.
+  voided?: boolean; voided_at?: string | null;
+  vat_amount?: number;
+  source?: 'till_pay_out' | 'payment_fee' | null;
 }
 export interface StockMovement {
   id: number; product_kind: string; product_id: string; movement_type: string;
@@ -497,6 +504,8 @@ export const purchases = {
   // fg_batch so the detail and return screens can read the real figure.
   detail: (id: string) => run<any>(supabase.from('purchase_orders')
     .select('*, purchase_items(*, fg_batch:fg_batch_id(qty_remaining)), purchase_payments(*)').eq('id', id).single()),
+  // Supplier VAT added on top of the goods (migration 0060).
+  setVat: (id: string, vat: number) => rpc<void>('set_purchase_vat', { p_purchase: id, p_vat: vat }),
   // Latest price paid per product, newest first, for prefilling a new
   // purchase's unit cost. '*' so it still works before 0045 adds
   // finished_good_id.
@@ -728,7 +737,8 @@ export const expenses = {
   list: () => runAll<Expense>((f, t) => supabase.from('expenses').select('*').order('expense_date', { ascending: false }).range(f, t)),
   create: (e: Partial<Expense>) => run<Expense>(supabase.from('expenses').insert(e).select().single()),
   update: (id: string, e: Partial<Expense>) => run<Expense>(supabase.from('expenses').update(e).eq('id', id).select().single()),
-  remove: (id: string) => del(supabase.from('expenses').delete().eq('id', id)),
+  // Expenses are never deleted (migration 0060): a void keeps the record.
+  void: (id: string) => run<Expense>(supabase.from('expenses').update({ voided: true }).eq('id', id).select().single()),
 };
 
 // ============================================================
@@ -857,6 +867,13 @@ export interface ProductProfit {
   total_revenue: number; total_cogs: number; profit: number; margin_pct: number;
 }
 
+export interface ReportExtras {
+  stock_loss: number; stock_loss_count: number;
+  till_short: number; till_over: number;
+  store_credit_owed: number; store_credit_customers: number;
+}
+export interface StockCostRow { product_kind: 'finished_good' | 'material'; product_id: string; qty: number; value_at_cost: number; }
+
 export const reports = {
   // Aggregated in SQL (migration 0016) rather than in the browser: it reads
   // sales_consumption, the highest-volume table, and uses the FIFO unit_cost
@@ -867,7 +884,13 @@ export const reports = {
       ...(branchId ? { p_branch: branchId } : {}),
     }),
   salesSummary: () => runAll<any>((f, t) => supabase.from('sales_orders').select('transaction_date,total_amount,amount_paid,balance,cogs,gross_profit').order('transaction_date').range(f, t)),
-  expenseSummary: () => runAll<any>((f, t) => supabase.from('expenses').select('expense_date,amount,expense_type_id').order('expense_date').range(f, t)),
+  expenseSummary: () => runAll<any>((f, t) => supabase.from('expenses').select('expense_date,amount,expense_type_id').eq('voided', false).order('expense_date').range(f, t)),
+  // Stock losses, till short/over and store credit owed (migration 0060).
+  extras: (from?: string, to?: string, branchId?: string | null) =>
+    rpc<ReportExtras>('report_extras', { p_from: from || null, p_to: to || null, p_branch: branchId || null }),
+  // What stock on hand cost, per item, from the FIFO layers (0060).
+  stockValue: (branchId?: string | null) =>
+    rpc<StockCostRow[]>('report_stock_value', { p_branch: branchId || null }),
   purchaseSummary: () => runAll<any>((f, t) => supabase.from('purchase_orders').select('purchase_date,total_amount,balance').order('purchase_date').range(f, t)),
 };
 
@@ -1001,6 +1024,8 @@ export interface InviteDetails { email: string; role: string; company: string; s
 export const tenantApi = {
   update: (id: string, patch: {
     name?: string; currency?: string; vat_enabled?: boolean; vat_rate?: number; tin?: string | null; logo_url?: string | null;
+    // Nothing dated on or before this can change (migration 0060).
+    books_closed_until?: string | null;
     expiry_warning_days?: number; allow_expired_sale?: boolean;
     cashier_returns?: 'none' | 'same_day_own' | 'any';
     shift_rules?: Partial<ShiftRules>;
@@ -1175,9 +1200,13 @@ export const shifts = {
   // null if the caller has no open till right now.
   myOpenShiftId: () => rpc<string | null>('current_open_shift'),
   open: (registerId: string, float: number) => rpc<string>('open_shift', { p_register: registerId, p_float: float }),
-  addCashMovement: (kind: 'pay_in' | 'pay_out' | 'drop', amount: number, reason: string, approval?: { userId: string; pin: string } | null) =>
+  // expenseTypeId: money paid out for a business cost also becomes an
+  // expense (migration 0060).
+  addCashMovement: (kind: 'pay_in' | 'pay_out' | 'drop', amount: number, reason: string,
+                    approval?: { userId: string; pin: string } | null, expenseTypeId?: string | null) =>
     approvalArgs(approval).then(args => rpc<string>('add_cash_movement', {
       p_kind: kind, p_amount: amount, p_reason: reason, ...args,
+      ...(expenseTypeId ? { p_expense_type: expenseTypeId } : {}),
     })),
   xReport: (shiftId?: string) => rpc<ShiftReport>('x_report', shiftId ? { p_shift: shiftId } : undefined),
   zReport: (shiftId: string) => rpc<ShiftReport>('z_report', { p_shift: shiftId }),
