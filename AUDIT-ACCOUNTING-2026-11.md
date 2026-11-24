@@ -54,13 +54,21 @@ Part 2.5 to 2.9 built and live 24 Nov (migration `0062_debts_statements_repeats.
 | 2.8 Bad debts | Owner can write off all or part of an unpaid invoice. No money moves; the amount shows as "Bad debts written off" on the P&L; undo from the sale. |
 | 2.9 Repeat expenses | "Repeat every month / week" when logging an expense. Each date is logged automatically when the owner or accounts opens the dashboard or Expenses (no scheduler needed); month ends handled; closed-books dates skipped; pause and resume. |
 
-Part 2.4 and 2.10 built 24 Nov (migration `0063_reconcile_balance_sheet.sql`), not yet deployed. Run 0063, then push.
+Part 2.4 and 2.10 built and live 24 Nov (migration `0063_reconcile_balance_sheet.sql`, commits 1097705 and 4cdad20).
 
 | Item | What was done |
 |---|---|
 | 2.4 Bank reconciliation | Bank & Cash, "Check statement": upload a bank or Moniepoint statement (CSV or Excel). ProfixBook finds the table, guesses the date, description, money in/out (or amount) and balance columns, and shows a preview before uploading. Each line is matched automatically to a movement in that account with the same amount within 3 days. What's left: Match by hand, Add it to ProfixBook (bank charge as an expense, owner money, loan, other income, VAT paid), or Skip. A second list shows what ProfixBook recorded that the bank doesn't show. The statement's closing balance sits beside ProfixBook's, with the difference. Finish when every line is done; only the owner can reopen. Re-uploading overlapping files skips lines already uploaded. |
 | 2.10 Balance sheet | Reports, Balance sheet tab (and Excel/PDF): owns (each account, stock at cost, customers owe, VAT to claim back), owes (suppliers, VAT owed, store credit, loans), and the owner's share split into owner money in less taken out, and profit kept plus starting balances. A snapshot of right now. Accounts checked against a statement show the date they were checked to. |
 | VAT paid | New "VAT paid to the tax office" money entry. It lowers VAT owed on the balance sheet and is not an expense. |
+
+Plans, Reports and the accountant pack, built 24 Nov (migration `0064_accounting_plan_locks.sql`), not yet deployed. Run 0064, then push.
+
+| Item | What was done |
+|---|---|
+| Plan split | Free keeps Profit & Loss, Sales, Expenses, Stock, VAT, Product profit and every accuracy fix. Growth adds debtors/creditors by how late, due dates, customer statements, write-offs, debts from before ProfixBook and repeat expenses. Business adds Bank & Cash, cash flow, balance sheet, statement checking, closed books and the accountant pack. Enforced in the database too. Nothing is deleted on a lower plan; the money ledger keeps filling in, so upgrading shows the full history. Trials get everything. Plan lists and the pricing comparison updated. |
+| Reports | One sidebar link to a Reports home: cards grouped as Profit and money, Sales and customers, Buying stock and costs, For your accountant, each with the question it answers and a plan label when locked. Each report is its own page (/reports/:kind) with a back link, only the filters that apply, and its own Excel/PDF buttons. The summary boxes moved off Reports (the dashboard has them). |
+| Accountant pack | Reports, Accountant pack: pick a period (this or last month, quarter or year, or dates). One Excel workbook with a sheet each for a cover page (business details, what is inside, how figures are worked out), Profit & Loss, Balance sheet, Cash flow, VAT, Sales, Purchases, Expenses, Debtors, Creditors, Stock value and every money movement. The same as one PDF. |
 
 ---
 

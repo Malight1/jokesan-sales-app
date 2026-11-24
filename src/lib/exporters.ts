@@ -102,11 +102,39 @@ export async function exportReport(kind: 'xlsx' | 'csv' | 'pdf', d: ExportDoc) {
 }
 
 async function reportPdf(d: ExportDoc) {
+  return pdfDocs([d], d.name, `${d.business ? d.business + ' · ' : ''}${d.title}`);
+}
+
+const sheetName = (title: string, used: Set<string>) => {
+  const base = title.replace(/[\\/?*[\]:]/g, ' ').slice(0, 28).trim() || 'Sheet';
+  let name = base; let n = 2;
+  while (used.has(name.toLowerCase())) name = `${base} ${n++}`;
+  used.add(name.toLowerCase());
+  return name;
+};
+
+/**
+ * Several reports in one file: an Excel workbook with a sheet per report,
+ * or one PDF with each report starting on a new page (the accountant pack).
+ */
+export async function exportPack(kind: 'xlsx' | 'pdf', name: string, footer: string, docs: ExportDoc[]) {
+  if (kind === 'pdf') return pdfDocs(docs, name, footer, 'landscape');
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const used = new Set<string>();
+  for (const d of docs) {
+    const { ws } = await buildSheet(d);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName(d.title, used));
+  }
+  XLSX.writeFile(wb, `${name}.xlsx`);
+}
+
+async function pdfDocs(docs: ExportDoc[], fileName: string, footer: string, orientation?: 'portrait' | 'landscape') {
   const [{ default: jsPDF }, { default: autoTable }, fonts] = await Promise.all([
     import('jspdf'), import('jspdf-autotable'), loadFonts(),
   ]);
-  const wide = d.tables.some(t => t.columns.length > 6);
-  const doc: any = new jsPDF({ unit: 'mm', format: 'a4', orientation: wide ? 'landscape' : 'portrait' });
+  const wide = docs.some(d => d.tables.some(t => t.columns.length > 6));
+  const doc: any = new jsPDF({ unit: 'mm', format: 'a4', orientation: orientation ?? (wide ? 'landscape' : 'portrait') });
   let font = (_w: Weight) => 'helvetica';
   if (fonts) {
     (Object.keys(FONT_FILES) as Weight[]).forEach(w => {
@@ -132,9 +160,12 @@ async function reportPdf(d: ExportDoc) {
   };
   const W = doc.internal.pageSize.getWidth();
   const M = 14;
+  const H0 = doc.internal.pageSize.getHeight();
   const ink: [number, number, number] = [15, 23, 42];
   const muted: [number, number, number] = [100, 116, 139];
 
+  docs.forEach((d, di) => {
+  if (di > 0) doc.addPage();
   let y = 16;
   if (d.business) {
     doc.setFont(font('bold'), 'normal'); doc.setFontSize(14); doc.setTextColor(...ink);
@@ -186,20 +217,21 @@ async function reportPdf(d: ExportDoc) {
     doc.setFont(font('regular'), 'normal'); doc.setFontSize(8.5); doc.setTextColor(...muted);
     d.notes.forEach(n => {
       const lines = doc.splitTextToSize(n, W - 2 * M);
-      if (y + lines.length * 4.2 > doc.internal.pageSize.getHeight() - 14) { doc.addPage(); y = 16; }
+      if (y + lines.length * 4.2 > H0 - 14) { doc.addPage(); y = 16; }
       doc.text(lines, M, y); y += lines.length * 4.2 + 1.5;
     });
   }
+  });
 
   const pages = doc.getNumberOfPages();
   const H = doc.internal.pageSize.getHeight();
   for (let i = 1; i <= pages; i++) {
     doc.setPage(i);
     doc.setFont(font('regular'), 'normal'); doc.setFontSize(7.5); doc.setTextColor(148, 163, 184);
-    doc.text(`${d.business ? d.business + ' · ' : ''}${d.title}`, M, H - 8);
+    doc.text(footer, M, H - 8);
     doc.text(`Page ${i} of ${pages}`, W - M, H - 8, { align: 'right' });
   }
-  doc.save(`${d.name}.pdf`);
+  doc.save(`${fileName}.pdf`);
 }
 
 function download(content: BlobPart, filename: string, type: string) {

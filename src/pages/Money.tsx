@@ -13,6 +13,8 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import NumberInput from '../components/NumberInput';
 import StatementUploadModal from '../components/StatementUploadModal';
+import PlanLock from '../components/PlanLock';
+import { hasFeature } from '../lib/features';
 import './Money.scss';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -23,8 +25,9 @@ const KIND_ICON = { cash: Banknote, bank: Landmark, wallet: Wallet } as const;
 // naira in and out of it, and the tools to record money that isn't a
 // sale or an expense: moving money between accounts, owner money, loans.
 export default function Money() {
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const allowed = hasFeature(tenant, 'accounting');
   const flowQ = useQuery<CashFlow>(() => money.cashFlow(null, today()), [], { cacheKey: 'money-overview' });
   const typesQ = useQuery<PaymentTypeAccount[]>(() => money.paymentTypes(), []);
   const [selected, setSelected] = useState<string | null>(null);
@@ -43,6 +46,20 @@ export default function Money() {
 
   const refresh = () => { flowQ.refetch(); typesQ.refetch(); statementsQ.refetch(); };
 
+  if (!allowed) return (
+    <div className="money">
+      <div className="page-header"><div className="page-title"><h1>Bank &amp; Cash</h1><p>Where your money is right now, and every naira that went in or out.</p></div></div>
+      <PlanLock feature="accounting" title="Bank & Cash">
+        <p>See where your money is right now, in every cash drawer, bank account and POS wallet, and every naira that went in or out.</p>
+        <ul>
+          <li>Record money moved between accounts, owner money and loans</li>
+          <li>Check your bank or Moniepoint statement against ProfixBook</li>
+          <li>Cash flow and balance sheet reports, and the accountant pack</li>
+        </ul>
+        <p>ProfixBook already keeps track of this in the background, so everything is there the day you upgrade.</p>
+      </PlanLock>
+    </div>
+  );
   if (flowQ.loading && !flowQ.data) return <Loading label="Adding up your money…" />;
   if (flowQ.error) return <ErrorState message={flowQ.error} onRetry={flowQ.refetch} />;
 

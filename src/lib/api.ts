@@ -913,6 +913,10 @@ export const money = {
     : run<MoneyAccount>(supabase.from('money_accounts').insert(a).select().single()),
   addEntry: (e: { kind: MoneyEntryKind; from_account?: string | null; to_account?: string | null; amount: number; entry_date: string; note?: string | null }) =>
     run<{ id: string }>(supabase.from('money_entries').insert(e).select('id').single()),
+  // Every movement in every account between two dates (accountant pack).
+  ledgerRange: (from: string, to: string) => runAll<MoneyLine>((f, t) => supabase.from('money_ledger').select('*')
+    .gte('entry_date', from).lte('entry_date', to).neq('category', 'opening')
+    .order('entry_date').order('id').range(f, t)),
   voidEntry: (id: string) => run<{ id: string }>(supabase.from('money_entries').update({ voided: true }).eq('id', id).select('id').single()),
   paymentTypes: () => run<PaymentTypeAccount[]>(supabase.from('payment_types').select('id, name, method_group, money_account_id').order('name')),
   setPaymentTypeAccount: (id: string, accountId: string | null) =>
@@ -1664,9 +1668,9 @@ export const support = {
 // Free is where a trial lands if nobody pays, so it has to be useful on
 // its own; Growth is the first paid step.
 export const PLANS = [
-  { id: 'free',     name: 'Free',     price: 0,     users: 1,  blurb: 'The owner, one shop', features: ['Point of sale that works offline', 'Stock and real profit', 'Invoices and WhatsApp receipts', 'Import from Excel or CSV', 'VAT', '50 products, 100 sales a month', 'Owner only, 1 branch'] },
-  { id: 'growth',   name: 'Growth',   price: 5500,  users: 5,  blurb: 'A growing team', features: ['Everything in Free, with no product or sales limits', 'WhatsApp debt reminders', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', 'Ask ProfixBook: 20 questions a month', '5 users, up to 3 branches'] },
-  { id: 'business', name: 'Business', price: 16500, users: 15, blurb: 'Multiple branches', features: ['Everything in Growth', 'Unlimited branches', '15 staff accounts', 'Priority WhatsApp support', 'Ask ProfixBook: 100 questions a month', 'Automatic payment confirmation', 'Custom fields & e-invoicing readiness'] },
+  { id: 'free',     name: 'Free',     price: 0,     users: 1,  blurb: 'The owner, one shop', features: ['Point of sale that works offline', 'Stock and real profit', 'Invoices and WhatsApp receipts', 'Import from Excel or CSV', 'VAT', 'Profit & Loss, sales and stock reports', '50 products, 100 sales a month', 'Owner only, 1 branch'] },
+  { id: 'growth',   name: 'Growth',   price: 5500,  users: 5,  blurb: 'A growing team', features: ['Everything in Free, with no product or sales limits', 'WhatsApp debt reminders', 'Debtors by how late, customer statements', 'Repeat expenses', 'Batch & expiry tracking (NAFDAC)', 'Price lists & discounts', 'Quotes, purchase orders & deliveries', 'Smart reorder suggestions', 'Ask ProfixBook: 20 questions a month', '5 users, up to 3 branches'] },
+  { id: 'business', name: 'Business', price: 16500, users: 15, blurb: 'Branches and full accounts', features: ['Everything in Growth', 'Unlimited branches', '15 staff accounts', 'Bank & Cash, cash flow and balance sheet', 'Bank statement checking', 'Accountant pack', 'Priority WhatsApp support', 'Ask ProfixBook: 100 questions a month', 'Automatic payment confirmation', 'Custom fields & e-invoicing readiness'] },
 ] as const;
 
 /** The plans you pay for (Free has no checkout). */

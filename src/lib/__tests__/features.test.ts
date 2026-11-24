@@ -51,6 +51,15 @@ describe('plan features', () => {
     expect(planFor('assistant')).toBe('Growth');
   });
 
+  it('puts debt tools on Growth and accounting on Business, with trials getting both (0064)', () => {
+    expect(hasFeature('free', 'debt_tools')).toBe(false);
+    expect(hasFeature('growth', 'debt_tools')).toBe(true);
+    expect(hasFeature('growth', 'accounting')).toBe(false);
+    expect(hasFeature('business', 'accounting')).toBe(true);
+    expect(hasFeature('trial', 'accounting')).toBe(true);
+    expect(planFor('accounting')).toBe('Business');
+  });
+
   it('gives Business and Enterprise priority support only', () => {
     expect(isPriority('business')).toBe(true);
     expect(isPriority('enterprise')).toBe(true);

@@ -972,7 +972,7 @@ function BusinessTab() {
             </div>
           )}
 
-          {hasTerms && (
+          {hasTerms && hasFeature(tenant, 'debt_tools') && (
             <>
               <hr className="divider" />
               <div className="form-group">
@@ -986,7 +986,7 @@ function BusinessTab() {
             </>
           )}
 
-          {hasBooksClosed && (
+          {hasBooksClosed && hasFeature(tenant, 'accounting') && (
             <>
               <hr className="divider" />
               <div className="form-group">

@@ -4013,6 +4013,8 @@ begin
 end $$;
 
 -- ---------- 27. money accounts and cash flow (0061) ----------
+-- Bank & Cash and the reports after it are on the Business plan (0064).
+update tenants set plan = 'business' where id = t_id('tenant');
 do $$
 declare
   v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos'); v_abuja uuid := t_id('abuja');
@@ -4471,6 +4473,58 @@ begin
     (select coalesce(sum(amount), 0) from money_entries where tenant_id = v_t and kind = 'owner_in' and not voided));
   perform t_as('00000000-0000-0000-0000-000000000003');
   perform t_err('the storekeeper can''t see the balance sheet', 'select public.report_balance_sheet()', 'Only the owner or accounts');
+  perform t_su();
+end $$;
+
+-- ---------- 30. plan locks for the accounting features (0064) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_bank uuid; v_cust uuid; v_sale uuid; v_n int;
+begin
+  perform t_su();
+  select id into v_bank from money_accounts where tenant_id = v_t and is_default;
+  select customer_id, id into v_cust, v_sale from sales_orders where tenant_id = v_t and not voided and balance > 0 and customer_id is not null limit 1;
+
+  update tenants set plan = 'free' where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('Free: no balance sheet', 'select public.report_balance_sheet()', 'Business plan');
+  perform t_err('Free: no cash flow report', 'select public.report_cash_flow()', 'Business plan');
+  perform t_err('Free: no bank statement checking', 'select public.bank_statements_list()', 'Business plan');
+  perform t_err('Free: no customer statements', format('select public.customer_statement(%L::uuid)', v_cust), 'Growth plan');
+  perform t_err('Free: no writing off debts', format('select public.write_off_debt(%L::uuid, 1)', v_sale), 'Growth plan');
+  perform t_err('Free: no opening debts', format('select public.create_opening_debt(''customer'', %L::uuid, 100, current_date)', v_cust), 'Growth plan');
+  perform t_err('Free: no recording money',
+    format('insert into money_entries (kind, to_account, amount) values (''owner_in'', %L, 10)', v_bank), 'row-level security');
+  perform t_err('Free: no new repeat expenses',
+    format('insert into recurring_expenses (branch_id, description, amount, frequency, next_date) values (%L, ''Rent'', 10, ''monthly'', current_date)', t_id('lagos')),
+    'row-level security');
+  perform t_rec('Free: repeats pause instead of failing', public.run_recurring_expenses() = 0);
+  perform t_err('Free: can''t close the books',
+    format('update tenants set books_closed_until = current_date - 1 where id = %L', v_t), 'Business plan');
+  perform t_rec('Free: Bank & Cash history can still be read', exists (select 1 from money_accounts));
+  perform t_su();
+
+  -- The money ledger still fills in on Free, so upgrading shows everything.
+  insert into expenses (tenant_id, expense_date, description, amount) values (v_t, current_date, 'Plan lock ledger check', 777);
+  perform t_rec('Free: the ledger keeps recording in the background',
+    exists (select 1 from money_ledger l join expenses e on e.id = l.source_id and l.source_table = 'expenses' where e.description = 'Plan lock ledger check'));
+
+  update tenants set plan = 'growth' where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('Growth: customer statements work', format('select public.customer_statement(%L::uuid)', v_cust));
+  perform t_err('Growth: still no balance sheet', 'select public.report_balance_sheet()', 'Business plan');
+  perform t_su();
+
+  update tenants set plan = 'trial', trial_ends_at = now() + interval '7 days' where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('a trial gets the balance sheet', 'select public.report_balance_sheet()');
+  perform t_su();
+
+  update tenants set plan = 'business' where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_ok('Business: balance sheet works', 'select public.report_balance_sheet()');
+  perform t_ok('Business: recording money works',
+    format('insert into money_entries (kind, to_account, amount) values (''owner_in'', %L, 10)', v_bank));
   perform t_su();
 end $$;
 

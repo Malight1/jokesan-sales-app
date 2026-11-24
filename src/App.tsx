@@ -122,6 +122,7 @@ export default function App() {
                         <Route path="/suppliers" element={<Suppliers />} />
                         <Route path="/stock-movement" element={<StockMovement />} />
                         <Route path="/reports" element={<Reports />} />
+                        <Route path="/reports/:kind" element={<Reports />} />
                         <Route path="/stock-alerts" element={<StockAlerts />} />
                         <Route path="/insights" element={<Insights />} />
                         <Route path="/pos" element={<POS />} />

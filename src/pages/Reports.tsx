@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link, Navigate, useParams } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Download, MessageCircle } from 'lucide-react';
+import { Download, MessageCircle, ArrowLeft, Check, FileSpreadsheet, FileText } from 'lucide-react';
 import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, customers as customersApi,
          purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock,
          StockCostRow, money as moneyApi, CashFlow, BalanceSheet } from '../lib/api';
@@ -15,37 +16,35 @@ import { useToast } from '../lib/ToastContext';
 import { whatsappLink, paymentRequestMessage } from '../lib/whatsapp';
 import { Loading, ErrorState } from '../components/DataStates';
 import DataTable, { Column } from '../components/DataTable';
-import { exportReport, ExportColumn, ExportDoc } from '../lib/exporters';
+import { exportReport, exportPack, ExportColumn, ExportDoc } from '../lib/exporters';
+import PlanLock from '../components/PlanLock';
+import ReportsHome from './ReportsHome';
+import { reportById, ReportId } from './reportCatalog';
+import './ReportsHome.scss';
 import { isRetail, label } from '../retail';
 import './Reports.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 const COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
 
-type Tab = 'pnl' | 'cashflow' | 'balance' | 'sales' | 'expenses' | 'stock' | 'debtors' | 'creditors' | 'products' | 'returns' | 'discounts' | 'vat';
-const ALL_TABS: { id: Tab; label: string }[] = [
-  { id: 'pnl', label: 'Profit & Loss' },
-  { id: 'cashflow', label: 'Cash flow' },
-  { id: 'balance', label: 'Balance sheet' },
-  { id: 'sales', label: 'Sales' },
-  { id: 'expenses', label: 'Expenses' },
-  { id: 'stock', label: 'Stock' },
-  { id: 'debtors', label: 'Debtors' },
-  { id: 'creditors', label: 'Creditors' },
-  { id: 'products', label: 'Product Profit' },
-  { id: 'returns', label: 'Returns' },
-  { id: 'discounts', label: 'Discounts' },
-  { id: 'vat', label: 'VAT' },
-];
+type Tab = ReportId;
 
+// /reports is the list of reports; /reports/:kind is one report (0064).
 export default function Reports() {
+  const { kind } = useParams();
+  const { tenant } = useAuth();
+  if (!kind) return <ReportsHome />;
+  const def = reportById(kind);
+  if (!def || (def.vatOnly && !tenant?.vat_enabled) || (def.tiersOnly && !hasFeature(tenant, 'price_tiers'))) return <Navigate to="/reports" replace />;
+  return <ReportView tab={def.id} />;
+}
+
+function ReportView({ tab }: { tab: Tab }) {
   const { tenant } = useAuth();
   const toast = useToast();
   const retail = isRetail(tenant);
   const tiersEnabled = hasFeature(tenant, 'price_tiers');
-  const vatOn = !!tenant?.vat_enabled;
-  const TABS = ALL_TABS.filter(t => (t.id !== 'discounts' || tiersEnabled) && (t.id !== 'vat' || vatOn));
-  const [tab, setTab] = useState<Tab>('pnl');
+  const def = reportById(tab)!;
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   // '' = every branch. Only offered to multi-branch companies.
@@ -54,6 +53,13 @@ export default function Reports() {
   // which rows are included, this decides how they're grouped.
   const [period, setPeriod] = useState<'day' | 'month' | 'year'>('month');
   const { multi, active, nameOf } = useBranches();
+  // The accountant pack covers the whole business, last month unless changed.
+  useEffect(() => {
+    if (tab !== 'accountant') return;
+    setBranch('');
+    if (!from && !to) { const [pf, pt] = PRESETS[1].range(); setFrom(pf); setTo(pt); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const salesQ = useQuery(() => salesApi.list(), []);
   const expQ = useQuery(() => expensesApi.list(), []);
@@ -282,7 +288,8 @@ export default function Reports() {
     if (d.id) await customersApi.markReminded(d.id);
   };
 
-  const rangeLabel = (from || to ? ` (${from || 'start'} → ${to || 'today'})` : '') + (branch ? ` — ${nameOf(branch)}` : '');
+  // The page header shows the period now, so card headings stay plain.
+  const rangeLabel = '';
 
   // ---- Table column definitions (DataTable gives each one search, sort and paging) ----
   const salesCols: Column<any>[] = [
@@ -423,11 +430,11 @@ export default function Reports() {
   const bsEquity = bsOwnsTotal - bsOwesTotal;
   const bsOwnerNet = bs ? Number(bs.owner_in) - Number(bs.owner_out) : 0;
 
-  const doExport = async (kind: 'xlsx' | 'pdf') => {
+  const buildDoc = (t: Tab): ExportDoc => {
     const base = { business: tenant?.name ?? undefined, subtitle };
     let docSpec: ExportDoc;
 
-    if (tab === 'pnl') {
+    if (t === 'pnl') {
       const lines = [
         ...(returnsExVat !== 0 ? [
           { item: 'Sales (before VAT)', amount: grossSales },
@@ -450,7 +457,7 @@ export default function Reports() {
           'Amounts in brackets reduce profit.',
           ...(vatCollected !== 0 ? [`VAT collected in this period: ₦${vatCollected.toLocaleString('en-NG', { maximumFractionDigits: 2 })}. It is owed to the tax office, so it is not counted as revenue.`] : []),
         ] };
-    } else if (tab === 'cashflow') {
+    } else if (t === 'cashflow') {
       docSpec = { ...base, name: 'cash-flow', title: 'Cash flow', tables: [
         { heading: 'Money in', columns: [{ header: 'Kind', value: r => r.label }, M('Amount', r => r.value)], rows: cashIn, totalLabel: 'Total money in' },
         { heading: 'Money out', columns: [{ header: 'Kind', value: r => r.label }, M('Amount', r => r.value)], rows: cashOut, totalLabel: 'Total money out' },
@@ -462,7 +469,7 @@ export default function Reports() {
         `Net change: ₦${(cashInTotal - cashOutTotal).toLocaleString('en-NG', { maximumFractionDigits: 2 })} (money in less money out).`,
         ...(movedBetween > 0 ? [`₦${movedBetween.toLocaleString('en-NG', { maximumFractionDigits: 2 })} was moved between your own accounts. It is shown in each account but left out of money in and money out.`] : []),
       ] };
-    } else if (tab === 'balance') {
+    } else if (t === 'balance') {
       const row = (label: string, value: number, strong = false) => ({ label, value, strong });
       docSpec = { ...base, subtitle: `As of ${prettyDay(bs?.as_of ?? todayIso())}, whole business`, name: 'balance-sheet', title: 'Balance sheet', tables: [
         { heading: 'What the business owns', columns: [{ header: '', value: r => r.label }, M('Amount', r => r.value, false)],
@@ -479,7 +486,7 @@ export default function Reports() {
         'This is a snapshot of right now. The date and branch filters don\'t change it.',
         'Stock is counted at what it cost you, not what it sells for.',
       ] };
-    } else if (tab === 'sales') {
+    } else if (t === 'sales') {
       docSpec = { ...base, name: 'sales-report', title: 'Sales', tables: [{ columns: [
         { header: 'Invoice', value: r => r.doc_no ?? '' },
         { header: 'Date', value: r => r.transaction_date },
@@ -490,7 +497,7 @@ export default function Reports() {
         { header: 'Status', value: r => STATUS[r.payment_status] ?? r.payment_status },
       ], rows: sales }],
       notes: returnsExVat !== 0 ? [`Returns in this period took ₦${returnsExVat.toLocaleString('en-NG', { maximumFractionDigits: 2 })} (before VAT) off sales. See the Returns report.`] : undefined };
-    } else if (tab === 'expenses') {
+    } else if (t === 'expenses') {
       const byType = Object.values(expenses.reduce<Record<string, { name: string; count: number; amount: number; vat: number }>>((m, e) => {
         const n = typeName(e.expense_type_id);
         m[n] = m[n] || { name: n, count: 0, amount: 0, vat: 0 };
@@ -510,7 +517,7 @@ export default function Reports() {
             M('Amount', r => r.amount), M('VAT included', r => Number(r.vat_amount || 0)),
           ], rows: expenses },
       ], notes: ['Voided expenses are left out.'] };
-    } else if (tab === 'stock') {
+    } else if (t === 'stock') {
       const materials = (levelsQ.data ?? []).filter(l => l.product_kind === 'material' && (!branch || l.branch_id === branch));
       const matRows = Object.values(materials.reduce<Record<string, { id: string; name: string; unit: string | null; qty: number }>>((m, l) => {
         m[l.product_id] = m[l.product_id] || { id: l.product_id, name: l.name, unit: l.unit, qty: 0 };
@@ -530,7 +537,7 @@ export default function Reports() {
             { header: 'Unit', value: (r: any) => r.unit ?? '' }, M('Value at cost', (r: any) => matCost.get(r.id) ?? 0),
           ], rows: matRows }] : []),
       ], notes: ['Value at cost is what the stock on hand cost you (first in, first out). That is the figure an accountant uses.'] };
-    } else if (tab === 'debtors') {
+    } else if (t === 'debtors') {
       docSpec = { ...base, subtitle: asOfText, name: 'debtors-report', title: 'Owed to you', tables: [{ columns: [
         { header: 'Customer', value: r => r.name }, { header: 'Phone', value: r => r.phone ?? '' },
         { header: 'Invoices', value: r => r.count, total: true, align: 'right' },
@@ -540,27 +547,27 @@ export default function Reports() {
       ], rows: debtors }],
       notes: Number(extras?.store_credit_owed || 0) > 0
         ? [`You also owe ${extras?.store_credit_customers} customer(s) ₦${Number(extras?.store_credit_owed).toLocaleString('en-NG', { maximumFractionDigits: 2 })} in store credit.`] : undefined };
-    } else if (tab === 'creditors') {
+    } else if (t === 'creditors') {
       docSpec = { ...base, subtitle: asOfText, name: 'creditors-report', title: 'You owe suppliers', tables: [{ columns: [
         { header: 'Supplier', value: r => r.name }, { header: 'Bills', value: r => r.count, total: true, align: 'right' },
         M('Billed', r => r.total), M('Paid', r => r.paid),
         ...AGING.map(b => M(AGING_SHORT[b.key], (r: any) => r.aging[b.key])),
         M('Owed', r => r.balance),
       ], rows: creditors }] };
-    } else if (tab === 'products') {
+    } else if (t === 'products') {
       docSpec = { ...base, name: 'product-profitability', title: 'Product profit', tables: [{ columns: [
         { header: 'Product', value: r => r.product_name }, { header: 'Qty sold', value: r => Number(r.qty_sold), align: 'right' },
         M('Revenue', r => Number(r.total_revenue)), M('Cost of goods', r => Number(r.total_cogs)), M('Gross profit', r => Number(r.profit)),
         { header: 'Margin %', value: r => r.margin_pct === null || r.margin_pct === undefined ? '' : Number(r.margin_pct), align: 'right' },
       ], rows: productProfit }],
       notes: productRevenue > 0 ? [`Overall margin: ${((productProfitTotal / productRevenue) * 100).toFixed(1)}%.`] : undefined };
-    } else if (tab === 'returns') {
+    } else if (t === 'returns') {
       docSpec = { ...base, name: 'returns-report', title: 'Returns', tables: [{ columns: [
         { header: 'Product', value: r => r.product_name }, { header: 'Qty returned', value: r => Number(r.qty_returned), align: 'right' },
         { header: 'Put back for sale', value: r => Number(r.resellable_qty), align: 'right' },
         M('Value returned', r => Number(r.value_returned)), M('Written off', r => Number(r.loss_value)),
       ], rows: returnsData }] };
-    } else if (tab === 'vat') {
+    } else if (t === 'vat') {
       docSpec = { ...base, name: 'vat-report', title: 'VAT', tables: [{ columns: [
         { header: 'Month', value: r => monthName(r.month) },
         M('VAT charged on sales', r => r.sales), M('VAT paid to suppliers', r => r.purchases), M('VAT on expenses', r => r.expenses), M('VAT to pay', r => r.due),
@@ -573,68 +580,204 @@ export default function Reports() {
       ], rows: discountsData }] };
     }
 
+    return docSpec;
+  };
+
+  const doExport = async (kind: 'xlsx' | 'pdf') => {
     try {
-      await exportReport(kind, docSpec);
+      await exportReport(kind, buildDoc(tab));
     } catch {
-      window.alert('Could not build the export file. Please try again.');
+      toast.error('Could not build the export file. Please try again.');
+    }
+  };
+
+  // ---- Accountant pack (0064) ----
+  const purchasesDoc = (): ExportDoc => ({
+    business: tenant?.name ?? undefined, subtitle, name: 'purchases', title: 'Purchases',
+    tables: [{ columns: [
+      { header: 'Bill', value: r => r.doc_no ?? '' },
+      { header: 'Date', value: r => r.purchase_date },
+      { header: 'Supplier', value: r => suppName(r.supplier_id) },
+      M('Total', r => r.total_amount), M('VAT', r => Number(r.vat_amount || 0)),
+      M('Paid', r => r.total_paid), M('Balance', r => r.balance),
+    ], rows: purchases }],
+    notes: ['Voided purchases are left out.'],
+  });
+  const [packing, setPacking] = useState<'xlsx' | 'pdf' | null>(null);
+  const downloadPack = async (kind: 'xlsx' | 'pdf') => {
+    if (!from || !to) { toast.error('Choose the dates first.'); return; }
+    setPacking(kind);
+    try {
+      const lines = await moneyApi.ledgerRange(from, to);
+      const acctName = new Map((cash?.accounts ?? []).map(a => [a.id, a.name]));
+      const movements: ExportDoc = {
+        business: tenant?.name ?? undefined, subtitle, name: 'money-movements', title: 'Money movements',
+        tables: [{ columns: [
+          { header: 'Date', value: (r: any) => r.entry_date },
+          { header: 'Account', value: (r: any) => acctName.get(r.account_id) ?? '' },
+          { header: 'Kind', value: (r: any) => CATEGORY_LABEL[r.category] ?? r.category },
+          { header: 'What', value: (r: any) => r.description ?? '' },
+          M('In', (r: any) => (r.amount > 0 ? Number(r.amount) : 0)), M('Out', (r: any) => (r.amount < 0 ? -Number(r.amount) : 0)),
+        ], rows: lines }],
+        notes: ['Every naira in and out of each cash drawer, bank account and wallet. Money moved between your own accounts shows twice: out of one, into the other.'],
+      };
+      const parts: ExportDoc[] = [
+        buildDoc('pnl'), buildDoc('balance'), buildDoc('cashflow'),
+        ...(tenant?.vat_enabled || vatRows.length ? [buildDoc('vat')] : []),
+        buildDoc('sales'), purchasesDoc(), buildDoc('expenses'),
+        buildDoc('debtors'), buildDoc('creditors'), buildDoc('stock'), movements,
+      ];
+      const cover: ExportDoc = {
+        business: tenant?.name ?? undefined, subtitle: periodText, name: 'cover', title: 'Accountant pack',
+        tables: [
+          { heading: 'The business', columns: [{ header: '', value: (r: any) => r.k }, { header: '', value: (r: any) => r.v }], rows: [
+            { k: 'Name', v: tenant?.name ?? '' },
+            ...(tenant?.tin ? [{ k: 'TIN', v: tenant.tin }] : []),
+            { k: 'Period', v: periodText },
+            { k: 'VAT registered', v: tenant?.vat_enabled ? `Yes, ${tenant?.vat_rate ?? ''}%` : 'No' },
+          ] },
+          { heading: 'What is in this file', columns: [{ header: 'Sheet', value: (r: any) => r.title }, { header: 'Covers', value: (r: any) => r.subtitle ?? '' }], rows: parts },
+        ],
+        notes: [
+          'Revenue and costs are shown before VAT. VAT collected is owed to the tax office and is not income.',
+          'Stock and cost of goods sold use first in, first out (FIFO) at what the stock cost.',
+          'Profit counts a sale when it is made; cash flow counts money on the day it moved.',
+          'Debtors and creditors are what was still unpaid on the last day of the period. The balance sheet and stock are as of the day this pack was made.',
+          'Prepared with ProfixBook.',
+        ],
+      };
+      const slug = (tenant?.name ?? 'business').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      await exportPack(kind, `${slug}-accountant-pack-${from}-to-${to}`, `${tenant?.name ?? ''} · Accountant pack · ${periodText}`, [cover, ...parts]);
+      toast.success(kind === 'xlsx' ? 'Excel pack downloaded.' : 'PDF pack downloaded.');
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Could not build the pack. Please try again.');
+    } finally {
+      setPacking(null);
     }
   };
 
   if (loading) return <Loading label="Building reports…" />;
   if (error) return <ErrorState message={error} onRetry={() => { salesQ.refetch(); expQ.refetch(); goodsQ.refetch(); }} />;
 
-  return (
-    <div>
+  const locked = !!def.feature && !hasFeature(tenant, def.feature);
+  const header = (
+    <>
+      <Link to="/reports" className="rv-back"><ArrowLeft size={14} aria-hidden="true" /> All reports</Link>
       <div className="page-header">
-        <div className="page-title"><h1>Reports</h1><p>Business performance overview{rangeLabel}</p></div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn-secondary" onClick={() => doExport('xlsx')}><Download size={15} /> Excel</button>
-          <button className="btn-secondary" onClick={() => doExport('pdf')}><Download size={15} /> PDF</button>
+        <div className="page-title">
+          <h1>{def.title}</h1>
+          <p>{def.question}</p>
         </div>
-      </div>
-
-      {/* Date range */}
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>From</label>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} />
-        </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>To</label>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} />
-        </div>
-        {multi && (
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>Branch</label>
-            <select value={branch} onChange={e => setBranch(e.target.value)}>
-              <option value="">All branches</option>
-              {active.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+        {!locked && tab !== 'accountant' && (
+          <div className="rv-actions">
+            <button className="btn-secondary" onClick={() => doExport('xlsx')}><Download size={15} /> Excel</button>
+            <button className="btn-secondary" onClick={() => doExport('pdf')}><Download size={15} /> PDF</button>
           </div>
         )}
-        {(from || to || branch) && (
-          <button className="btn-ghost btn-sm" style={{ marginBottom: 4 }} onClick={() => { setFrom(''); setTo(''); setBranch(''); }}>Clear</button>
-        )}
       </div>
+    </>
+  );
+  if (locked) return (
+    <div>
+      {header}
+      <PlanLock feature={def.feature!} title={def.title}>
+        <p>{LOCK_TEXT[tab] ?? def.question}</p>
+      </PlanLock>
+    </div>
+  );
 
-      <div className="stat-cards">
-        <div className="stat-card"><div className="stat-label">Revenue</div><div className="stat-value">{fmt(totalSales)}</div></div>
-        <div className="stat-card"><div className="stat-label">Gross Profit</div><div className="stat-value" style={{ color: '#16a34a' }}>{fmt(grossProfit)}</div></div>
-        <div className="stat-card"><div className="stat-label">Net Profit</div><div className="stat-value" style={{ color: netProfit >= 0 ? '#16a34a' : '#dc2626' }}>{fmt(netProfit)}</div></div>
-        <div className="stat-card"><div className="stat-label">Owed to you</div><div className="stat-value" style={{ color: '#dc2626' }}>{fmt(totalOutstanding)}</div></div>
-      </div>
+  return (
+    <div>
+      {header}
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ padding: '0.6rem 1.1rem', background: 'none', border: 'none', cursor: 'pointer',
-              fontWeight: tab === t.id ? 700 : 400, color: tab === t.id ? '#2563eb' : '#64748b',
-              borderBottom: tab === t.id ? '2px solid #2563eb' : '2px solid transparent',
-              fontSize: '0.875rem', marginBottom: '-1px' }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {(def.filter !== 'none' || (def.branch && multi)) && tab !== 'accountant' && (
+        <div className="rv-filters">
+          {def.filter === 'dates' && (
+            <>
+              <div className="form-group">
+                <label htmlFor="rv-from">From</label>
+                <input id="rv-from" type="date" value={from} onChange={e => setFrom(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="rv-to">To</label>
+                <input id="rv-to" type="date" value={to} onChange={e => setTo(e.target.value)} />
+              </div>
+            </>
+          )}
+          {def.filter === 'asof' && (
+            <div className="form-group">
+              <label htmlFor="rv-asof">Unpaid as of</label>
+              <input id="rv-asof" type="date" value={to} onChange={e => setTo(e.target.value)} />
+            </div>
+          )}
+          {def.branch && multi && (
+            <div className="form-group">
+              <label htmlFor="rv-branch">Branch</label>
+              <select id="rv-branch" value={branch} onChange={e => setBranch(e.target.value)}>
+                <option value="">All branches</option>
+                {active.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          )}
+          {(from || to || branch) && (
+            <button className="btn-ghost btn-sm" style={{ marginBottom: 4 }} onClick={() => { setFrom(''); setTo(''); setBranch(''); }}>Clear</button>
+          )}
+        </div>
+      )}
+
+      {tab === 'accountant' && (
+        <div className="card ap-card">
+          <div className="ap-period">
+            <h3>Which period?</h3>
+            <div className="rv-presets" role="group" aria-label="Period">
+              {PRESETS.map(pr => {
+                const [pf, pt] = pr.range();
+                return (
+                  <button key={pr.id} type="button" className={from === pf && to === pt ? 'is-on' : ''} aria-pressed={from === pf && to === pt}
+                          onClick={() => { setFrom(pf); setTo(pt); }}>{pr.label}</button>
+                );
+              })}
+            </div>
+            <div className="ap-dates">
+              <div className="form-group">
+                <label htmlFor="ap-from">From</label>
+                <input id="ap-from" type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="ap-to">To</label>
+                <input id="ap-to" type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div className="ap-contents">
+            <h3>What's inside</h3>
+            <ul>
+              {[
+                'A cover page with your business details and how the figures are worked out',
+                'Profit & Loss for the period',
+                'Balance sheet: what you own and owe',
+                'Cash flow, by kind and by account',
+                ...(tenant?.vat_enabled || vatRows.length ? ['VAT by month'] : []),
+                `Every sale (${sales.length})`,
+                `Every purchase (${purchases.length})`,
+                `Every expense (${expenses.length}), and totals by type`,
+                'Debtors and creditors, by how late',
+                'Stock value at cost',
+                'Every movement in each bank, cash and wallet account',
+              ].map(item => <li key={item}><Check size={14} aria-hidden="true" /> {item}</li>)}
+            </ul>
+          </div>
+          <div className="ap-download">
+            <button type="button" className="btn-primary" onClick={() => downloadPack('xlsx')} disabled={!!packing || !from || !to}>
+              <FileSpreadsheet size={16} aria-hidden="true" /> {packing === 'xlsx' ? 'Building…' : 'Download Excel pack'}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => downloadPack('pdf')} disabled={!!packing || !from || !to}>
+              <FileText size={16} aria-hidden="true" /> {packing === 'pdf' ? 'Building…' : 'Download PDF'}
+            </button>
+            <p>Excel has one sheet for each part, so your accountant can work with the numbers. Send the file on WhatsApp or by email.</p>
+          </div>
+        </div>
+      )}
 
       {tab === 'pnl' && (
         <div className="card" style={{ maxWidth: 560 }}>
@@ -1037,3 +1180,23 @@ function AgingStrip({ aging }: { aging: Record<AgingKey, number> }) {
     </dl>
   );
 }
+
+// Accountant pack periods.
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const PRESETS: { id: string; label: string; range: () => [string, string] }[] = [
+  { id: 'this-month', label: 'This month', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth(), 1)), iso(n)]; } },
+  { id: 'last-month', label: 'Last month', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), n.getMonth() - 1, 1)), iso(new Date(n.getFullYear(), n.getMonth(), 0))]; } },
+  { id: 'this-quarter', label: 'This quarter', range: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3) * 3; return [iso(new Date(n.getFullYear(), q, 1)), iso(n)]; } },
+  { id: 'last-quarter', label: 'Last quarter', range: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3) * 3; return [iso(new Date(n.getFullYear(), q - 3, 1)), iso(new Date(n.getFullYear(), q, 0))]; } },
+  { id: 'this-year', label: 'This year', range: () => { const n = new Date(); return [iso(new Date(n.getFullYear(), 0, 1)), iso(n)]; } },
+  { id: 'last-year', label: 'Last year', range: () => { const y = new Date().getFullYear() - 1; return [`${y}-01-01`, `${y}-12-31`]; } },
+];
+
+// What a locked report would show, for the upgrade panel.
+const LOCK_TEXT: Partial<Record<Tab, string>> = {
+  cashflow: 'Money that actually came in and went out, by kind and by account. It answers "I made a profit, so where is the money?"',
+  balance: 'What the business owns (cash, bank, stock, what customers owe) against what it owes, and the owner\'s share. Banks ask for this when you apply for a loan.',
+  debtors: 'Every customer who owes you, split by how late they are: not due, 1-30 days, 31-60, 61-90 and over 90 days.',
+  creditors: 'Every supplier you owe, split by how late each bill is, so you know what to pay first.',
+  accountant: 'One Excel file with everything your accountant needs for a month, quarter or year: profit and loss, balance sheet, cash flow, VAT, every sale, purchase and expense, debts and stock, and every bank and cash movement.',
+};

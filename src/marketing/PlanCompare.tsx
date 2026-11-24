@@ -57,6 +57,19 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: 'Accounts and reports',
+    rows: [
+      everyPlan('Profit & Loss, sales, expenses, stock and VAT reports'),
+      feature('Debtors and creditors by how late, with due dates', 'debt_tools'),
+      feature('Customer statements (PDF or WhatsApp)', 'debt_tools'),
+      feature('Repeat expenses and bad-debt write-offs', 'debt_tools'),
+      feature('Bank & Cash: every account, transfers, owner money, loans', 'accounting'),
+      feature('Cash flow and balance sheet', 'accounting'),
+      feature('Check bank and Moniepoint statements', 'accounting'),
+      feature('Accountant pack (Excel and PDF)', 'accounting'),
+    ],
+  },
+  {
     title: 'Automation and control',
     rows: [
       { label: 'Ask ProfixBook (ask your business a question)', cell: p => hasFeature(p.id, 'assistant') ? (ASSISTANT[p.id] ?? true) : false },

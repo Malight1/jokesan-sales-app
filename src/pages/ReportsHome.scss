@@ -1,0 +1,87 @@
+@use '../styles/variables' as *;
+
+// Reports home: plain cards on white, grouped by the question they answer.
+.rh {
+  .rh-group { margin-bottom: 1.75rem; }
+  .rh-group h2 {
+    margin: 0 0 0.65rem;
+    font-size: $font-size-sm; font-weight: 700; color: $gray-700;
+  }
+  .rh-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 0.75rem;
+  }
+  .rh-card {
+    display: flex; align-items: center; gap: 0.85rem;
+    min-height: 84px; padding: 0.95rem 1rem;
+    background: $white; border: 1px solid $gray-200; border-radius: $radius-lg;
+    color: inherit; text-decoration: none;
+    transition: $transition-fast;
+    &:hover { border-color: $primary; .rh-go { color: $primary; transform: translateX(2px); } }
+    &:focus-visible { outline: none; box-shadow: $ring; border-color: $primary; }
+    &.is-locked .rh-icon { background: $gray-100; color: $gray-500; }
+  }
+  .rh-icon {
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: $radius;
+    background: $primary-light; color: $primary;
+  }
+  .rh-text { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; min-width: 0; }
+  .rh-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: $font-size-base; font-weight: 700; color: $gray-900; }
+  .rh-question { font-size: $font-size-sm; color: $gray-500; line-height: 1.45; }
+  .rh-plan {
+    display: inline-flex; align-items: center; gap: 0.2rem;
+    padding: 0.1rem 0.45rem; border-radius: $radius-full;
+    background: $gray-100; color: $gray-600; font-size: $font-size-xs; font-weight: 600;
+  }
+  .rh-go { flex-shrink: 0; color: $gray-400; transition: $transition-fast; }
+  @media (prefers-reduced-motion: reduce) { .rh-card:hover .rh-go { transform: none; } }
+}
+
+// A single report page.
+.rv-back {
+  display: inline-flex; align-items: center; gap: 0.25rem; margin-bottom: 0.4rem;
+  font-size: $font-size-xs; color: $gray-500; text-decoration: none;
+  &:hover { color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; border-radius: $radius-sm; }
+}
+.rv-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.rv-filters {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  .form-group { margin-bottom: 0; }
+  input, select { min-width: 150px; }
+}
+.rv-presets {
+  display: flex; flex-wrap: wrap; gap: 0.4rem;
+  button {
+    min-height: 36px; padding: 0.35rem 0.8rem;
+    border: 1px solid $gray-300; border-radius: $radius-full;
+    background: $white; color: $gray-600; font: inherit; font-size: $font-size-sm; cursor: pointer;
+    &:hover { border-color: $gray-400; }
+    &.is-on { border-color: $primary; background: $primary-light; color: $primary; font-weight: 600; }
+    &:focus-visible { outline: none; box-shadow: $ring; }
+  }
+}
+.rv-note { margin: 0 0 1rem; font-size: $font-size-sm; color: $gray-500; }
+
+// Accountant pack.
+.ap-card { max-width: 860px; }
+.ap-period { margin-bottom: 1.25rem; }
+.ap-period h3, .ap-contents h3 { margin: 0 0 0.6rem; font-size: $font-size-base; }
+.ap-dates { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; .form-group { margin-bottom: 0; } }
+.ap-contents ul {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.35rem 1.5rem;
+  list-style: none; margin: 0 0 1.25rem; padding: 0;
+}
+.ap-contents li {
+  display: flex; align-items: flex-start; gap: 0.45rem;
+  font-size: $font-size-sm; color: $gray-700; line-height: 1.45;
+  svg { flex-shrink: 0; margin-top: 0.15rem; color: #15803d; }
+}
+.ap-download {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+  padding-top: 1rem; border-top: 1px solid $gray-200;
+  p { flex-basis: 100%; margin: 0; font-size: $font-size-xs; color: $gray-500; }
+}

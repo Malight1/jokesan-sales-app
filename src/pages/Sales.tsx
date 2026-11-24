@@ -903,7 +903,7 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
   // Due date and write-offs (migration 0062).
   const writeOffsQ = useQuery(() => debts.writeOffs([id]).catch(() => []), [id]);
   const [dueEdit, setDueEdit] = useState<string | null>(null);
-  const canMoveDue = viewer?.role === 'admin' || viewer?.role === 'accounts' || viewer?.role === 'sales';
+  const canMoveDue = (viewer?.role === 'admin' || viewer?.role === 'accounts' || viewer?.role === 'sales') && hasFeature(tenant, 'debt_tools');
   const saveDue = async () => {
     if (!dueEdit) return;
     try { await debts.setDueDate('sale', id, dueEdit); toast.success('Due date changed.'); setDueEdit(null); refetch(); }
@@ -1035,7 +1035,7 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
                   {(writeOffsQ.data ?? []).map(w => (
                     <div key={w.id}>
                       <span>Written off {fmt(w.amount)} on {prettyDate(w.writeoff_date)}{w.reason ? `: ${w.reason}` : ''}</span>
-                      <button type="button" className="btn-ghost btn-sm" onClick={() => undoWriteOff(w.id)}><Undo2 size={13} /> Undo</button>
+                      {hasFeature(tenant, 'debt_tools') && <button type="button" className="btn-ghost btn-sm" onClick={() => undoWriteOff(w.id)}><Undo2 size={13} /> Undo</button>}
                     </div>
                   ))}
                 </div>

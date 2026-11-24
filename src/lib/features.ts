@@ -15,7 +15,9 @@ export type Feature =
   | 'einvoicing'
   | 'assistant'
   | 'debt_reminders'
-  | 'custom_fields';
+  | 'custom_fields'
+  | 'debt_tools'    // 0064: aging, statements, write-offs, opening debts, repeats, due dates
+  | 'accounting';   // 0064: Bank & Cash, cash flow, balance sheet, statement checking, closed books
 
 const PLAN_LEVEL: Record<string, number> = {
   free: 1,
@@ -39,6 +41,8 @@ const FEATURE_LEVEL: Record<Feature, number> = {
   auto_payments: 3,
   einvoicing: 3,
   custom_fields: 3,
+  debt_tools: 2,
+  accounting: 3,
 };
 
 type PlanTenant = Pick<Tenant, 'plan' | 'trial_ends_at' | 'plan_expires_at'>;

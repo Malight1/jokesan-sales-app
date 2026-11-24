@@ -7,6 +7,7 @@ import {
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
 import { personName, supplierTitle } from '../lib/supplierName';
 import { whatsappLink } from '../lib/whatsapp';
 import { ErrorState } from '../components/DataStates';
@@ -36,7 +37,7 @@ const emptyAccount: Account = { owed: 0, credit: 0, bought: 0, paid: 0, count: 0
 
 export default function Suppliers() {
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   // Paying a supplier is admin, inventory or accounts; the database checks
   // it too (guard_money_write), this only hides buttons that would fail.
   const canPay = ['admin', 'inventory', 'accounts'].includes(profile?.role ?? '');
@@ -270,7 +271,7 @@ export default function Suppliers() {
                   <div className="form-group"><label htmlFor="sup-email">Email</label><input id="sup-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                 </div>
                 <div className="form-group"><label htmlFor="sup-address">Address</label><input id="sup-address" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-                {schemaHasTerms && (
+                {schemaHasTerms && hasFeature(tenant, 'debt_tools') && (
                   <div className="form-group">
                     <label htmlFor="sup-terms">Days you have to pay them</label>
                     <input id="sup-terms" inputMode="numeric" value={form.payment_terms_days} placeholder="Your usual terms"
@@ -321,7 +322,8 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
   onClose: () => void; onEdit: () => void; onPaid: () => void;
 }) {
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
+  const debtTools = hasFeature(tenant, 'debt_tools');
   const [paying, setPaying] = useState<PurchaseOrder | null>(null);
   const [addingOpening, setAddingOpening] = useState(false);
   const name = supplierTitle(supplier);
@@ -396,7 +398,7 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
             )}
             <button type="button" className="btn-ghost" onClick={onEdit}><Pencil size={16} /> Edit details</button>
             {profile?.role === 'admin' && (
-              <button type="button" className="btn-ghost" onClick={() => setAddingOpening(true)}><History size={16} /> Owed before ProfixBook</button>
+              debtTools && <button type="button" className="btn-ghost" onClick={() => setAddingOpening(true)}><History size={16} /> Owed before ProfixBook</button>
             )}
           </div>
 

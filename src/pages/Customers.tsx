@@ -8,7 +8,7 @@ import {
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
-import { hasFeature } from '../lib/features';
+import { hasFeature, planFor } from '../lib/features';
 import { whatsappLink, paymentRequestMessage, hasBank } from '../lib/whatsapp';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
@@ -20,6 +20,7 @@ import Modal from '../components/Modal';
 import NumberInput from '../components/NumberInput';
 import StatementModal from '../components/StatementModal';
 import OpeningDebtModal from '../components/OpeningDebtModal';
+import { PlanNote } from '../components/PlanLock';
 import { dueText } from '../lib/debts';
 import '../styles/accounts.scss';
 
@@ -42,6 +43,7 @@ export default function Customers() {
   const toast = useToast();
   const { tenant } = useAuth();
   const tiersEnabled = hasFeature(tenant, 'price_tiers');
+  const debtTools = hasFeature(tenant, 'debt_tools');
   const { data: rows, loading, error, refetch, isOffline } = useQuery<Customer[]>(() => customersApi.list(), [], { cacheKey: 'customers-list' });
   const salesQ = useQuery<SaleBalance[]>(() => salesApi.balances().catch(() => []), [], { cacheKey: 'customers-balances' });
   const { data: types } = useQuery(() => lookups.customerTypes(), []);
@@ -283,7 +285,7 @@ export default function Customers() {
                   <div className="form-group"><label htmlFor="cus-email">Email (optional)</label><input id="cus-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                   <div className="form-group"><label htmlFor="cus-address">Address</label><input id="cus-address" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
                 </div>
-                {schemaHasTerms && (
+                {schemaHasTerms && debtTools && (
                   <div className="form-group">
                     <label htmlFor="cus-terms">Days they have to pay</label>
                     <input id="cus-terms" inputMode="numeric" value={form.payment_terms_days} placeholder="Your usual terms"
@@ -365,6 +367,7 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
   const name = customerTitle(customer);
   const bank = tenant?.bank_details;
   const canRemind = hasFeature(tenant, 'debt_reminders');
+  const debtTools = hasFeature(tenant, 'debt_tools');
   const docNo = (s: SaleBalance) => s.doc_no ?? `#${s.id.slice(0, 8).toUpperCase()}`;
   const open = [...account.open].sort((a, b) => a.transaction_date.localeCompare(b.transaction_date));
   const daysOld = (d: string) => Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000));
@@ -436,12 +439,14 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
             {customer.phone && (
               <a className="btn-secondary" href={`tel:${customer.phone.replace(/\s+/g, '')}`}><Phone size={16} /> Call</a>
             )}
-            <button type="button" className="btn-secondary" onClick={() => setShowStatement(true)}><FileText size={16} /> Statement</button>
+            {debtTools && <button type="button" className="btn-secondary" onClick={() => setShowStatement(true)}><FileText size={16} /> Statement</button>}
             <button type="button" className="btn-ghost" onClick={onEdit}><Pencil size={16} /> Edit details</button>
-            {isOwner && (
+            {isOwner && debtTools && (
               <button type="button" className="btn-ghost" onClick={() => setAddingOpening(true)}><History size={16} /> Owed before ProfixBook</button>
             )}
           </div>
+
+          {!debtTools && <PlanNote>Statements, bad-debt write-offs and debts from before ProfixBook are on the {planFor('debt_tools')} plan.</PlanNote>}
 
           <section className="acct-section">
             <h3>Unpaid invoices</h3>
@@ -472,7 +477,7 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
                           <Link2 size={13} /> {linkFor === s.id ? 'Creating…' : 'Pay link'}
                         </button>
                       )}
-                      {isOwner && (
+                      {isOwner && debtTools && (
                         <button type="button" className="btn-ghost btn-sm" onClick={() => setWritingOff(s)}>
                           <Ban size={13} /> Write off
                         </button>

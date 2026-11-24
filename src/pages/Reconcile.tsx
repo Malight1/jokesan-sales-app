@@ -9,6 +9,8 @@ import { useToast } from '../lib/ToastContext';
 import { Loading, ErrorState } from '../components/DataStates';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import PlanLock from '../components/PlanLock';
+import { hasFeature } from '../lib/features';
 import './Reconcile.scss';
 
 const prettyDate = (d: string) => new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -22,7 +24,7 @@ export default function Reconcile() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const { profile } = useAuth();
+  const { profile, tenant } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const q = useQuery<BankStatementView>(() => bank.view(id), [id]);
   const [filter, setFilter] = useState<Filter>('todo');
@@ -31,6 +33,11 @@ export default function Reconcile() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
+  if (!hasFeature(tenant, 'accounting')) return (
+    <PlanLock feature="accounting" title="Checking bank statements">
+      <p>Upload a statement from your bank or Moniepoint app and ProfixBook matches every line to what you recorded, so lost payments and charges nobody wrote down show up straight away.</p>
+    </PlanLock>
+  );
   if (q.loading && !q.data) return <Loading label="Opening the statement…" />;
   if (q.error) return <ErrorState message={q.error} onRetry={q.refetch} />;
   const st = q.data!;

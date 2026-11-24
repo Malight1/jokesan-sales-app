@@ -1,0 +1,33 @@
+@use '../styles/variables' as *;
+
+.plan-lock {
+  display: flex; gap: 1rem; align-items: flex-start;
+  max-width: 640px; padding: 1.5rem;
+  background: $white; border: 1px solid $gray-200; border-radius: $radius-lg;
+  h2 { margin: 0.35rem 0 0.4rem; font-size: $font-size-xl; color: $gray-900; }
+}
+.plan-lock-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 40px; height: 40px; border-radius: $radius-full;
+  background: $primary-light; color: $primary;
+}
+.plan-lock-body { min-width: 0; }
+.plan-lock-tag {
+  display: inline-block; padding: 0.15rem 0.55rem; border-radius: $radius-full;
+  background: $primary-light; color: $primary; font-size: $font-size-xs; font-weight: 600;
+}
+.plan-lock-text {
+  margin-bottom: 1rem; font-size: $font-size-sm; color: $gray-600; line-height: 1.6;
+  p { margin: 0 0 0.5rem; }
+  ul { margin: 0 0 0.5rem; padding-left: 1.1rem; }
+  li { margin-bottom: 0.2rem; }
+}
+.plan-lock-ask { margin: 0; font-size: $font-size-sm; color: $gray-500; }
+.plan-note {
+  display: flex; align-items: flex-start; gap: 0.35rem;
+  margin: 0 0 1rem; font-size: $font-size-xs; color: $gray-500; line-height: 1.5;
+  svg { flex-shrink: 0; margin-top: 0.15rem; }
+}
+@media (max-width: 560px) {
+  .plan-lock { flex-direction: column; padding: 1.15rem; }
+}

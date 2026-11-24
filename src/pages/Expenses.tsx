@@ -6,6 +6,7 @@ import './Expenses.scss';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
+import { hasFeature } from '../lib/features';
 import { ErrorState } from '../components/DataStates';
 import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -38,6 +39,8 @@ export default function Expenses() {
   const { data: expTypes } = useQuery<Lookup[]>(() => lookups.expenseTypes(), []);
   const { data: payTypes } = useQuery<Lookup[]>(() => lookups.paymentTypes(), []);
   // Which account paid (0061). Optional: the payment method decides otherwise.
+  const debtTools = hasFeature(tenant, 'debt_tools');
+  const accounting = hasFeature(tenant, 'accounting');
   const { data: moneyAccounts } = useQuery<MoneyAccount[]>(() => moneyApi.accounts().catch(() => []), []);
   const createMut = useMutation(expensesApi.create);
   const updateMut = useMutation((id: string, e: Partial<Expense>) => expensesApi.update(id, e));
@@ -173,7 +176,7 @@ export default function Expenses() {
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Log Expense</button>
       </div>
 
-      {(recurringQ.data ?? []).length > 0 && (
+      {debtTools && (recurringQ.data ?? []).length > 0 && (
         <section className="exp-repeats" aria-label="Repeat expenses">
           <h3><Repeat size={15} aria-hidden="true" /> Repeat expenses</h3>
           <ul>
@@ -251,7 +254,7 @@ export default function Expenses() {
                     </select>
                   </div>
                 </div>
-                {(moneyAccounts ?? []).length > 0 && (
+                {accounting && (moneyAccounts ?? []).length > 0 && (
                   <div className="form-group">
                     <label htmlFor="exp-from">Paid from</label>
                     <select id="exp-from" value={form.money_account_id} onChange={e => setForm(f => ({ ...f, money_account_id: e.target.value }))}>
@@ -260,7 +263,7 @@ export default function Expenses() {
                     </select>
                   </div>
                 )}
-                {!editRow && (
+                {!editRow && debtTools && (
                   <div className="form-group">
                     <label htmlFor="exp-repeat">Repeat</label>
                     <select id="exp-repeat" value={repeat} onChange={e => setRepeat(e.target.value as any)}>
