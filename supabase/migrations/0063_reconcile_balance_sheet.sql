@@ -31,20 +31,150 @@ alter table money_entries drop constraint if exists money_entries_kind_check;
 alter table money_entries add constraint money_entries_kind_check
   check (kind in ('transfer', 'owner_in', 'owner_out', 'loan_in', 'loan_repay', 'other_in', 'vat_paid'));
 
-do $$
-declare d text; n text;
+-- Full definitions (from 0061) rather than a text patch, so this works
+-- however the live copies were saved.
+create or replace function public.guard_money_entry()
+returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  d := pg_get_functiondef('public.guard_money_entry()'::regprocedure);
-  n := replace(d, $q$NEW.kind in ('owner_out', 'loan_repay')$q$, $q$NEW.kind in ('owner_out', 'loan_repay', 'vat_paid')$q$);
-  if n = d then raise exception 'guard_money_entry: patch did not apply'; end if;
-  execute n;
+  if TG_OP = 'DELETE' then
+    if auth.uid() is not null then
+      raise exception 'Money entries can''t be deleted. Void it instead, so there is a record of it.';
+    end if;
+    return OLD;
+  end if;
+  if TG_OP = 'UPDATE' then
+    if OLD.voided then raise exception 'This entry was voided and can''t be changed.'; end if;
+    if NEW.voided then
+      NEW.voided_at := now(); NEW.voided_by := auth.uid();
+      return NEW;
+    end if;
+  end if;
+  -- Which side each kind needs.
+  if NEW.kind = 'transfer' and (NEW.from_account is null or NEW.to_account is null) then
+    raise exception 'Pick the account the money left and the one it went into.';
+  end if;
+  if NEW.kind = 'transfer' and NEW.from_account = NEW.to_account then
+    raise exception 'The two accounts have to be different.';
+  end if;
+  if NEW.kind in ('owner_in', 'loan_in', 'other_in') then
+    if NEW.to_account is null then raise exception 'Pick the account the money went into.'; end if;
+    NEW.from_account := null;
+  end if;
+  if NEW.kind in ('owner_out', 'loan_repay', 'vat_paid') then
+    if NEW.from_account is null then raise exception 'Pick the account the money came out of.'; end if;
+    NEW.to_account := null;
+  end if;
+  if exists (select 1 from money_accounts where id in (NEW.from_account, NEW.to_account) and tenant_id <> NEW.tenant_id) then
+    raise exception 'That account does not belong to this company.';
+  end if;
+  return NEW;
+end $$;
 
-  d := pg_get_functiondef('public.money_sync(text, uuid)'::regprocedure);
-  n := replace(d, $q$when 'loan_repay' then 'Loan repayment'$q$,
-                  $q$when 'loan_repay' then 'Loan repayment'
-      when 'vat_paid'   then 'VAT paid to the tax office'$q$);
-  if n = d then raise exception 'money_sync: patch did not apply'; end if;
-  execute n;
+create or replace function public.money_sync(p_table text, p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  r       record;
+  v_acc   uuid;
+  v_acc2  uuid;
+  v_date  date;
+  v_label text;
+begin
+  delete from money_ledger where source_table = p_table and source_id = p_id;
+
+  if p_table = 'sale_payments' then
+    select sp.tenant_id, sp.amount_paid, sp.payment_date, sp.payment_type_id, sp.incoming_payment_id, sp.money_account_id,
+           sp.reference, so.branch_id, so.voided, so.doc_no
+      into r from sale_payments sp join sales_orders so on so.id = sp.sales_order_id where sp.id = p_id;
+    if not found or r.voided or r.amount_paid = 0 or r.reference = 'STORE_CREDIT' then return; end if;
+    v_acc := public.money_account_for(r.tenant_id, r.branch_id, r.payment_type_id, r.incoming_payment_id, r.money_account_id);
+    if v_acc is null then return; end if;
+    insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+    values (r.tenant_id, v_acc, r.payment_date, r.amount_paid,
+            case when r.amount_paid > 0 then 'customer_payment' else 'refund' end, p_table, p_id,
+            case when r.amount_paid > 0 then 'Payment for ' else 'Refund on ' end || coalesce(r.doc_no, 'a sale'));
+
+  elsif p_table = 'purchase_payments' then
+    select pp.tenant_id, pp.amount_paid, pp.payment_date, pp.payment_type_id, pp.money_account_id,
+           po.branch_id, po.voided, po.doc_no
+      into r from purchase_payments pp join purchase_orders po on po.id = pp.purchase_order_id where pp.id = p_id;
+    if not found or r.voided or r.amount_paid = 0 then return; end if;
+    v_acc := public.money_account_for(r.tenant_id, r.branch_id, r.payment_type_id, null, r.money_account_id);
+    if v_acc is null then return; end if;
+    insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+    values (r.tenant_id, v_acc, r.payment_date, -r.amount_paid, 'supplier_payment', p_table, p_id,
+            'Paid supplier for ' || coalesce(r.doc_no, 'a purchase'));
+
+  elsif p_table = 'expenses' then
+    select e.tenant_id, e.amount, e.expense_date, e.payment_type_id, e.money_account_id, e.branch_id, e.voided,
+           e.description, et.name as type_name
+      into r from expenses e left join expense_types et on et.id = e.expense_type_id where e.id = p_id;
+    if not found or r.voided or r.amount = 0 then return; end if;
+    v_acc := public.money_account_for(r.tenant_id, r.branch_id, r.payment_type_id, null, r.money_account_id);
+    if v_acc is null then return; end if;
+    insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+    values (r.tenant_id, v_acc, r.expense_date, -r.amount, 'expense', p_table, p_id,
+            coalesce(nullif(trim(r.description), ''), r.type_name, 'Expense'));
+
+  elsif p_table = 'cash_movements' then
+    select cm.tenant_id, cm.kind, cm.amount, cm.reason, cm.expense_id, cm.created_at, s.branch_id
+      into r from cash_movements cm join shifts s on s.id = cm.shift_id where cm.id = p_id;
+    if not found or r.expense_id is not null then return; end if;   -- the expense carries it
+    v_acc  := public.money_till_account(r.tenant_id, r.branch_id);
+    if v_acc is null then return; end if;
+    v_date := (r.created_at at time zone 'Africa/Lagos')::date;
+    if r.kind = 'pay_in' then
+      insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+      values (r.tenant_id, v_acc, v_date, r.amount, 'till_pay_in', p_table, p_id, 'Paid into the till: ' || r.reason);
+    elsif r.kind = 'pay_out' then
+      insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+      values (r.tenant_id, v_acc, v_date, -r.amount, 'till_pay_out', p_table, p_id, 'Paid out of the till: ' || r.reason);
+    else
+      -- Cash taken to the bank: out of the drawer, into the main bank account.
+      v_acc2 := public.money_default_account(r.tenant_id);
+      insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+      values (r.tenant_id, v_acc, v_date, -r.amount, 'transfer', p_table, p_id, 'Cash taken from the till: ' || r.reason);
+      if v_acc2 is not null and v_acc2 <> v_acc then
+        insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+        values (r.tenant_id, v_acc2, v_date, r.amount, 'transfer', p_table, p_id, 'Cash banked from the till: ' || r.reason);
+      end if;
+    end if;
+
+  elsif p_table = 'shifts' then
+    select tenant_id, branch_id, status, variance, closed_at, doc_no into r from shifts where id = p_id;
+    if not found or r.status <> 'closed' or coalesce(r.variance, 0) = 0 then return; end if;
+    v_acc := public.money_till_account(r.tenant_id, r.branch_id);
+    if v_acc is null then return; end if;
+    insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+    values (r.tenant_id, v_acc, (r.closed_at at time zone 'Africa/Lagos')::date, r.variance, 'till_difference', p_table, p_id,
+            case when r.variance < 0 then 'Till short at close' else 'Till over at close' end || coalesce(' (' || r.doc_no || ')', ''));
+
+  elsif p_table = 'money_entries' then
+    select * into r from money_entries where id = p_id;
+    if not found or r.voided then return; end if;
+    v_label := case r.kind
+      when 'transfer'   then 'Moved money'
+      when 'owner_in'   then 'Owner put money in'
+      when 'owner_out'  then 'Owner took money out'
+      when 'loan_in'    then 'Loan received'
+      when 'loan_repay' then 'Loan repayment'
+      when 'vat_paid'   then 'VAT paid to the tax office'
+      else 'Other money in' end || coalesce(': ' || nullif(trim(r.note), ''), '');
+    if r.from_account is not null then
+      insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+      values (r.tenant_id, r.from_account, r.entry_date, -r.amount, r.kind, p_table, p_id, v_label);
+    end if;
+    if r.to_account is not null then
+      insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+      values (r.tenant_id, r.to_account, r.entry_date, r.amount, r.kind, p_table, p_id, v_label);
+    end if;
+
+  elsif p_table = 'money_accounts' then
+    select * into r from money_accounts where id = p_id;
+    if not found or r.opening_balance = 0 then return; end if;
+    insert into money_ledger (tenant_id, account_id, entry_date, amount, category, source_table, source_id, description)
+    values (r.tenant_id, r.id, coalesce(r.opening_date, (r.created_at at time zone 'Africa/Lagos')::date),
+            r.opening_balance, 'opening', p_table, p_id, 'Starting balance');
+  end if;
 end $$;
 revoke execute on function public.money_sync(text, uuid) from public, anon, authenticated;
 
