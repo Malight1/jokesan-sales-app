@@ -4186,4 +4186,152 @@ begin
     exists (select 1 from money_accounts a join branches b on b.id = a.branch_id where b.name = 'Kano' and a.is_till));
 end $$;
 
+-- ---------- 28. due dates, opening debts, write-offs, statements, repeats (0062) ----------
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_lagos uuid := t_id('lagos'); v_cust uuid := t_id('return_cust');
+  v_soap uuid; v_sale uuid; v_ob uuid; v_obs uuid; v_cash uuid; v_w uuid; v_x jsonb; v_st jsonb; v_n int;
+  v_before numeric; v_rec uuid; v_sup uuid; v_po uuid;
+begin
+  perform t_su();
+  select id into v_soap from finished_goods where name = 'Ledger Soap' and tenant_id = v_t;
+  select id into v_cash from payment_types where tenant_id = v_t and method_group = 'cash' limit 1;
+
+  -- Due dates from payment terms.
+  update tenants set payment_terms_days = 7 where id = v_t;
+  update customers set payment_terms_days = null where id = v_cust;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.set_my_branch(v_lagos);
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_cust, t_items(v_soap, 1, 100)) into v_sale;
+  perform t_rec('an invoice is due after the business''s default terms (7 days)',
+    (select due_date = transaction_date + 7 from sales_orders where id = v_sale));
+  perform t_su();
+  update customers set payment_terms_days = 14 where id = v_cust;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  execute format('select public.create_sale(%L::uuid, current_date, null, 0, %L::jsonb)', v_cust, t_items(v_soap, 1, 100)) into v_sale;
+  perform t_rec('a customer''s own terms win (14 days)', (select due_date = transaction_date + 14 from sales_orders where id = v_sale));
+  perform public.set_due_date('sale', v_sale, current_date + 30);
+  perform t_rec('the owner can move an invoice''s due date', (select due_date = current_date + 30 from sales_orders where id = v_sale));
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('the storekeeper cannot move an invoice''s due date',
+    format('select public.set_due_date(''sale'', %L::uuid, current_date)', v_sale), 'can''t change');
+  perform t_su();
+  update tenants set payment_terms_days = null where id = v_t;
+  perform t_rec('existing invoices got a due date', not exists (select 1 from sales_orders where due_date is null));
+
+  -- Opening debts.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  select (public.dashboard_summary()->>'month_sales')::numeric into v_before;
+  v_ob := public.create_opening_debt('customer', v_cust, 50000, current_date - 60, current_date - 30, 'From the old notebook');
+  perform t_rec('an opening debt is an invoice that owes money but adds no sales',
+    (select total_amount = 0 and balance = 50000 and opening_amount = 50000 and doc_no like '%-OB-%' and due_date = current_date - 30
+       from sales_orders where id = v_ob),
+    (select format('total=%s bal=%s open=%s doc=%s due=%s', total_amount, balance, opening_amount, doc_no, due_date) from sales_orders where id = v_ob));
+  v_obs := public.create_opening_debt('customer', v_cust, 1000, current_date, null, null);
+  perform t_rec('this month''s sales are not changed by an opening debt dated today',
+    (public.dashboard_summary()->>'month_sales')::numeric = v_before);
+  perform public.record_sale_payment(v_ob, 20000, v_cash);
+  perform t_rec('a payment on an opening debt reduces it', (select balance = 30000 and payment_status = 'part' from sales_orders where id = v_ob));
+  perform t_su();
+  perform t_rec('money collected on an opening debt reaches the cash drawer',
+    exists (select 1 from money_ledger l join sale_payments sp on sp.id = l.source_id where sp.sales_order_id = v_ob and l.amount = 20000));
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform t_err('only the owner adds opening debts',
+    format('select public.create_opening_debt(''customer'', %L::uuid, 100, current_date)', v_cust), 'Only the owner');
+  perform t_su();
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform t_err('an opening debt needs a real supplier',
+    format('select public.create_opening_debt(''supplier'', %L::uuid, 1, current_date)', gen_random_uuid()), '');
+  perform t_su();
+end $$;
+
+do $$
+declare
+  v_t uuid := t_id('tenant'); v_cust uuid := t_id('return_cust'); v_sup uuid; v_po uuid; v_ob uuid; v_w uuid;
+  v_x jsonb; v_x2 jsonb; v_st jsonb; v_n int; v_rec uuid; v_lock_n int;
+begin
+  perform t_su();
+  insert into suppliers (tenant_id, company_store, payment_terms_days) values (v_t, 'Owed Supplier Ltd', 30) returning id into v_sup;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_po := public.create_opening_debt('supplier', v_sup, 80000, current_date - 10);
+  perform t_rec('an opening bill owes the supplier and adds no purchases',
+    (select total_amount = 0 and balance = 80000 and opening_amount = 80000 and doc_no like '%-OB-%' and due_date = current_date - 10 from purchase_orders where id = v_po));
+  perform t_su();
+
+  -- Bad debts.
+  select id into v_ob from sales_orders where tenant_id = v_t and opening_amount = 50000 limit 1;
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  v_x := public.report_extras(current_date, current_date);
+  perform t_err('cannot write off more than is owed', format('select public.write_off_debt(%L::uuid, 999999)', v_ob), 'still owed');
+  v_w := public.write_off_debt(v_ob, 5000, 'Customer relocated');
+  perform t_rec('writing off reduces what they owe', (select balance = 25000 from sales_orders where id = v_ob));
+  v_x2 := public.report_extras(current_date, current_date);
+  perform t_rec('a bad debt shows as a cost in the reports',
+    (v_x2->>'bad_debts')::numeric - (v_x->>'bad_debts')::numeric = 5000, v_x2::text);
+  perform t_su();
+  perform t_rec('writing off moves no money', not exists (select 1 from money_ledger where source_id = v_w));
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  perform t_err('only the owner can write off', format('select public.write_off_debt(%L::uuid, 1)', v_ob), 'Only the owner');
+  perform t_su();
+
+  -- Statements.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_st := public.customer_statement(v_cust);
+  perform t_su();
+  perform t_rec('a statement ends on exactly what the customer owes',
+    (v_st->>'closing')::numeric = (select sum(balance) from sales_orders where customer_id = v_cust and not voided),
+    (v_st->>'closing') || ' vs ' || (select sum(balance) from sales_orders where customer_id = v_cust and not voided)::text);
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  select count(*) into v_n from customers c where c.tenant_id = v_t and abs(
+    (select (public.customer_statement(c.id)->>'closing')::numeric) -
+    (select coalesce(sum(balance), 0) from sales_orders where customer_id = c.id and not voided)) > 0.005;
+  perform t_su();
+  perform t_rec('every customer''s statement matches their balances', v_n = 0, v_n || ' differ');
+  perform t_rec('the statement shows the write-off and the opening debt',
+    exists (select 1 from jsonb_array_elements(v_st->'lines') l where l->>'what' = 'Written off' and (l->>'amount')::numeric = -5000)
+    and exists (select 1 from jsonb_array_elements(v_st->'lines') l where l->>'what' = 'Owed before ProfixBook'));
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  v_st := public.customer_statement(v_cust, current_date - 1, current_date);
+  perform t_su();
+  perform t_rec('a statement for a period starts with what was owed before it',
+    (v_st->>'opening')::numeric + coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(v_st->'lines') l), 0)
+      = (v_st->>'closing')::numeric
+    and (v_st->>'opening')::numeric >= 50000);
+  perform t_as('00000000-0000-0000-0000-000000000003');
+  perform t_err('the storekeeper cannot see statements', format('select public.customer_statement(%L::uuid)', v_cust), 'can''t see');
+  perform t_su();
+
+  -- Undoing a write-off.
+  perform t_as('00000000-0000-0000-0000-000000000001');
+  perform public.void_debt_writeoff(v_w);
+  perform t_rec('undoing a write-off puts the debt back', (select balance = 30000 from sales_orders where id = v_ob));
+  perform t_su();
+
+  -- Repeat expenses.
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  insert into recurring_expenses (branch_id, description, amount, frequency, next_date)
+  values (t_id('lagos'), 'Shop rent', 150000, 'monthly', current_date - 40) returning id into v_rec;
+  perform t_rec('a monthly rent that started 40 days ago makes two expenses', public.run_recurring_expenses() = 2);
+  perform t_rec('running again makes nothing new', public.run_recurring_expenses() = 0);
+  perform t_rec('the next one is in the future', (select next_date > current_date and anchor_day is not null from recurring_expenses where id = v_rec));
+  perform t_su();
+  perform t_rec('each repeat is a real expense with its own date',
+    (select count(*) = 2 and count(distinct expense_date) = 2 from expenses where source = 'recurring' and source_ref like v_rec::text || ':%'));
+  perform t_rec('month ends stay sensible (31 Jan, 28 Feb, 31 Mar)',
+    public.recurring_next('2027-01-31', 'monthly', 31) = '2027-02-28' and public.recurring_next('2027-02-28', 'monthly', 31) = '2027-03-31'
+    and public.recurring_next('2026-11-24', 'weekly', null) = '2026-12-01');
+  update tenants set books_closed_until = current_date - 1 where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000004');
+  insert into recurring_expenses (branch_id, description, amount, frequency, next_date)
+  values (t_id('lagos'), 'Night guard', 30000, 'weekly', current_date - 14);
+  select public.run_recurring_expenses() into v_lock_n;
+  perform t_su();
+  perform t_rec('repeats dated inside closed books are skipped, today''s is made', v_lock_n = 1, v_lock_n::text);
+  update tenants set books_closed_until = null where id = v_t;
+  perform t_as('00000000-0000-0000-0000-000000000002');
+  perform t_rec('a cashier gets nothing from running repeats', public.run_recurring_expenses() = 0);
+  perform t_su();
+end $$;
+
 select name, pass, detail from t_results order by n;

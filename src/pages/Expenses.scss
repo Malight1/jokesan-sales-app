@@ -1,0 +1,21 @@
+@use '../styles/variables' as *;
+
+// Repeat expenses (0062).
+.exp-repeats {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  background: $white;
+  border: 1px solid $gray-200;
+  border-radius: $radius-lg;
+  h3 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: $font-size-sm; color: $gray-800; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+  li {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    padding: 0.5rem 0; border-top: 1px solid $gray-100;
+    &:first-child { border-top: none; }
+    div { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+    strong { font-size: $font-size-sm; color: $gray-900; }
+    span { font-size: $font-size-xs; color: $gray-500; }
+    &.is-paused strong { color: $gray-500; }
+  }
+}

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, X, Pencil, Ban } from 'lucide-react';
-import { expenses as expensesApi, lookups, money as moneyApi, Expense, Lookup, MoneyAccount } from '../lib/api';
+import React, { useEffect, useState } from 'react';
+import { Plus, X, Pencil, Ban, Repeat, Pause, Play } from 'lucide-react';
+import { expenses as expensesApi, lookups, money as moneyApi, debts, Expense, Lookup, MoneyAccount, RecurringExpense } from '../lib/api';
+import { addDays } from '../lib/debts';
+import './Expenses.scss';
 import { useQuery, useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import { useAuth } from '../lib/AuthContext';
@@ -17,7 +19,17 @@ const blankForm = () => ({
   expense_type_id: '', description: '', amount: 0, payment_type_id: '', vat_amount: 0, money_account_id: '',
 });
 
-const SOURCE_LABEL: Record<string, string> = { till_pay_out: 'From the till', payment_fee: 'Automatic' };
+const SOURCE_LABEL: Record<string, string> = { till_pay_out: 'From the till', payment_fee: 'Automatic', recurring: 'Repeats' };
+
+// The same day next month, or the month's last day if it is shorter.
+const nextMonth = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const last = new Date(y, m + 1, 0).getDate();
+  const nm = m === 12 ? 1 : m + 1; const ny = m === 12 ? y + 1 : y;
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+};
+const ordinal = (n: number) => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+const prettyDay = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export default function Expenses() {
   const toast = useToast();
@@ -35,6 +47,22 @@ export default function Expenses() {
   const [editRow, setEditRow] = useState<Expense | null>(null);
   const [voidRow, setVoidRow] = useState<Expense | null>(null);
   const [form, setForm] = useState(blankForm());
+  // Repeat expenses (migration 0062): made on their dates when the page opens.
+  const [repeat, setRepeat] = useState<'' | 'monthly' | 'weekly'>('');
+  const recurringQ = useQuery<RecurringExpense[]>(() => debts.recurring().catch(() => []), []);
+  useEffect(() => {
+    debts.runRecurring().then(n => {
+      if (n > 0) { toast.success(`${n} repeat expense${n === 1 ? '' : 's'} added for ${n === 1 ? 'its' : 'their'} date.`); refetch(); recurringQ.refetch(); }
+    }).catch(() => { /* not set up yet */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggleRecurring = async (r: RecurringExpense) => {
+    try {
+      await debts.saveRecurring({ id: r.id, is_active: !r.is_active });
+      toast.success(r.is_active ? `${r.description} paused.` : `${r.description} will repeat again.`);
+      recurringQ.refetch();
+    } catch (e: any) { toast.error(e?.message ?? 'Could not change it.'); }
+  };
 
   // Default to this month: an all-time total only ever grows and tells the
   // owner nothing. "All time" is still one tap away.
@@ -51,7 +79,7 @@ export default function Expenses() {
   const typeName = (id: string | null) => expTypes?.find(t => t.id === id)?.name ?? '—';
   const payName = (id: string | null) => payTypes?.find(t => t.id === id)?.name ?? '—';
 
-  const openCreate = () => { setEditRow(null); setForm(blankForm()); setShowModal(true); };
+  const openCreate = () => { setEditRow(null); setForm(blankForm()); setRepeat(''); setShowModal(true); };
   const openEdit = (x: Expense) => {
     setEditRow(x);
     setForm({
@@ -69,8 +97,22 @@ export default function Expenses() {
     const payload = { ...form, vat_amount: Number(form.vat_amount) || 0, expense_type_id: form.expense_type_id || null, payment_type_id: form.payment_type_id || null,
       money_account_id: form.money_account_id || null };
     const res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
+    if (res && !editRow && repeat) {
+      try {
+        await debts.saveRecurring({
+          description: form.description.trim() || expTypes?.find(t => t.id === form.expense_type_id)?.name || 'Repeat expense',
+          amount: form.amount, expense_type_id: form.expense_type_id || null, payment_type_id: form.payment_type_id || null,
+          money_account_id: form.money_account_id || null, branch_id: (res as Expense).branch_id ?? null, frequency: repeat,
+          anchor_day: repeat === 'monthly' ? Number(form.expense_date.slice(8, 10)) : null,
+          next_date: repeat === 'monthly' ? nextMonth(form.expense_date) : addDays(form.expense_date, 7),
+        });
+        recurringQ.refetch();
+      } catch (err: any) {
+        toast.error(`Expense saved, but it won't repeat: ${err?.message ?? 'unknown error'}`);
+      }
+    }
     if (res) {
-      toast.success(editRow ? 'Expense updated.' : 'Expense logged.');
+      toast.success(editRow ? 'Expense updated.' : repeat ? `Expense logged. It will repeat every ${repeat === 'monthly' ? 'month' : 'week'}.` : 'Expense logged.');
       setShowModal(false);
       setForm(blankForm());
       setEditRow(null);
@@ -130,6 +172,28 @@ export default function Expenses() {
         </div>
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Log Expense</button>
       </div>
+
+      {(recurringQ.data ?? []).length > 0 && (
+        <section className="exp-repeats" aria-label="Repeat expenses">
+          <h3><Repeat size={15} aria-hidden="true" /> Repeat expenses</h3>
+          <ul>
+            {(recurringQ.data ?? []).map(r => (
+              <li key={r.id} className={r.is_active ? undefined : 'is-paused'}>
+                <div>
+                  <strong>{r.description}</strong>
+                  <span>
+                    {fmt(r.amount)} every {r.frequency === 'monthly' ? `month on the ${ordinal(r.anchor_day ?? Number(r.next_date.slice(8, 10)))}` : 'week'}
+                    {r.is_active ? ` · next ${prettyDay(r.next_date)}` : ' · paused'}
+                  </span>
+                </div>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => toggleRecurring(r)}>
+                  {r.is_active ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <DataTable
         columns={columns}
@@ -194,6 +258,17 @@ export default function Expenses() {
                       <option value="">Based on the payment method</option>
                       {(moneyAccounts ?? []).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
+                  </div>
+                )}
+                {!editRow && (
+                  <div className="form-group">
+                    <label htmlFor="exp-repeat">Repeat</label>
+                    <select id="exp-repeat" value={repeat} onChange={e => setRepeat(e.target.value as any)}>
+                      <option value="">Just this once</option>
+                      <option value="monthly">Every month, on this date</option>
+                      <option value="weekly">Every week</option>
+                    </select>
+                    {repeat && <small style={{ color: '#64748b', fontSize: '0.75rem' }}>For rent, salaries, diesel and the like. ProfixBook logs it on each date for you. You can pause it any time.</small>}
                   </div>
                 )}
                 {showVat && (

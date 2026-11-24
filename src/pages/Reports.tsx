@@ -5,6 +5,7 @@ import { sales as salesApi, expenses as expensesApi, finishedGoods as goodsApi, 
          purchases as purchasesApi, suppliers as suppliersApi, reports as reportsApi, returns as returnsApi, pricing, lookups, stock,
          StockCostRow, money as moneyApi, CashFlow } from '../lib/api';
 import { CATEGORY_LABEL, naira } from '../lib/money';
+import { AGING, agingKey, AgingKey, todayIso } from '../lib/debts';
 import { hasFeature } from '../lib/features';
 import { useBranches } from '../lib/useBranches';
 import { qtyByProduct } from '../lib/branchStock';
@@ -124,7 +125,8 @@ export default function Reports() {
   const stockLoss = Number(extras?.stock_loss || 0);
   // Positive = the tills came up short overall.
   const tillShort = Number(extras?.till_short || 0) - Number(extras?.till_over || 0);
-  const netProfit = grossProfit - totalExpenses - stockLoss - tillShort;
+  const badDebts = Number(extras?.bad_debts || 0);
+  const netProfit = grossProfit - totalExpenses - stockLoss - tillShort - badDebts;
   const costRows = stockCostQ.data ?? [];
   const costOf = new Map(costRows.filter(r => r.product_kind === 'finished_good').map(r => [r.product_id, Number(r.value_at_cost || 0)]));
   const stockValue = goods.reduce((s, g) => s + (costOf.get(g.id) ?? 0), 0);
@@ -180,12 +182,21 @@ export default function Reports() {
     const c = custQ.data?.find(x => x.id === id);
     return c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.company_store || 'Unknown' : 'Walk-in';
   };
-  const debtorMap: Record<string, { id: string | null; name: string; phone: string | null; total: number; paid: number; balance: number; count: number }> = {};
+  // How late each debt is, on the To date (0062). An invoice without a due
+  // date was due the day it was made.
+  const asOf = to || todayIso();
+  const emptyAging = () => Object.fromEntries(AGING.map(b => [b.key, 0])) as Record<AgingKey, number>;
+  type Debtor = { id: string | null; name: string; phone: string | null; total: number; paid: number; balance: number; count: number; aging: Record<AgingKey, number> };
+  const debtorMap: Record<string, Debtor> = {};
+  const debtAging = emptyAging();
   salesOwing.forEach(s => {
     const key = s.customer_id ?? 'walkin';
     const phone = custQ.data?.find(c => c.id === s.customer_id)?.phone ?? null;
-    debtorMap[key] = debtorMap[key] || { id: s.customer_id, name: custName(s.customer_id), phone, total: 0, paid: 0, balance: 0, count: 0 };
-    debtorMap[key].total += s.total_amount;
+    debtorMap[key] = debtorMap[key] || { id: s.customer_id, name: custName(s.customer_id), phone, total: 0, paid: 0, balance: 0, count: 0, aging: emptyAging() };
+    const bucket = agingKey(s.due_date ?? s.transaction_date, asOf);
+    debtorMap[key].aging[bucket] += s.balance;
+    debtAging[bucket] += s.balance;
+    debtorMap[key].total += s.total_amount + Number(s.opening_amount || 0);
     debtorMap[key].paid += s.amount_paid;
     debtorMap[key].balance += s.balance;
     debtorMap[key].count += 1;
@@ -199,11 +210,16 @@ export default function Reports() {
   };
   const purchases = (purchQ.data ?? []).filter(pu => !pu.voided && inRange(pu.purchase_date) && inBranch(pu.branch_id));
   const purchasesOwing = (purchQ.data ?? []).filter(pu => !pu.voided && pu.balance > 0 && upTo(pu.purchase_date) && inBranch(pu.branch_id));
-  const creditorMap: Record<string, { key: string; name: string; total: number; paid: number; balance: number; count: number }> = {};
+  type Creditor = { key: string; name: string; total: number; paid: number; balance: number; count: number; aging: Record<AgingKey, number> };
+  const creditorMap: Record<string, Creditor> = {};
+  const billAging = emptyAging();
   purchasesOwing.forEach(pu => {
     const key = pu.supplier_id ?? 'none';
-    creditorMap[key] = creditorMap[key] || { key, name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0 };
-    creditorMap[key].total += pu.total_amount;
+    creditorMap[key] = creditorMap[key] || { key, name: suppName(pu.supplier_id), total: 0, paid: 0, balance: 0, count: 0, aging: emptyAging() };
+    const bucket = agingKey(pu.due_date ?? pu.purchase_date, asOf);
+    creditorMap[key].aging[bucket] += pu.balance;
+    billAging[bucket] += pu.balance;
+    creditorMap[key].total += pu.total_amount + Number(pu.opening_amount || 0);
     creditorMap[key].paid += pu.total_paid;
     creditorMap[key].balance += pu.balance;
     creditorMap[key].count += 1;
@@ -305,12 +321,18 @@ export default function Reports() {
         : <strong>{fmt(r.due)}</strong> },
   ];
 
+  const AGING_SHORT: Record<AgingKey, string> = { current: 'Not due', d30: '1-30 days', d60: '31-60 days', d90: '61-90 days', over: 'Over 90 days' };
+  const agingCols: Column<any>[] = AGING.map(b => ({
+    key: b.key, header: AGING_SHORT[b.key], align: 'right' as const, value: (r: any) => r.aging[b.key],
+    render: (r: any) => r.aging[b.key] > 0
+      ? <span style={{ color: b.key === 'current' ? undefined : b.key === 'd30' ? '#b45309' : '#dc2626', fontWeight: b.key === 'current' ? 400 : 600 }}>{fmt(r.aging[b.key])}</span>
+      : <span style={{ color: '#cbd5e1' }}>-</span>,
+  }));
   const debtorCols: Column<any>[] = [
     { key: 'name', header: 'Customer', value: r => r.name, render: r => <strong>{r.name}</strong> },
     { key: 'count', header: 'Invoices', align: 'right', value: r => r.count },
-    { key: 'total', header: 'Total', align: 'right', value: r => r.total, render: r => fmt(r.total) },
-    { key: 'paid', header: 'Paid', align: 'right', value: r => r.paid, render: r => fmt(r.paid) },
-    { key: 'balance', header: 'Outstanding', align: 'right', value: r => r.balance,
+    ...agingCols,
+    { key: 'balance', header: 'Owed', align: 'right', value: r => r.balance,
       render: r => <span style={{ color: '#dc2626', fontWeight: 700 }}>{fmt(r.balance)}</span> },
     { key: 'remind', header: '', sortable: false, align: 'right', value: () => '',
       render: r => (
@@ -323,8 +345,7 @@ export default function Reports() {
   const creditorCols: Column<any>[] = [
     { key: 'name', header: 'Supplier', value: r => r.name, render: r => <strong>{r.name}</strong> },
     { key: 'count', header: 'Bills', align: 'right', value: r => r.count },
-    { key: 'total', header: 'Total', align: 'right', value: r => r.total, render: r => fmt(r.total) },
-    { key: 'paid', header: 'Paid', align: 'right', value: r => r.paid, render: r => fmt(r.paid) },
+    ...agingCols,
     { key: 'balance', header: 'Owed', align: 'right', value: r => r.balance,
       render: r => <span style={{ color: '#d97706', fontWeight: 700 }}>{fmt(r.balance)}</span> },
   ];
@@ -395,6 +416,7 @@ export default function Reports() {
         { item: 'Total expenses', amount: -totalExpenses, strong: true },
         ...(stockLoss !== 0 ? [{ item: 'Stock written off or lost (at cost)', amount: -stockLoss }] : []),
         ...(tillShort !== 0 ? [{ item: tillShort > 0 ? 'Till cash short' : 'Till cash over', amount: -tillShort }] : []),
+        ...(badDebts !== 0 ? [{ item: 'Bad debts written off', amount: -badDebts }] : []),
         { item: 'Net profit', amount: netProfit, strong: true },
       ];
       docSpec = { ...base, name: 'profit-and-loss', title: 'Profit & Loss',
@@ -471,14 +493,18 @@ export default function Reports() {
       docSpec = { ...base, subtitle: asOfText, name: 'debtors-report', title: 'Owed to you', tables: [{ columns: [
         { header: 'Customer', value: r => r.name }, { header: 'Phone', value: r => r.phone ?? '' },
         { header: 'Invoices', value: r => r.count, total: true, align: 'right' },
-        M('Invoiced', r => r.total), M('Paid', r => r.paid), M('Owed', r => r.balance),
+        M('Invoiced', r => r.total), M('Paid', r => r.paid),
+        ...AGING.map(b => M(AGING_SHORT[b.key], (r: any) => r.aging[b.key])),
+        M('Owed', r => r.balance),
       ], rows: debtors }],
       notes: Number(extras?.store_credit_owed || 0) > 0
         ? [`You also owe ${extras?.store_credit_customers} customer(s) ₦${Number(extras?.store_credit_owed).toLocaleString('en-NG', { maximumFractionDigits: 2 })} in store credit.`] : undefined };
     } else if (tab === 'creditors') {
       docSpec = { ...base, subtitle: asOfText, name: 'creditors-report', title: 'You owe suppliers', tables: [{ columns: [
         { header: 'Supplier', value: r => r.name }, { header: 'Bills', value: r => r.count, total: true, align: 'right' },
-        M('Billed', r => r.total), M('Paid', r => r.paid), M('Owed', r => r.balance),
+        M('Billed', r => r.total), M('Paid', r => r.paid),
+        ...AGING.map(b => M(AGING_SHORT[b.key], (r: any) => r.aging[b.key])),
+        M('Owed', r => r.balance),
       ], rows: creditors }] };
     } else if (tab === 'products') {
       docSpec = { ...base, name: 'product-profitability', title: 'Product profit', tables: [{ columns: [
@@ -583,6 +609,7 @@ export default function Reports() {
             { label: 'Operating Expenses', value: -totalExpenses },
             ...(stockLoss !== 0 ? [{ label: 'Stock written off or lost (at cost)', value: -stockLoss }] : []),
             ...(tillShort !== 0 ? [{ label: tillShort > 0 ? 'Till cash short' : 'Till cash over', value: -tillShort }] : []),
+            ...(badDebts !== 0 ? [{ label: 'Bad debts written off', value: -badDebts }] : []),
             { label: 'Net Profit', value: netProfit, strong: true, final: true },
           ].map(row => (
             <div key={row.label} style={{
@@ -770,6 +797,7 @@ export default function Reports() {
             Every unpaid invoice dated {asOfLabel}, however old. The From date doesn't hide older debts.
             {Number(extras?.store_credit_owed || 0) > 0 && <> You also owe {extras?.store_credit_customers} customer{extras?.store_credit_customers === 1 ? '' : 's'} {fmt(Number(extras?.store_credit_owed))} in store credit.</>}
           </p>
+          <AgingStrip aging={debtAging} />
           <DataTable
             columns={debtorCols}
             rows={debtors}
@@ -787,6 +815,7 @@ export default function Reports() {
           <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
             Every unpaid bill dated {asOfLabel}, however old.
           </p>
+          <AgingStrip aging={billAging} />
           <DataTable
             columns={creditorCols}
             rows={creditors}
@@ -901,5 +930,21 @@ export default function Reports() {
         </div>
       )}
     </div>
+  );
+}
+
+// Owed, split by how late it is (0062). Late buckets are amber, then red.
+function AgingStrip({ aging }: { aging: Record<AgingKey, number> }) {
+  const total = AGING.reduce((sum, b) => sum + aging[b.key], 0);
+  if (total <= 0) return null;
+  return (
+    <dl className="aging-strip">
+      {AGING.map(b => (
+        <div key={b.key} className={`aging-${b.key}${aging[b.key] > 0 ? '' : ' is-zero'}`}>
+          <dt>{b.label}</dt>
+          <dd>{'\u20a6' + Math.round(aging[b.key]).toLocaleString('en-NG')}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

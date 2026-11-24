@@ -77,3 +77,19 @@
     border-radius: $border-radius;
   }
 }
+
+// Due date and write-offs on a sale (0062).
+.sd-late { color: $danger; font-weight: 600; }
+.sd-due-btn { margin-left: 0.5rem; font-size: $font-size-xs; }
+.sd-due-edit {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+  input { width: auto; min-height: 32px; padding: 0.2rem 0.45rem; font-size: $font-size-sm; }
+}
+.sd-writeoffs {
+  margin: 0.75rem 0 0;
+  > div {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    padding: 0.5rem 0.75rem; border-radius: $radius; background: $gray-50;
+    font-size: $font-size-sm; color: $gray-700;
+  }
+}

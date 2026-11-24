@@ -16,6 +16,7 @@
 .acct-tel { color: $gray-700; text-decoration: none; font-variant-numeric: tabular-nums; &:hover { color: $primary; } }
 .acct-num { font-variant-numeric: tabular-nums; }
 .acct-muted { color: $gray-400; }
+.acct-late { color: $danger; font-weight: 600; }
 .acct-owed { color: $danger; font-weight: 700; font-variant-numeric: tabular-nums; }
 .acct-credit { color: $success; font-weight: 600; font-variant-numeric: tabular-nums; }
 
@@ -121,6 +122,13 @@
   .acct-list-meta { font-size: $font-size-xs; color: $gray-500; }
   .acct-list-amount { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .acct-list-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
+  // Three or more actions (owner: write off) sit on their own line, so the
+  // invoice number and due date keep their room.
+  &.has-many-actions {
+    li { flex-wrap: wrap; row-gap: 0.45rem; }
+    .acct-list-actions { width: 100%; justify-content: flex-start; }
+  }
+  .acct-list-tag { display: inline-block; margin-left: 0.4rem; font-size: $font-size-xs; font-weight: 500; color: $gray-500; }
 
   @media (max-width: 560px) {
     li { flex-wrap: wrap; }

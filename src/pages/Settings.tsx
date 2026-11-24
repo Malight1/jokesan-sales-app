@@ -777,6 +777,9 @@ function BusinessTab() {
   // database has the column.
   const hasBooksClosed = tenant?.books_closed_until !== undefined;
   const [booksClosed, setBooksClosed] = useState(tenant?.books_closed_until ?? '');
+  // Usual payment terms for invoices (migration 0062).
+  const hasTerms = tenant?.payment_terms_days !== undefined;
+  const [terms, setTerms] = useState(tenant?.payment_terms_days == null ? '' : String(tenant.payment_terms_days));
   const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
   // E-invoicing (NRS) readiness (migration 0035, Phase 7c).
   const hasEinvoiceFields = tenant?.rc_number !== undefined;
@@ -842,6 +845,7 @@ function BusinessTab() {
     const res = await saveBiz.mutate(tenant.id, {
       name: name.trim(), currency, vat_enabled: vatEnabled, vat_rate: Number(vatRate) || 0, tin: tin.trim() || null,
       ...(hasBooksClosed ? { books_closed_until: booksClosed || null } : {}),
+      ...(hasTerms ? { payment_terms_days: terms === '' ? null : Math.min(365, Number(terms)) } : {}),
       ...(hasExpirySettings ? { expiry_warning_days: days, allow_expired_sale: allowExpired } : {}),
       ...(hasReturnPolicy ? { cashier_returns: cashierReturns } : {}),
       ...(hasShiftRules ? {
@@ -966,6 +970,20 @@ function BusinessTab() {
                 TIN, RC number and this address are the master data Nigeria's e-invoicing (NRS) rollout will want — see Settings → E-Invoicing for readiness.
               </small>
             </div>
+          )}
+
+          {hasTerms && (
+            <>
+              <hr className="divider" />
+              <div className="form-group">
+                <label htmlFor="pay-terms">Days customers have to pay</label>
+                <input id="pay-terms" inputMode="numeric" value={terms} placeholder="0 (pay straight away)"
+                       onChange={e => setTerms(e.target.value.replace(/[^\d]/g, '').slice(0, 3))} />
+                <small style={{ color: '#64748b', fontSize: '0.75rem' }}>
+                  Your usual terms, for example 14 or 30 days. Each invoice gets a due date from this, unless the customer has their own terms. Reports then show who is late and by how long.
+                </small>
+              </div>
+            </>
           )}
 
           {hasBooksClosed && (

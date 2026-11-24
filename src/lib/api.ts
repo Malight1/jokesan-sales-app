@@ -12,6 +12,8 @@ export interface Customer {
   id: string; first_name: string | null; last_name: string | null;
   company_store: string | null; address: string | null; phone: string | null;
   email: string | null; customer_type_id: string | null; last_reminded_at: string | null;
+  // Days they have to pay; empty = the business default (migration 0062).
+  payment_terms_days?: number | null;
   // Earned from returns, spent on a later sale (migration 0023).
   credit_balance?: number;
   // Overrides their customer type's price list (migration 0025).
@@ -35,6 +37,7 @@ export interface Supplier {
   custom_fields?: Record<string, any>;
   // Where you send their money (migration 0053). Optional until it runs.
   bank_name?: string | null; account_name?: string | null; account_number?: string | null;
+  payment_terms_days?: number | null;
 }
 export interface Material {
   id: string; name: string; unit: string | null; type_of_material: string;
@@ -67,6 +70,8 @@ export interface SalesOrder {
   notes: string | null; created_at: string; voided: boolean;
   subtotal: number; vat_amount: number; vat_rate: number;
   branch_id: string | null;
+  // When it should be paid, and what was owed before ProfixBook (0062).
+  due_date?: string | null; opening_amount?: number;
   // Cumulative return adjustment (0023). total_amount/gross_profit stay as
   // invoiced; these two track what's been given back since.
   returned_total?: number; returned_profit?: number;
@@ -85,6 +90,7 @@ export interface PurchaseOrder {
   returned_total?: number;
   // Supplier VAT on top of the goods (migration 0060).
   vat_amount?: number;
+  due_date?: string | null; opening_amount?: number;
   // Ordered before received (migration 0029). Optional so a screen still
   // works against a database that hasn't run it — every purchase defaults
   // to 'received' either way, matching the immediate-receipt "Quick
@@ -117,7 +123,7 @@ export interface Expense {
   // can be claimed back; where an automatic expense came from.
   voided?: boolean; voided_at?: string | null;
   vat_amount?: number;
-  source?: 'till_pay_out' | 'payment_fee' | null;
+  source?: 'till_pay_out' | 'payment_fee' | 'recurring' | null;
   // Which money account paid it; otherwise worked out from the payment method (0061).
   money_account_id?: string | null;
 }
@@ -390,12 +396,13 @@ export const boms = {
 export interface SaleBalance {
   id: string; customer_id: string | null; doc_no?: string | null; transaction_date: string;
   total_amount: number; amount_paid: number; balance: number; voided: boolean; created_at: string;
+  due_date?: string | null; opening_amount?: number;
 }
 export const sales = {
   list: () => runAll<SalesOrder>((f, t) => supabase.from('sales_orders').select('*').order('transaction_date', { ascending: false }).range(f, t)),
   // Just the money columns, for customer balances and statements.
   balances: () => runAll<SaleBalance>((f, t) => supabase.from('sales_orders')
-    .select('id, customer_id, doc_no, transaction_date, total_amount, amount_paid, balance, voided, created_at')
+    .select('*')
     .order('transaction_date', { ascending: false }).range(f, t)),
   detail: (id: string) => run<any>(supabase.from('sales_orders').select('*, sale_items(*), sale_payments(*)').eq('id', id).single()),
   // Look a sale up by its invoice number, for the POS "Returns" counter.
@@ -912,9 +919,40 @@ export const money = {
     run<PaymentTypeAccount>(supabase.from('payment_types').update({ money_account_id: accountId }).eq('id', id).select('id, name, method_group, money_account_id').single()),
 };
 
+// ============================================================
+// DEBTS (migration 0062): due dates, what was owed before ProfixBook,
+// bad debts, customer statements and repeat expenses.
+// ============================================================
+export interface StatementLine { date: string; ref: string | null; what: string; amount: number; balance: number; }
+export interface Statement { from: string | null; to: string; opening: number; closing: number; lines: StatementLine[]; }
+export interface RecurringExpense {
+  id: string; branch_id: string | null; expense_type_id: string | null; description: string; amount: number;
+  payment_type_id: string | null; money_account_id: string | null; frequency: 'monthly' | 'weekly';
+  anchor_day: number | null; next_date: string; is_active: boolean;
+}
+export const debts = {
+  setDueDate: (kind: 'sale' | 'purchase', id: string, due: string) => rpcVoid('set_due_date', { p_kind: kind, p_id: id, p_due: due }),
+  addOpening: (kind: 'customer' | 'supplier', partyId: string, amount: number, date: string, due?: string | null, note?: string | null) =>
+    rpc<string>('create_opening_debt', { p_kind: kind, p_party: partyId, p_amount: amount, p_date: date, p_due: due || null, p_note: note || null }),
+  writeOff: (saleId: string, amount: number, reason?: string | null) => rpc<string>('write_off_debt', { p_sale: saleId, p_amount: amount, p_reason: reason || null }),
+  writeOffs: (saleIds: string[]) => saleIds.length
+    ? run<{ id: string; sales_order_id: string; amount: number; writeoff_date: string; reason: string | null; voided: boolean }[]>(
+        supabase.from('debt_writeoffs').select('id, sales_order_id, amount, writeoff_date, reason, voided').in('sales_order_id', saleIds).eq('voided', false))
+    : Promise.resolve([]),
+  undoWriteOff: (id: string) => rpcVoid('void_debt_writeoff', { p_id: id }),
+  statement: (customerId: string, from?: string | null, to?: string | null) =>
+    rpc<Statement>('customer_statement', { p_customer: customerId, p_from: from || null, p_to: to || null }),
+  recurring: () => run<RecurringExpense[]>(supabase.from('recurring_expenses').select('*').order('next_date')),
+  saveRecurring: (r: Partial<RecurringExpense>) => r.id
+    ? run<RecurringExpense>(supabase.from('recurring_expenses').update(r).eq('id', r.id).select().single())
+    : run<RecurringExpense>(supabase.from('recurring_expenses').insert(r).select().single()),
+  runRecurring: () => rpc<number>('run_recurring_expenses'),
+};
+
 export interface ReportExtras {
   stock_loss: number; stock_loss_count: number;
   till_short: number; till_over: number;
+  bad_debts?: number;
   store_credit_owed: number; store_credit_customers: number;
 }
 export interface StockCostRow { product_kind: 'finished_good' | 'material'; product_id: string; qty: number; value_at_cost: number; }
@@ -1071,6 +1109,8 @@ export const tenantApi = {
     name?: string; currency?: string; vat_enabled?: boolean; vat_rate?: number; tin?: string | null; logo_url?: string | null;
     // Nothing dated on or before this can change (migration 0060).
     books_closed_until?: string | null;
+    // Default days to pay an invoice (migration 0062).
+    payment_terms_days?: number | null;
     expiry_warning_days?: number; allow_expired_sale?: boolean;
     cashier_returns?: 'none' | 'same_day_own' | 'any';
     shift_rules?: Partial<ShiftRules>;

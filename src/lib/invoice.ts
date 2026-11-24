@@ -306,6 +306,8 @@ export interface InvoiceData {
   vatRate?: number;
   tin?: string | null;
   logoDataUrl?: string | null;
+  // When it should be paid (migration 0062); printed while money is owed.
+  dueDate?: string | null;
   // Only printed when there's a balance left to collect.
   bankDetails?: BankDetails;
   // Sale-entity custom fields flagged show_on_invoice (migration 0032).
@@ -328,7 +330,11 @@ export async function generateInvoicePdf(d: InvoiceData) {
   ], M, y);
   const status = d.balance <= 0 ? ['Paid in full', 'good'] : d.paid > 0 ? ['Part paid', 'warn'] : ['Unpaid', 'warn'];
   chip(c, status[0], status[1] as 'good' | 'warn', c.W - M, y);
-  const right = facts(c, [['Date issued', prettyDate(d.date)], ...(d.balance > 0 ? [['Amount due', c.money(d.balance)] as [string, string]] : [])], y + 8);
+  const right = facts(c, [
+    ['Date issued', prettyDate(d.date)],
+    ...(d.balance > 0 && d.dueDate && d.dueDate.slice(0, 10) !== d.date.slice(0, 10) ? [['Due by', prettyDate(d.dueDate)] as [string, string]] : []),
+    ...(d.balance > 0 ? [['Amount due', c.money(d.balance)] as [string, string]] : []),
+  ], y + 8);
   y = Math.max(left, right) + 6;
 
   y = itemsTable(c, y, ['#', 'Description', 'Qty', 'Unit price', 'Amount'],

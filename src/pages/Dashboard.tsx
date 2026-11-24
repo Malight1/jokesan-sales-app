@@ -1,5 +1,5 @@
 import TillWatchPanel from '../components/TillWatchPanel';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ShoppingCart, Wallet, AlertTriangle, XCircle, CheckCircle2, FlaskConical, Truck, Repeat,
@@ -9,7 +9,7 @@ import {
   AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  dashboard, customers as customersApi, batches as batchesApi, reports as reportsApi, money as moneyApi, DashboardSummary, LowStockItem, ExpiryOverview,
+  dashboard, customers as customersApi, batches as batchesApi, reports as reportsApi, money as moneyApi, debts, DashboardSummary, LowStockItem, ExpiryOverview,
 } from '../lib/api';
 import { expiryLabel, BATCH_STATUS } from '../lib/batches';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -474,6 +474,13 @@ export function OwnerDashboard({ d, onReminded, expiry }: {
   const stockLoss = num(extrasQ.data?.stock_loss);
   const tillShort = num(extrasQ.data?.till_short) - num(extrasQ.data?.till_over);
   const net = monthProfit - num(d.month_expenses) - stockLoss - tillShort;
+  // Repeat expenses that came due are logged when the owner looks (0062),
+  // once per visit.
+  useEffect(() => {
+    if (sessionStorage.getItem('pfb-recurring-run')) return;
+    sessionStorage.setItem('pfb-recurring-run', '1');
+    debts.runRecurring().catch(() => { /* not set up yet */ });
+  }, []);
   // Money in every cash drawer, bank and wallet right now (0061).
   const moneyQ = useQuery(() => moneyApi.cashFlow(null, null).catch(() => null), []);
   const moneyNow = (moneyQ.data?.accounts ?? []).filter(a => a.is_active).reduce((s, a) => s + num(a.closing), 0);

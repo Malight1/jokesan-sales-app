@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, X, Pencil, Trash2, Eye, Phone, Copy, Wallet, MessageCircle } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Eye, Phone, Copy, Wallet, MessageCircle, History } from 'lucide-react';
 import {
   suppliers as suppliersApi, purchases as purchasesApi, customFieldDefs, lookups,
   Supplier, CustomFieldDef, PurchaseOrder, Lookup,
@@ -14,6 +14,8 @@ import DataTable, { Column, RowAction } from '../components/DataTable';
 import ConfirmDialog from '../components/ConfirmDialog';
 import CustomFieldsSection from '../components/CustomFieldsSection';
 import Modal from '../components/Modal';
+import OpeningDebtModal from '../components/OpeningDebtModal';
+import { dueText } from '../lib/debts';
 import { PayModal } from './Purchases';
 import './Purchases.scss';
 import '../styles/accounts.scss';
@@ -26,6 +28,7 @@ const emptyForm = {
   first_name: '', last_name: '', company_store: '', address: '', email: '', phone: '',
   bank_name: '', account_number: '', account_name: '',
   custom_fields: {} as Record<string, any>,
+  payment_terms_days: '' as string,
 };
 
 interface Account { owed: number; credit: number; bought: number; paid: number; count: number; last: string | null; open: PurchaseOrder[] }
@@ -77,6 +80,7 @@ export default function Suppliers() {
       address: s.address ?? '', email: s.email ?? '', phone: s.phone ?? '',
       bank_name: s.bank_name ?? '', account_number: s.account_number ?? '', account_name: s.account_name ?? '',
       custom_fields: s.custom_fields ?? {},
+      payment_terms_days: s.payment_terms_days == null ? '' : String(s.payment_terms_days),
     });
     setShowModal(true);
   };
@@ -86,13 +90,16 @@ export default function Suppliers() {
   // rejects the whole save.
   const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
   const schemaHasBank = (rows ?? []).some(r => 'account_number' in r);
+  const schemaHasTerms = (rows ?? []).some(r => 'payment_terms_days' in r);
   // A supplier is often just a business, so either name will do.
   const hasName = !!(form.company_store.trim() || form.first_name.trim() || form.last_name.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasName) { toast.error('Enter a business name or a contact person.'); return; }
-    const { custom_fields, bank_name, account_number, account_name, ...rest } = form;
+    const { custom_fields, bank_name, account_number, account_name, payment_terms_days, ...rest } = form;
+    const terms = payment_terms_days.trim() === '' ? null : Math.round(Number(payment_terms_days));
+    if (terms !== null && (terms < 0 || terms > 365)) { toast.error('Payment terms must be between 0 and 365 days.'); return; }
     const trimmed = Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, v.trim() || null]));
     const bank = { bank_name: bank_name.trim() || null, account_number: account_number.replace(/\s+/g, '') || null, account_name: account_name.trim() || null };
     const wantsBank = !!(bank.bank_name || bank.account_number || bank.account_name);
@@ -100,6 +107,7 @@ export default function Suppliers() {
       ...trimmed,
       ...(schemaHasBank || (rows ?? []).length === 0 || wantsBank ? bank : {}),
       ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
+      ...(schemaHasTerms ? { payment_terms_days: terms } : {}),
     };
     let res = editRow ? await updateMut.mutate(editRow.id, payload) : await createMut.mutate(payload);
     // A first supplier on a database without 0053 yet: retry without bank fields.
@@ -262,6 +270,14 @@ export default function Suppliers() {
                   <div className="form-group"><label htmlFor="sup-email">Email</label><input id="sup-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                 </div>
                 <div className="form-group"><label htmlFor="sup-address">Address</label><input id="sup-address" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+                {schemaHasTerms && (
+                  <div className="form-group">
+                    <label htmlFor="sup-terms">Days you have to pay them</label>
+                    <input id="sup-terms" inputMode="numeric" value={form.payment_terms_days} placeholder="Your usual terms"
+                           onChange={e => setForm(f => ({ ...f, payment_terms_days: e.target.value.replace(/[^\d]/g, '').slice(0, 3) }))} />
+                    <small className="acct-note">For example 30. Each bill gets a due date, and Reports show which bills are late.</small>
+                  </div>
+                )}
 
                 <h3 className="section-title">Their bank account</h3>
                 <p className="acct-note" style={{ marginBottom: '0.75rem' }}>Where you send their money. Shown every time you pay them, so nobody has to dig through chats for it.</p>
@@ -305,7 +321,9 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
   onClose: () => void; onEdit: () => void; onPaid: () => void;
 }) {
   const toast = useToast();
+  const { profile } = useAuth();
   const [paying, setPaying] = useState<PurchaseOrder | null>(null);
+  const [addingOpening, setAddingOpening] = useState(false);
   const name = supplierTitle(supplier);
   const open = [...account.open].sort((a, b) => a.purchase_date.localeCompare(b.purchase_date));
   const docNo = (p: PurchaseOrder) => p.doc_no ?? `#${p.id.slice(0, 8).toUpperCase()}`;
@@ -377,6 +395,9 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
               </>
             )}
             <button type="button" className="btn-ghost" onClick={onEdit}><Pencil size={16} /> Edit details</button>
+            {profile?.role === 'admin' && (
+              <button type="button" className="btn-ghost" onClick={() => setAddingOpening(true)}><History size={16} /> Owed before ProfixBook</button>
+            )}
           </div>
 
           <section className="acct-section" style={{ marginBottom: 0 }}>
@@ -388,10 +409,16 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
                 {open.map(p => (
                   <li key={p.id}>
                     <div className="acct-list-main">
-                      <span className="acct-list-title">{docNo(p)}</span>
+                      <span className="acct-list-title">
+                        {docNo(p)}
+                        {Number(p.opening_amount || 0) > 0 && <span className="acct-list-tag">owed before ProfixBook</span>}
+                      </span>
                       <span className="acct-list-meta">
                         {fmtDate(p.purchase_date)}
-                        {p.total_paid > 0 ? ` · paid ${fmt(p.total_paid)} of ${fmt(p.total_amount)}` : ` · ${fmt(p.total_amount)}, nothing paid yet`}
+                        {p.due_date && <> · <span className={dueText(p.due_date).late ? 'acct-late' : undefined}>{dueText(p.due_date).text}</span></>}
+                        {p.total_paid > 0
+                          ? ` · paid ${fmt(p.total_paid)} of ${fmt(p.total_amount + Number(p.opening_amount || 0))}`
+                          : ` · ${fmt(p.total_amount + Number(p.opening_amount || 0))}, nothing paid yet`}
                       </span>
                     </div>
                     <span className="acct-list-amount acct-owed">{fmt(p.balance)}</span>
@@ -416,6 +443,10 @@ function SupplierAccountModal({ supplier, account, canPay, payTypes, onClose, on
           onClose={() => setPaying(null)}
           onDone={() => { setPaying(null); onPaid(); }}
         />
+      )}
+      {addingOpening && (
+        <OpeningDebtModal kind="supplier" partyId={supplier.id} partyName={name}
+                          onClose={() => setAddingOpening(false)} onDone={() => { setAddingOpening(false); onPaid(); }} />
       )}
     </>
   );

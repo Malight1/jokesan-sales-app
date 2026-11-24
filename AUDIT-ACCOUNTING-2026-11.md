@@ -44,6 +44,16 @@ Part 2.1 to 2.3 built 24 Nov (migration `0061_money_accounts.sql`, Bank & Cash p
 | 2.2 Transfers and owner money | "Record money": move money between accounts, owner put money in, owner took money out, loan received, loan repayment, other money in. Void instead of delete, activity log, closed-books date applies. |
 | 2.3 Cash flow report | Reports, Cash flow tab: money in and out by kind for the dates chosen, the net change, and each account's start, in, out and end. Money moved between your own accounts is shown but left out of the totals. Dashboard shows "Cash and bank" now. |
 
+Part 2.5 to 2.9 built 24 Nov (migration `0062_debts_statements_repeats.sql`), not yet deployed. Run 0062, then push.
+
+| Item | What was done |
+|---|---|
+| 2.5 Due dates and aging | Payment terms in days on customers, suppliers and the business (Settings). Every invoice and bill gets a due date; the owner, accounts or sales can move one. Invoices print "Due by". Sales show "Overdue". Debtors and Creditors split what is owed into not due, 1-30, 31-60, 61-90 and over 90 days late, on screen and in exports. |
+| 2.6 Customer statements | Statement button on a customer's account: every invoice, payment, return, refund, store credit and write-off for a period with a running balance; PDF or WhatsApp. The closing figure always equals what they owe (tested for every customer). |
+| 2.7 Opening debts | "Owed before ProfixBook" on a customer or supplier (owner only): an OB-numbered document that owes money but adds nothing to sales, profit or purchases. It can be collected or paid like any invoice and shows on statements and aging. Starting cash and bank balances were done in 2.1. |
+| 2.8 Bad debts | Owner can write off all or part of an unpaid invoice. No money moves; the amount shows as "Bad debts written off" on the P&L; undo from the sale. |
+| 2.9 Repeat expenses | "Repeat every month / week" when logging an expense. Each date is logged automatically when the owner or accounts opens the dashboard or Expenses (no scheduler needed); month ends handled; closed-books dates skipped; pause and resume. |
+
 ---
 
 ## Part 1: Numbers that are wrong or incomplete today (fix first)

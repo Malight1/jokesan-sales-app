@@ -38,6 +38,8 @@ export interface Tenant {
   require_confirmed_transfer?: boolean;
   // Nothing dated on or before this can be added, changed or voided (0060).
   books_closed_until?: string | null;
+  // Default days customers have to pay (migration 0062).
+  payment_terms_days?: number | null;
   // Set false by the platform owner's suspend button. Was never selected,
   // so the app could not tell a suspended tenant from a live one.
   is_active: boolean;

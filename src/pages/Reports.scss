@@ -34,3 +34,20 @@
   strong { font-size: $font-size-lg; color: #15803d; font-variant-numeric: tabular-nums; }
   &.is-neg { background: $danger-light; strong { color: $danger; } }
 }
+
+// Aging strip (0062): what is owed, by how late.
+.aging-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0;
+  margin: 0 0 1rem;
+  border: 1px solid $gray-200;
+  border-radius: $radius;
+  overflow: hidden;
+  > div { padding: 0.65rem 0.85rem; border-right: 1px solid $gray-100; &:last-child { border-right: none; } }
+  dt { font-size: $font-size-xs; color: $gray-500; margin-bottom: 0.2rem; }
+  dd { margin: 0; font-weight: 700; color: $gray-900; font-variant-numeric: tabular-nums; }
+  .aging-d30 dd { color: #b45309; }
+  .aging-d60 dd, .aging-d90 dd, .aging-over dd { color: $danger; }
+  .is-zero dd { color: $gray-400; font-weight: 500; }
+}

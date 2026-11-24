@@ -3,7 +3,7 @@ import { Plus, X, Eye, Wallet, Ban, FileText, MessageCircle, Undo2, Gift, Link2,
 import {
   sales as salesApi, customers as customersApi, finishedGoods as goodsApi, lookups, branding, pricing,
   returns as returnsApi, storeCredit, payments as paymentsApi, deliveries as deliveriesApi, IntegrationStatus,
-  customFieldDefs, customFields as customFieldsApi, stock,
+  customFieldDefs, customFields as customFieldsApi, stock, debts,
   SalesOrder, Customer, FinishedGood, Lookup, ReturnCondition, PriceList, PriceListItem, CustomerType, CustomFieldDef, StockLevel,
 } from '../lib/api';
 import { useBranches } from '../lib/useBranches';
@@ -16,6 +16,7 @@ import { hasFeature } from '../lib/features';
 import { resolvePriceLocal, PriceContext } from '../lib/pricing';
 import { generateInvoicePdf, generateCreditNotePdf, prettyDate } from '../lib/invoice';
 import { DocTotals, DocLink } from '../components/DocParts';
+import { dueText, daysLate } from '../lib/debts';
 import { whatsappLink, howToPayLines, paymentRequestMessage } from '../lib/whatsapp';
 import { enqueuePayment } from '../lib/offlineQueue';
 import { Loading, ErrorState } from '../components/DataStates';
@@ -39,9 +40,10 @@ const CONDITIONS: { id: ReturnCondition; label: string; hint: string }[] = [
 
 // Read the status off the money itself, so the label can never disagree
 // with the Paid and Balance columns beside it.
-const saleStatus = (s: { voided?: boolean; balance: number; amount_paid: number }) =>
+const saleStatus = (s: { voided?: boolean; balance: number; amount_paid: number; due_date?: string | null }) =>
   s.voided ? { label: 'Voided', cls: 'badge-gray' }
   : s.balance <= 0 ? { label: 'Paid', cls: 'badge-success' }
+  : s.due_date && daysLate(s.due_date) > 0 ? { label: 'Overdue', cls: 'badge-danger' }
   : s.amount_paid > 0 ? { label: 'Part paid', cls: 'badge-warning' }
   : { label: 'Unpaid', cls: 'badge-danger' };
 
@@ -263,6 +265,7 @@ export default function Sales() {
         companyAddress: tenant?.address,
         invoiceNo: invoiceNo(s),
         date: s.transaction_date,
+        dueDate: s.due_date ?? null,
         customerName: customerName(s.customer_id),
         customerPhone: cust?.phone,
         customerAddress: cust?.address,
@@ -897,6 +900,20 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
   const [voidTarget, setVoidTarget] = useState<{ id: string; doc_no: string | null } | null>(null);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
   const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
+  // Due date and write-offs (migration 0062).
+  const writeOffsQ = useQuery(() => debts.writeOffs([id]).catch(() => []), [id]);
+  const [dueEdit, setDueEdit] = useState<string | null>(null);
+  const canMoveDue = viewer?.role === 'admin' || viewer?.role === 'accounts' || viewer?.role === 'sales';
+  const saveDue = async () => {
+    if (!dueEdit) return;
+    try { await debts.setDueDate('sale', id, dueEdit); toast.success('Due date changed.'); setDueEdit(null); refetch(); }
+    catch (e: any) { toast.error(e?.message ?? 'Could not change the due date.'); }
+  };
+  const undoWriteOff = async (wid: string) => {
+    try { await debts.undoWriteOff(wid); toast.success('Write-off undone. The amount is owed again.'); writeOffsQ.refetch(); refetch(); onVoidedReturn(); }
+    catch (e: any) { toast.error(e?.message ?? 'Could not undo it.'); }
+  };
+  const writtenOff = (writeOffsQ.data ?? []).reduce((sum, w) => sum + Number(w.amount), 0);
   const saveFieldsMut = useMutation((v: Record<string, any>) => customFieldsApi.set('sale', id, v));
 
   useEffect(() => {
@@ -963,6 +980,26 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
               <div className="view-meta">
                 <div><span>Date</span><strong>{prettyDate(data.transaction_date)}</strong></div>
                 <div><span>Customer</span><strong>{customerName(data.customer_id)}</strong></div>
+                {data.due_date && (
+                  <div>
+                    <span>Due</span>
+                    {dueEdit !== null ? (
+                      <span className="sd-due-edit">
+                        <input type="date" value={dueEdit} onChange={e => setDueEdit(e.target.value)} aria-label="New due date" />
+                        <button type="button" className="btn-primary btn-sm" onClick={saveDue}>Save</button>
+                        <button type="button" className="btn-ghost btn-sm" onClick={() => setDueEdit(null)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <strong>
+                        {prettyDate(data.due_date)}
+                        {data.balance > 0 && dueText(data.due_date).late && <span className="sd-late"> · {dueText(data.due_date).text}</span>}
+                        {canMoveDue && data.balance > 0 && !data.voided && (
+                          <button type="button" className="link-inline sd-due-btn" onClick={() => setDueEdit(data.due_date.slice(0, 10))}>Change</button>
+                        )}
+                      </strong>
+                    )}
+                  </div>
+                )}
                 {seesProfit && <div><span>Cost of goods</span><strong>{fmt(data.cogs)}</strong></div>}
                 {seesProfit && <div><span>Gross profit</span><strong className={data.gross_profit < 0 ? 'text-danger' : ''}>{fmt(data.gross_profit)}</strong></div>}
               </div>
@@ -983,13 +1020,26 @@ function SaleDetail({ id, onClose, customerName, productName, isAdmin, onVoidedR
                 rows={[
                   data.vat_amount > 0 && { label: 'Subtotal', value: fmt(data.subtotal) },
                   data.vat_amount > 0 && { label: `VAT (${data.vat_rate}%)`, value: fmt(data.vat_amount) },
-                  { label: 'Total', value: fmt(data.total_amount) },
+                  Number(data.opening_amount || 0) > 0
+                    ? { label: 'Owed before ProfixBook', value: fmt(data.opening_amount) }
+                    : { label: 'Total', value: fmt(data.total_amount) },
                   data.returned_total > 0 && { label: 'Returned', value: `−${fmt(data.returned_total)}`, tone: 'bad' },
                   { label: 'Paid', value: fmt(data.amount_paid) },
+                  writtenOff > 0 && { label: 'Written off', value: `−${fmt(writtenOff)}`, tone: 'muted' },
                 ]}
                 total={data.balance > 0
                   ? { label: 'Balance due', value: fmt(data.balance), tone: 'warn' }
                   : { label: 'Paid in full', value: fmt(0), tone: 'good' }} />
+              {isAdmin && (writeOffsQ.data ?? []).length > 0 && (
+                <div className="sd-writeoffs">
+                  {(writeOffsQ.data ?? []).map(w => (
+                    <div key={w.id}>
+                      <span>Written off {fmt(w.amount)} on {prettyDate(w.writeoff_date)}{w.reason ? `: ${w.reason}` : ''}</span>
+                      <button type="button" className="btn-ghost btn-sm" onClick={() => undoWriteOff(w.id)}><Undo2 size={13} /> Undo</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {creditNotes && creditNotes.length > 0 && (
                 <>
                   <h3 className="section-title">Credit Notes</h3>

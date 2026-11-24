@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, X, Pencil, Trash2, Wallet, MessageCircle, Phone, Copy, Link2, Eye } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Wallet, MessageCircle, Phone, Copy, Link2, Eye, FileText, Ban, History } from 'lucide-react';
 import {
-  customers as customersApi, sales as salesApi, lookups, pricing, customFieldDefs, payments as paymentsApi,
+  customers as customersApi, sales as salesApi, lookups, pricing, customFieldDefs, payments as paymentsApi, debts,
   Customer, PriceList, CustomFieldDef, SaleBalance, Lookup, IntegrationStatus,
 } from '../lib/api';
 import { useQuery, useMutation } from '../lib/hooks';
@@ -17,6 +17,10 @@ import OfflineBanner from '../components/OfflineBanner';
 import CustomFieldsSection from '../components/CustomFieldsSection';
 import CollectPaymentModal from '../components/CollectPaymentModal';
 import Modal from '../components/Modal';
+import NumberInput from '../components/NumberInput';
+import StatementModal from '../components/StatementModal';
+import OpeningDebtModal from '../components/OpeningDebtModal';
+import { dueText } from '../lib/debts';
 import '../styles/accounts.scss';
 
 const fmt = (n: number) => '₦' + (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -26,6 +30,7 @@ const fmtDate = (d: string | null | undefined) =>
 const emptyForm = {
   first_name: '', last_name: '', company_store: '', address: '', phone: '', email: '', customer_type_id: '', price_list_id: '',
   tin: '', customer_kind: 'b2c' as 'b2b' | 'b2c', custom_fields: {} as Record<string, any>,
+  payment_terms_days: '' as string,
 };
 
 export const customerTitle = (c: Pick<Customer, 'first_name' | 'last_name' | 'company_store'>) =>
@@ -82,6 +87,7 @@ export default function Customers() {
       address: c.address ?? '', phone: c.phone ?? '', email: c.email ?? '', customer_type_id: c.customer_type_id ?? '',
       price_list_id: c.price_list_id ?? '', tin: c.tin ?? '', customer_kind: c.customer_kind ?? 'b2c',
       custom_fields: c.custom_fields ?? {},
+      payment_terms_days: c.payment_terms_days == null ? '' : String(c.payment_terms_days),
     });
     setShowModal(true);
   };
@@ -91,18 +97,22 @@ export default function Customers() {
   // reject the whole save).
   const schemaHasCustomFields = (rows ?? []).some(r => 'custom_fields' in r);
   const schemaHasEinvoiceFields = (rows ?? []).some(r => 'customer_kind' in r);
+  const schemaHasTerms = (rows ?? []).some(r => 'payment_terms_days' in r);
   const hasName = !!(form.first_name.trim() || form.company_store.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasName) { toast.error("Enter the customer's name or their business name."); return; }
-    const { price_list_id, tin, customer_kind, custom_fields, ...rest } = form;
+    const { price_list_id, tin, customer_kind, custom_fields, payment_terms_days, ...rest } = form;
+    const terms = payment_terms_days.trim() === '' ? null : Math.round(Number(payment_terms_days));
+    if (terms !== null && (!Number.isFinite(terms) || terms < 0 || terms > 365)) { toast.error('Payment terms must be between 0 and 365 days.'); return; }
     const trimmed = Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, typeof v === 'string' ? (v.trim() || null) : v]));
     const payload = {
       ...trimmed, customer_type_id: form.customer_type_id || null,
       ...(tiersEnabled ? { price_list_id: price_list_id || null } : {}),
       ...(schemaHasEinvoiceFields ? { tin: tin.trim() || null, customer_kind } : {}),
       ...(schemaHasCustomFields || Object.keys(custom_fields).length > 0 ? { custom_fields } : {}),
+      ...(schemaHasTerms ? { payment_terms_days: terms } : {}),
     };
     const res = editRow
       ? await updateMut.mutate(editRow.id, payload)
@@ -273,6 +283,14 @@ export default function Customers() {
                   <div className="form-group"><label htmlFor="cus-email">Email (optional)</label><input id="cus-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                   <div className="form-group"><label htmlFor="cus-address">Address</label><input id="cus-address" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
                 </div>
+                {schemaHasTerms && (
+                  <div className="form-group">
+                    <label htmlFor="cus-terms">Days they have to pay</label>
+                    <input id="cus-terms" inputMode="numeric" value={form.payment_terms_days} placeholder="Your usual terms"
+                           onChange={e => setForm(f => ({ ...f, payment_terms_days: e.target.value.replace(/[^\d]/g, '').slice(0, 3) }))} />
+                    <small className="acct-note">For example 14 or 30. Leave it empty to use your usual terms from Settings. Invoices show the due date, and Reports show who is late.</small>
+                  </div>
+                )}
                 {tiersEnabled && (
                   <div className="form-group">
                     <label htmlFor="cus-pricelist">Price list</label>
@@ -339,6 +357,10 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
   const { data: integration } = useQuery<IntegrationStatus>(() => paymentsApi.integrationStatus().catch(() => ({ connected: false } as IntegrationStatus)), []);
   const [collecting, setCollecting] = useState<SaleBalance | null>(null);
   const [linkFor, setLinkFor] = useState<string | null>(null);
+  const [showStatement, setShowStatement] = useState(false);
+  const [addingOpening, setAddingOpening] = useState(false);
+  const [writingOff, setWritingOff] = useState<SaleBalance | null>(null);
+  const isOwner = profile?.role === 'admin';
 
   const name = customerTitle(customer);
   const bank = tenant?.bank_details;
@@ -414,7 +436,11 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
             {customer.phone && (
               <a className="btn-secondary" href={`tel:${customer.phone.replace(/\s+/g, '')}`}><Phone size={16} /> Call</a>
             )}
+            <button type="button" className="btn-secondary" onClick={() => setShowStatement(true)}><FileText size={16} /> Statement</button>
             <button type="button" className="btn-ghost" onClick={onEdit}><Pencil size={16} /> Edit details</button>
+            {isOwner && (
+              <button type="button" className="btn-ghost" onClick={() => setAddingOpening(true)}><History size={16} /> Owed before ProfixBook</button>
+            )}
           </div>
 
           <section className="acct-section">
@@ -422,14 +448,20 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
             {open.length === 0 ? (
               <div className="acct-empty">{account.invoices > 0 ? `${name} has paid every invoice.` : `No sales to ${name} yet.`}</div>
             ) : (
-              <ul className="acct-list">
+              <ul className={`acct-list${isOwner ? ' has-many-actions' : ''}`}>
                 {open.map(s => (
                   <li key={s.id}>
                     <div className="acct-list-main">
-                      <span className="acct-list-title">{docNo(s)}</span>
+                      <span className="acct-list-title">
+                        {docNo(s)}
+                        {Number(s.opening_amount || 0) > 0 && <span className="acct-list-tag">owed before ProfixBook</span>}
+                      </span>
                       <span className="acct-list-meta">
-                        {fmtDate(s.transaction_date)} · {daysOld(s.transaction_date) === 0 ? 'today' : `${daysOld(s.transaction_date)} days ago`}
-                        {s.amount_paid > 0 && ` · paid ${fmt(s.amount_paid)} of ${fmt(s.total_amount)}`}
+                        {fmtDate(s.transaction_date)}
+                        {s.due_date
+                          ? <> · <span className={dueText(s.due_date).late ? 'acct-late' : undefined}>{dueText(s.due_date).text}</span></>
+                          : <> · {daysOld(s.transaction_date) === 0 ? 'today' : `${daysOld(s.transaction_date)} days ago`}</>}
+                        {s.amount_paid > 0 && ` · paid ${fmt(s.amount_paid)} of ${fmt(s.total_amount + Number(s.opening_amount || 0))}`}
                       </span>
                     </div>
                     <span className="acct-list-amount acct-owed">{fmt(s.balance)}</span>
@@ -438,6 +470,11 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
                       {integration?.connected && (
                         <button type="button" className="btn-ghost btn-sm" onClick={() => sendPayLink(s)} disabled={linkFor === s.id}>
                           <Link2 size={13} /> {linkFor === s.id ? 'Creating…' : 'Pay link'}
+                        </button>
+                      )}
+                      {isOwner && (
+                        <button type="button" className="btn-ghost btn-sm" onClick={() => setWritingOff(s)}>
+                          <Ban size={13} /> Write off
                         </button>
                       )}
                     </div>
@@ -480,6 +517,76 @@ function CustomerAccountModal({ customer, account, onClose, onEdit, onPaid }: {
           onDone={() => { setCollecting(null); onPaid(); }}
         />
       )}
+      {showStatement && (
+        <StatementModal customerId={customer.id} customerName={name} phone={customer.phone} onClose={() => setShowStatement(false)} />
+      )}
+      {addingOpening && (
+        <OpeningDebtModal kind="customer" partyId={customer.id} partyName={name}
+                          onClose={() => setAddingOpening(false)} onDone={() => { setAddingOpening(false); onPaid(); }} />
+      )}
+      {writingOff && (
+        <WriteOffModal sale={writingOff} docNo={docNo(writingOff)} customerName={name}
+                       onClose={() => setWritingOff(null)} onDone={() => { setWritingOff(null); onPaid(); }} />
+      )}
     </>
+  );
+}
+
+// Writing off what a customer will never pay (migration 0062). No money
+// moves: the invoice stops being owed and the amount shows as a bad debt
+// on the Profit & Loss.
+function WriteOffModal({ sale, docNo, customerName, onClose, onDone }: {
+  sale: SaleBalance; docNo: string; customerName: string; onClose: () => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const [amount, setAmount] = useState(Number(sale.balance));
+  const [reason, setReason] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (amount <= 0 || amount > sale.balance + 0.005) { setError(`Enter an amount from ₦1 up to ${fmt(sale.balance)}.`); return; }
+    setPending(true); setError(null);
+    try {
+      await debts.writeOff(sale.id, amount, reason.trim() || null);
+      toast.success(`${fmt(amount)} written off ${docNo}.`);
+      onDone();
+    } catch (err: any) {
+      setError(err?.message ?? 'Could not write it off.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth={440}>
+      <div className="modal-header">
+        <h2>Write off {docNo}</h2>
+        <button className="close-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      </div>
+      <form onSubmit={submit}>
+        <div className="modal-body">
+          {error && <ErrorState message={error} />}
+          <p style={{ fontSize: '0.875rem', color: '#475569', lineHeight: 1.55, margin: '0 0 1rem' }}>
+            Only when {customerName} will never pay. The invoice stops showing as owed, and the amount counts as a bad debt
+            on your Profit &amp; Loss. No money moves. If they pay after all, open the invoice under Sales Orders and undo the write-off.
+          </p>
+          <div className="form-group">
+            <label htmlFor="wo-amount">Amount to write off (₦)</label>
+            <NumberInput id="wo-amount" value={amount} onChange={setAmount} />
+            <small className="acct-note">{fmt(sale.balance)} is still owed on this invoice.</small>
+          </div>
+          <div className="form-group">
+            <label htmlFor="wo-reason">Why (optional)</label>
+            <input id="wo-reason" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Customer closed the shop and moved away" />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-danger" disabled={pending}>{pending ? 'Saving…' : 'Write off'}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
