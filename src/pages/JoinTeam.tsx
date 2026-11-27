@@ -49,7 +49,7 @@ export default function JoinTeam() {
     if (!invite) return;
     setError(null); setErrorCode(null);
     if (!fullName.trim()) { setError('Enter your name.'); return; }
-    if (password.length < 6) { setError('Your password needs at least 6 characters.'); return; }
+    if (password.length < 8) { setError('Your password needs at least 8 characters.'); return; }
     setSaving(true);
     const res = await team.acceptInvite(inviteId, fullName.trim(), password);
     if (!res.success) {
@@ -94,9 +94,11 @@ export default function JoinTeam() {
     return shell(
       <>
         <div className="auth-intro">
-          <h2>{invite ? 'This invite has already been used' : 'This invite link is not valid'}</h2>
+          <h2>{!invite ? 'This invite link is not valid' : invite.status === 'expired' ? 'This invite link has expired' : 'This invite has already been used'}</h2>
           <p>
-            {invite
+            {invite?.status === 'expired'
+              ? 'Invite links last 7 days. Ask whoever invited you to send a new one.'
+              : invite
               ? 'If you already joined, sign in with your email and password. If you never set a password, ask your admin to send you a new invite link.'
               : 'It may have been cancelled, or the link was cut short when it was copied. Ask whoever invited you to send it again.'}
           </p>
@@ -135,7 +137,7 @@ export default function JoinTeam() {
           <label htmlFor="join-password">Choose a password</label>
           <div className="auth-password">
             <input id="join-password" type={showPassword ? 'text' : 'password'} value={password}
-              onChange={e => setPassword(e.target.value)} autoComplete="new-password" required minLength={6} placeholder="At least 6 characters" />
+              onChange={e => setPassword(e.target.value)} autoComplete="new-password" required minLength={8} placeholder="At least 8 characters" />
             <button type="button" className="auth-password-toggle" onClick={() => setShowPassword(s => !s)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}>
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}

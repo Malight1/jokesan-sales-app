@@ -25,7 +25,7 @@ export default function ResetPassword() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
     if (password !== confirm) { setError("Those two passwords don't match."); return; }
     setSaving(true);
     const { error: err } = await supabase.auth.updateUser({ password });
@@ -72,12 +72,12 @@ export default function ResetPassword() {
               <div className="form-group">
                 <label htmlFor="rp-new">New password</label>
                 <input id="rp-new" type="password" value={password} onChange={e => setPassword(e.target.value)}
-                       required minLength={6} autoComplete="new-password" placeholder="At least 6 characters" />
+                       required minLength={8} autoComplete="new-password" placeholder="At least 8 characters" />
               </div>
               <div className="form-group">
                 <label htmlFor="rp-confirm">Type it again</label>
                 <input id="rp-confirm" type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                       required minLength={6} autoComplete="new-password" />
+                       required minLength={8} autoComplete="new-password" />
               </div>
               <button type="submit" className="btn-primary auth-submit" disabled={saving}>
                 {saving ? <><Loader2 size={16} className="spin" /> Saving…</> : 'Save New Password'}

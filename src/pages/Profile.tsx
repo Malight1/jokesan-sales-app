@@ -43,7 +43,7 @@ export default function Profile() {
 
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.length < 6) { toast.error('Use at least 6 characters.'); return; }
+    if (password.length < 8) { toast.error('Use at least 8 characters.'); return; }
     if (password !== confirm) { toast.error("The two passwords don't match."); return; }
     const res = await passMut.mutate(password);
     if (res !== null) {
@@ -113,7 +113,7 @@ export default function Profile() {
             <div className="form-group">
               <label>New password</label>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                     autoComplete="new-password" placeholder="At least 6 characters" />
+                     autoComplete="new-password" placeholder="At least 8 characters" />
             </div>
 
             <div className="form-group">

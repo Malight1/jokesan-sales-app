@@ -21,7 +21,7 @@ export default function AcceptInvite() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
     if (password !== confirm) { setError("Passwords don't match."); return; }
     setSaving(true);
     const { error: err } = await supabase.auth.updateUser({ password });
@@ -71,11 +71,11 @@ export default function AcceptInvite() {
         <form onSubmit={submit}>
           <div className="form-group">
             <label>New Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} placeholder="••••••••" />
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} placeholder="••••••••" />
           </div>
           <div className="form-group">
             <label>Confirm Password</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required minLength={6} placeholder="••••••••" />
+            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required minLength={8} placeholder="••••••••" />
           </div>
           <button type="submit" className="btn-primary auth-submit" disabled={saving}>
             {saving ? <><Loader2 size={16} className="spin" /> Saving…</> : 'Set Password & Continue'}

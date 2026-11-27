@@ -17,6 +17,15 @@ create function t_id(p_k text) returns uuid language sql stable security definer
 $$;
 -- Act as a signed-in user through the API role, so RLS and the stock lock
 -- see exactly what PostgREST would.
+-- Change the test business's plan the way the server does (no signed-in
+-- user), whoever the test is currently acting as (0065 blocks owners).
+create function t_plan(p_plan text) returns void language plpgsql security definer as $$
+declare v_sub text := current_setting('request.jwt.claim.sub', true);
+begin
+  perform set_config('request.jwt.claim.sub', '', false);
+  update tenants set plan = p_plan::plan_tier where id = t_id('tenant');
+  perform set_config('request.jwt.claim.sub', coalesce(v_sub, ''), false);
+end $$;
 create function t_as(p_uid uuid) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claim.sub', p_uid::text, false);
@@ -54,6 +63,7 @@ create function t_stock(p_branch uuid, p_product uuid) returns numeric language 
        + coalesce((select sum(qty_remaining) from purchase_items where branch_id = p_branch and material_id = p_product), 0)
 $$;
 grant all on t_results, t_ids to authenticated;
+grant execute on function t_plan(text) to authenticated;
 grant usage, select on sequence t_results_n_seq to authenticated;
 
 -- ---------- 1. the company, its branches and its people ----------
@@ -2323,7 +2333,7 @@ begin
 
   -- ---- A: at Starter, none of the four Growth+ features work ----
   perform t_as(v_admin);
-  update tenants set plan = 'starter' where id = t_id('tenant');
+  perform t_plan('starter');
   perform t_su();
 
   perform t_as(v_admin);
@@ -2345,7 +2355,7 @@ begin
 
   -- ---- B: at Growth, all four work ----
   perform t_as(v_admin);
-  update tenants set plan = 'growth' where id = t_id('tenant');
+  perform t_plan('growth');
   perform t_su();
 
   perform t_as(v_admin);
@@ -2368,7 +2378,7 @@ begin
     v_limit int; v_used int; v_headroom int; i int;
   begin
     perform t_as(v_admin);
-    update tenants set plan = 'starter' where id = t_id('tenant');
+    perform t_plan('starter');
     perform t_su();
 
     perform t_as(v_admin);
@@ -2379,7 +2389,7 @@ begin
     perform t_su();
 
     perform t_as(v_admin);
-    update tenants set plan = 'growth' where id = t_id('tenant');
+    perform t_plan('growth');
     perform t_su();
 
     select public.plan_user_limit('growth') into v_limit;
@@ -2408,7 +2418,7 @@ begin
     v_limit int; v_used int; v_headroom int; i int;
   begin
     perform t_as(v_admin);
-    update tenants set plan = 'starter' where id = t_id('tenant');
+    perform t_plan('starter');
     perform t_su();
 
     perform t_as(v_admin);
@@ -2418,7 +2428,7 @@ begin
     perform t_su();
 
     perform t_as(v_admin);
-    update tenants set plan = 'growth' where id = t_id('tenant');
+    perform t_plan('growth');
     perform t_su();
 
     select public.plan_branch_limit('growth') into v_limit;
@@ -2671,7 +2681,7 @@ begin
   perform t_su();
 end $$;
 
--- ---------- 47. a platform-admin-flagged signup gets no tenant at all (0043) ----------
+-- ---------- 47. a platform-admin flag in sign-up data is ignored (0043, closed in 0065) ----------
 do $$
 declare
   v_pure_admin uuid := '00000000-0000-0000-0000-0000000000ae';
@@ -2683,13 +2693,14 @@ begin
     (v_pure_admin, 'pure-admin@stockflow.test', '{"platform_admin": true}');
   select count(*) into v_tenants_after from tenants;
 
-  perform t_rec('a platform_admin signup creates no new tenant', v_tenants_after = v_tenants_before);
-  perform t_rec('a platform_admin signup gets no profile row', not exists (select 1 from profiles where id = v_pure_admin));
-  perform t_rec('a platform_admin signup is registered directly in platform_admins',
-    exists (select 1 from platform_admins where user_id = v_pure_admin));
-
+  -- Since 0065 this flag does nothing: anyone can put it in their own
+  -- sign-up data, so it must never grant platform admin.
+  perform t_rec('a platform_admin flag in sign-up data is ignored: an ordinary business is made',
+    v_tenants_after = v_tenants_before + 1 and exists (select 1 from profiles where id = v_pure_admin and role = 'admin'));
+  perform t_rec('and the account is NOT a platform admin',
+    not exists (select 1 from platform_admins where user_id = v_pure_admin));
   perform t_as(v_pure_admin);
-  perform t_ok('the new platform admin can call a guarded platform_* RPC', 'select public.platform_tenants()');
+  perform t_err('so it can''t call platform tools', 'select public.platform_tenants()', 'Not authorised');
   perform t_su();
 
   -- The ordinary signup path is completely unaffected by this branch.
@@ -3147,6 +3158,7 @@ begin
     not (v_snap->'access'->>'can_write')::boolean and v_snap->'access'->>'reason' = 'suspended');
 
   -- Unconfirmed owners show up until they confirm.
+  update auth.users set email_confirmed_at = null where id = v_owner;
   perform t_as(v_admin);
   perform t_rec('an owner who never confirmed their email needs attention',
     exists (select 1 from public.platform_needs_attention() where kind = 'unconfirmed_owner' and tenant_id = t_id('tenant')));
@@ -3305,7 +3317,7 @@ begin
   perform t_su();
 
   perform t_as('00000000-0000-0000-0000-000000000001');
-  update tenants set plan = 'growth' where id = t_id('tenant');
+  perform t_plan('growth');
   perform t_rec('a manufacturer still gets no "buy" rows for goods it produces',
     not exists (select 1 from public.reorder_suggestions() where product_kind = 'finished_good'));
   perform t_su();
@@ -3441,8 +3453,11 @@ begin
     public.invite_claim_existing(v_inv) ->> 'state' = 'has_password');
 
   -- An account that exists with no business at all gets attached.
+  -- (Made with the sign-up trigger skipped: sign-up can no longer make an account with no business, 0065.)
+  set session_replication_role = replica;
   insert into auth.users (id, email, raw_user_meta_data) values
-    ('00000000-0000-0000-0000-000000000022', 'orphan@jokesan.ng', '{"platform_admin":true}');
+    ('00000000-0000-0000-0000-000000000022', 'orphan@jokesan.ng', '{}');
+  set session_replication_role = origin;
   insert into staff_invites (tenant_id, email, role) values (v_t, 'orphan@jokesan.ng', 'inventory') returning id into v_orphan_inv;
   v_state := public.invite_claim_existing(v_orphan_inv);
   perform t_rec('an account with no business is attached to it', v_state ->> 'state' = 'attached'
@@ -4526,6 +4541,89 @@ begin
   perform t_ok('Business: recording money works',
     format('insert into money_entries (kind, to_account, amount) values (''owner_in'', %L, 10)', v_bank));
   perform t_su();
+end $$;
+
+-- ---------- 31. security fixes (0065) ----------
+do $$
+declare
+  v_a uuid; v_b uuid; v_bprod uuid; v_inv uuid; v_old uuid; v_n int;
+begin
+  perform t_su();
+  -- Two businesses signed up the normal way (confirmed emails).
+  insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) values
+    ('a1a1a1a1-0000-0000-0000-000000000001', 'sec-owner-a@example.com', '{"company_name":"Sec Shop A"}', now()),
+    ('b1b1b1b1-0000-0000-0000-000000000001', 'sec-owner-b@example.com', '{"company_name":"Sec Shop B"}', now());
+  select tenant_id into v_a from profiles where id = 'a1a1a1a1-0000-0000-0000-000000000001';
+  select tenant_id into v_b from profiles where id = 'b1b1b1b1-0000-0000-0000-000000000001';
+  insert into finished_goods (tenant_id, name, selling_price) values (v_b, 'Sec B product', 999) returning id into v_bprod;
+
+  -- C1: sign-up can't make a platform admin.
+  insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
+  values ('c1c1c1c1-0000-0000-0000-000000000001', 'sneaky@example.com', '{"platform_admin": true, "company_name":"Sneaky"}', now());
+  perform t_rec('sign-up data can''t make someone a platform admin',
+    not exists (select 1 from platform_admins where user_id = 'c1c1c1c1-0000-0000-0000-000000000001')
+    and exists (select 1 from profiles where id = 'c1c1c1c1-0000-0000-0000-000000000001' and role = 'admin'));
+
+  -- C2: an owner can't change billing fields on their own business.
+  perform t_as('a1a1a1a1-0000-0000-0000-000000000001');
+  perform t_err('an owner can''t give their business the Business plan',
+    format('update tenants set plan = ''business'', plan_expires_at = now() + interval ''10 years'' where id = %L', v_a), 'only be changed by paying');
+  perform t_err('an owner can''t extend their own trial',
+    format('update tenants set trial_ends_at = now() + interval ''5 years'' where id = %L', v_a), 'only be changed by paying');
+  perform t_err('an owner can''t raise their own AI limit',
+    format('update tenants set assistant_monthly_limit = 100000 where id = %L', v_a), 'only be changed by paying');
+  perform t_err('an owner can''t give themselves a founding price',
+    format('update tenants set founding_number = 1 where id = %L', v_a), 'only be changed by paying');
+  perform t_ok('an owner can still change their business name and VAT',
+    format('update tenants set name = ''Sec Shop A Ltd'', vat_enabled = true, vat_rate = 7.5 where id = %L', v_a));
+  perform t_su();
+  update tenants set is_active = false where id = v_a;
+  perform t_as('a1a1a1a1-0000-0000-0000-000000000001');
+  perform t_err('a suspended business can''t lift its own suspension',
+    format('update tenants set is_active = true where id = %L', v_a), 'only be changed by paying');
+  perform t_su();
+  update tenants set is_active = true where id = v_a;
+  perform t_rec('the server can still change a plan', (select true));
+
+  -- Businesses stay apart.
+  perform t_as('a1a1a1a1-0000-0000-0000-000000000001');
+  select count(*) into v_n from finished_goods where tenant_id = v_b;
+  perform t_rec('one business can''t read another''s products', v_n = 0, v_n::text);
+  update finished_goods set selling_price = 1 where id = v_bprod;
+  perform t_su();
+  perform t_rec('one business can''t change another''s prices', (select selling_price = 999 from finished_goods where id = v_bprod));
+
+  -- M2 + L4: invites.
+  perform t_as('a1a1a1a1-0000-0000-0000-000000000001');
+  insert into staff_invites (email, role) values ('fresh-invite@example.com', 'sales') returning id into v_inv;
+  perform t_su();
+  insert into staff_invites (tenant_id, email, role, created_at) values (v_a, 'old-invite@example.com', 'sales', now() - interval '8 days') returning id into v_old;
+  perform t_rec('an invite older than 7 days shows as expired',
+    (select status = 'expired' from public.invite_details(v_old)) and (select status = 'pending' from public.invite_details(v_inv)));
+  perform t_rec('an expired invite link can''t be claimed', public.invite_claim_existing(v_old)->>'state' = 'no_invite');
+  perform t_err('a plain sign-up with an invited email is refused',
+    'insert into auth.users (id, email, email_confirmed_at) values (''d1d1d1d1-0000-0000-0000-000000000001'', ''fresh-invite@example.com'', null)', 'Open the link in your invite');
+  insert into auth.users (id, email, email_confirmed_at) values ('f1f1f1f1-0000-0000-0000-000000000002', 'fresh-invite@example.com', now());
+  perform t_rec('a confirmed account from the invite link joins the business',
+    (select tenant_id = v_a and role = 'sales' from profiles where id = 'f1f1f1f1-0000-0000-0000-000000000002'));
+  insert into auth.users (id, email, email_confirmed_at) values ('e1e1e1e1-0000-0000-0000-000000000003', 'old-invite@example.com', now());
+  perform t_rec('an expired invite doesn''t attach a new account to the business',
+    (select tenant_id <> v_a from profiles where id = 'e1e1e1e1-0000-0000-0000-000000000003'));
+
+  -- L1: visitors who aren't signed in.
+  execute 'set role anon';
+  perform t_err('a visitor can''t call business functions', 'select public.report_balance_sheet()', 'permission denied');
+  perform t_err('a visitor can''t look up a branch name', 'select public.branch_name(gen_random_uuid())', 'permission denied');
+  perform t_rec('a visitor can still open an invite link', (select count(*) = 1 from public.invite_details(v_inv)));
+  execute 'reset role';
+  perform t_as('a1a1a1a1-0000-0000-0000-000000000001');
+  perform t_err('a signed-in user can''t call internal helpers', format('select public.money_default_account(%L::uuid)', v_b), 'permission denied');
+  perform t_ok('a signed-in user can still use their own functions', 'select public.my_doc_code()');
+  perform t_su();
+
+  -- L3: a pay link written from the app starts unpaid.
+  perform t_rec('pay links always start unpaid (guard in place)',
+    exists (select 1 from pg_trigger where tgname = 'trg_guard_payment_link_insert'));
 end $$;
 
 select name, pass, detail from t_results order by n;

@@ -34,7 +34,8 @@ create table auth.users (
   created_at timestamptz default now(),
   -- Real Supabase columns the support snapshot (0049) reads.
   last_sign_in_at timestamptz,
-  email_confirmed_at timestamptz
+  -- Most test accounts behave as confirmed; a test passes null to act out an unconfirmed sign-up.
+  email_confirmed_at timestamptz default now()
 );
 -- Supabase resolves the caller from the JWT; here a GUC stands in for it.
 create or replace function auth.uid() returns uuid language sql stable as $$

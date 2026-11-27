@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   try {
     const { inviteId, fullName, password } = await req.json();
     if (!inviteId || !UUID.test(String(inviteId))) return json({ error: 'This invite link is not valid.' });
-    if (!password || String(password).length < 6) return json({ error: 'Password must be at least 6 characters.' });
+    if (!password || String(password).length < 8) return json({ error: 'Password must be at least 8 characters.' });
     const name = String(fullName ?? '').trim().slice(0, 120);
     if (!name) return json({ error: 'Enter your name.' });
 

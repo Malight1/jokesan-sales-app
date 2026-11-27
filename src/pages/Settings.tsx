@@ -892,7 +892,7 @@ function BusinessTab() {
 
   const submitPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pw.length < 6) { toast.error('Password must be at least 6 characters.'); return; }
+    if (pw.length < 8) { toast.error('Password must be at least 8 characters.'); return; }
     if (pw !== pw2) { toast.error('Passwords do not match.'); return; }
     const res = await savePw.mutate(pw);
     if (res !== null) { toast.success('Password changed.'); setPw(''); setPw2(''); }
@@ -1146,11 +1146,11 @@ function BusinessTab() {
             <div className="grid-2">
               <div className="form-group">
                 <label>New Password</label>
-                <input type="password" value={pw} onChange={e => setPw(e.target.value)} minLength={6} required />
+                <input type="password" value={pw} onChange={e => setPw(e.target.value)} minLength={8} required />
               </div>
               <div className="form-group">
                 <label>Confirm Password</label>
-                <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} minLength={6} required />
+                <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} minLength={8} required />
               </div>
             </div>
             <button className="btn-primary" type="submit" disabled={savePw.pending}>
@@ -1312,7 +1312,11 @@ function TeamTab({ isMultiBranch }: { isMultiBranch: boolean }) {
     { key: 'email', header: 'Email', value: inv => inv.email, render: inv => <strong>{inv.email}</strong> },
     { key: 'role', header: 'Role', value: inv => inv.role, render: inv => <span className="badge-gray">{ROLE_NAME[inv.role] ?? inv.role}</span> },
     { key: 'created_at', header: 'Invited', value: inv => inv.created_at,
-      render: inv => new Date(inv.created_at).toLocaleDateString('en-GB') },
+      render: inv => Date.now() - new Date(inv.created_at).getTime() > 7 * 86400000
+        ? <span title="Invite links last 7 days. Cancel this one and invite them again.">
+            {new Date(inv.created_at).toLocaleDateString('en-GB')} · <span className="badge-warning">Expired</span>
+          </span>
+        : new Date(inv.created_at).toLocaleDateString('en-GB') },
     { key: 'actions', header: '', sortable: false, align: 'right', value: () => '',
       render: inv => (
         <>

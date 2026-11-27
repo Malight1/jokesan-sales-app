@@ -20,6 +20,11 @@ function friendlyAuthError(msg: string, mode: Mode): string {
       ? 'This email already has an account. Sign in instead, or tap "Forgot password?".'
       : msg;
   }
+  // The sign-up trigger refuses an invited email (0065); Supabase reports it as a database error.
+  if (/team invite|database error saving new user/i.test(msg)) {
+    return 'This email has been invited to join a team. Open the invite link you were sent to set your password and join. If the link has expired, ask whoever invited you to send a new one.';
+  }
+  if (/password should be at least|weak password|password is too short/i.test(msg)) return 'Use a password with at least 8 characters.';
   if (/rate limit|too many/i.test(msg)) return 'Too many attempts. Wait a few minutes and try again.';
   if (/failed to fetch|network/i.test(msg)) return "We couldn't reach ProfixBook. Check your internet and try again.";
   if (/error sending/i.test(msg)) return "We couldn't send the email just now. Try again in a few minutes, or contact support.";
@@ -80,6 +85,7 @@ export default function Login() {
       const { error } = await signIn(email.trim(), password);
       if (error) setError(/confirm/i.test(error) ? error : friendlyAuthError(error, mode));
     } else {
+      if (password.length < 8) { setError('Use a password with at least 8 characters.'); setLoading(false); return; }
       const { error } = await signUp({ email: email.trim(), password, fullName, companyName, tenantType, businessType });
       if (error) setError(friendlyAuthError(error, mode));
       else setNotice('Account created. Check your email for a confirmation link (look in spam too), then sign in.');
@@ -177,7 +183,7 @@ export default function Login() {
               </div>
               <div className="auth-password">
                 <input id="auth-password" type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-                  required minLength={6} placeholder="••••••••" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+                  required minLength={mode === 'signup' ? 8 : undefined} placeholder="••••••••" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
                 <button type="button" className="auth-password-toggle" onClick={() => setShowPassword(v => !v)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}>
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
