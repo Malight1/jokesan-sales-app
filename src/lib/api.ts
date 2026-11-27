@@ -1823,3 +1823,24 @@ export const payments = {
 // in the Supabase editor, and only ever against the pitch account. Any UI
 // path to it would let a real tenant seed a stranger's contacts into their
 // own live data — see migration 0015.
+
+// ============================================================
+// SETUP CHECKLIST: what a new business has done so far.
+// Head-only counts, so nothing but numbers comes back.
+// ============================================================
+export interface SetupStatus { products: number; staff: number; invites: number; sales: number; moneyStarted: number; }
+const headCount = async (q: PromiseLike<{ count: number | null; error: any }>) => {
+  const { count, error } = await q;
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+};
+export const setupStatus = async (): Promise<SetupStatus> => {
+  const [products, staff, invites, sales, moneyStarted] = await Promise.all([
+    headCount(supabase.from('finished_goods').select('id', { count: 'exact', head: true })),
+    headCount(supabase.from('profiles').select('id', { count: 'exact', head: true })),
+    headCount(supabase.from('staff_invites').select('id', { count: 'exact', head: true }).eq('status', 'pending')),
+    headCount(supabase.from('sales_orders').select('id', { count: 'exact', head: true })),
+    headCount(supabase.from('money_accounts').select('id', { count: 'exact', head: true }).not('opening_date', 'is', null)).catch(() => 0),
+  ]);
+  return { products, staff, invites, sales, moneyStarted };
+};

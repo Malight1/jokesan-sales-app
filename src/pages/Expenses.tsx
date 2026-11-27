@@ -173,7 +173,7 @@ export default function Expenses() {
           <h1>Expenses</h1>
           <p>{month === 'all' ? `${fmt(shownTotal)} spent in total` : `${fmt(shownTotal)} spent in ${monthLabel(month)}`}</p>
         </div>
-        <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Log Expense</button>
+        <button className="btn-primary" onClick={openCreate} data-tour="exp-new"><Plus size={16} /> Log Expense</button>
       </div>
 
       {debtTools && (recurringQ.data ?? []).length > 0 && (

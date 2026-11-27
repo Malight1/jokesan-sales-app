@@ -16,6 +16,7 @@ import { useOnlineSync } from '../lib/useOnlineSync';
 import PendingSyncPanel from './PendingSyncPanel';
 import ConfirmDialog from './ConfirmDialog';
 import BrandMark from './BrandMark';
+import { HelpButton, PageTour } from './help/HelpCenter';
 import { isRetail, label } from '../retail';
 import '../styles/layout.scss';
 
@@ -308,6 +309,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {!online ? 'Offline' : `${pendingCount + failedCount} pending sync`}
               </button>
             )}
+            <HelpButton variant="chip" />
             <button className="till-chip" onClick={() => navigate(location.pathname === '/profile' ? '/pos' : '/profile')}
               aria-label={location.pathname === '/profile' ? 'Back to the till' : 'My profile'}>
               <UserCircle size={15} /> <span className="till-chip-label">{location.pathname === '/profile' ? 'Back to till' : userName}</span>
@@ -324,6 +326,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
           {children}
         </main>
+        <PageTour />
         {showSync && <PendingSyncPanel queue={queue} online={online} onClose={() => setShowSync(false)} />}
         {confirmSignOut && (
           <ConfirmDialog
@@ -404,6 +407,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Menu size={20} />
             </button>
             <h2>{title}</h2>
+            <HelpButton />
           </div>
           <div className="topbar-right">
             {(!online || pendingCount > 0 || failedCount > 0) && (
@@ -557,6 +561,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
           {children}
         </main>
+        <PageTour />
       </div>
 
       {showSync && <PendingSyncPanel queue={queue} online={online} onClose={() => setShowSync(false)} />}

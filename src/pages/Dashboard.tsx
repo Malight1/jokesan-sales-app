@@ -20,6 +20,7 @@ import { useToast } from '../lib/ToastContext';
 import { ErrorState } from '../components/DataStates';
 import OfflineBanner from '../components/OfflineBanner';
 import { RetailDashboard } from '../retail';
+import SetupChecklist from '../components/help/SetupChecklist';
 import './Dashboard.scss';
 
 // ------------------------------------------------------------------
@@ -763,6 +764,7 @@ export default function Dashboard() {
           {data.role === 'admin' && <Link className="db-btn db-btn-primary db-btn-sm" to="/settings">Choose a plan</Link>}
         </div>
       )}
+      {data.role === 'admin' && <SetupChecklist />}
       <DashboardView d={data} onRefresh={refetch} expiry={expiryQ.data} />
       {data.role === 'admin' && <TillWatchPanel />}
     </>

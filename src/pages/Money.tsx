@@ -74,7 +74,7 @@ export default function Money() {
           <button type="button" className="btn-secondary" onClick={() => setEditing({ kind: 'bank', opening_balance: 0, opening_date: today(), is_active: true })}>
             <Plus size={16} /> Add account
           </button>
-          <button type="button" className="btn-primary" onClick={() => setEntryKind('transfer')}>
+          <button type="button" className="btn-primary" onClick={() => setEntryKind('transfer')} data-tour="money-record">
             <ArrowLeftRight size={16} /> Record money
           </button>
         </div>
@@ -100,7 +100,7 @@ export default function Money() {
         </div>
       )}
 
-      <div className="money-accounts">
+      <div className="money-accounts" data-tour="money-accounts">
         {live.map(a => {
           const Icon = KIND_ICON[a.kind];
           const on = current?.id === a.id;
@@ -233,7 +233,7 @@ function AccountLines({ account, onEdit, onChanged, onCheck }: { account: MoneyA
 // Bank statements uploaded for checking (migration 0063).
 function Statements({ list, onUpload }: { list: BankStatementSummary[]; onUpload: () => void }) {
   return (
-    <section className="card money-statements">
+    <section className="card money-statements" data-tour="money-statements">
       <div className="money-lines-head">
         <div>
           <h3>Bank statements</h3>

@@ -773,7 +773,7 @@ export default function POS() {
         <section className="pos-products" aria-label="Products">
           {goodsQ.isOffline && <OfflineBanner label="product list" />}
           <div className="pos-toolbar">
-            <label className="pos-search">
+            <label className="pos-search" data-tour="pos-search">
               <Search size={18} aria-hidden="true" />
               <span className="sr-only">Search products or scan a barcode</span>
               <input
@@ -813,7 +813,7 @@ export default function POS() {
           </p>
 
           <div className="product-grid">
-            {filtered.map(g => {
+            {filtered.map((g, gi) => {
               const n = avail(g);
               const out = n <= 0;
               const low = !out && n <= g.min_stock_level;
@@ -823,6 +823,7 @@ export default function POS() {
                 <button
                   key={g.id}
                   className={`ptile${out ? ' is-out' : ''}${count ? ' in-cart' : ''}`}
+                  data-tour={gi === 0 ? 'pos-tile' : undefined}
                   onClick={() => addToCart(g)}
                   disabled={out}
                   aria-label={`${g.name}, ${fmt(resolvedPrice(g, 1))}, ${stockText}${count ? `, ${count} in sale` : ''}`}
@@ -853,7 +854,7 @@ export default function POS() {
         </section>
 
         {/* ---------------- current sale ---------------- */}
-        <section className={`pos-cart${cartOpen ? ' is-open' : ''}${cart.length ? ' has-items' : ''}`} aria-label="Current sale">
+        <section className={`pos-cart${cartOpen ? ' is-open' : ''}${cart.length ? ' has-items' : ''}`} aria-label="Current sale" data-tour="pos-cart">
           <header className="cart-head">
             <button type="button" className="cart-close" onClick={() => setCartOpen(false)} aria-label="Back to products"><X size={20} /></button>
             <h2>Current sale{multi ? <small> · {myBranchName}</small> : null}</h2>
@@ -1012,7 +1013,7 @@ export default function POS() {
                   )}
                 </div>
 
-                <div className="co-field">
+                <div className="co-field" data-tour="pos-pay">
                   <div className="co-label-row">
                     <span className="co-label" id="pos-pay-label">Payment</span>
                     {liveProviders.length > 0 && (
@@ -1173,7 +1174,7 @@ export default function POS() {
 
         {/* Phones: the sale lives in a sheet, and this bar is how you get there. */}
         {cart.length > 0 && !cartOpen && (
-          <button type="button" className="pos-mobilebar" onClick={() => setCartOpen(true)}>
+          <button type="button" className="pos-mobilebar" onClick={() => setCartOpen(true)} data-tour="pos-cart">
             <span className="mb-count">{itemCount}</span>
             <span className="mb-label">View sale</span>
             <strong>{fmt(total)}</strong>

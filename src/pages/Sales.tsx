@@ -372,7 +372,7 @@ export default function Sales() {
           <h1>Sales Orders</h1>
           <p>Every sale and invoice, what was paid and what is still owed.</p>
         </div>
-        <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }}><Plus size={16} /> New Sale</button>
+        <button className="btn-primary" onClick={() => { resetForm(); setShowModal(true); }} data-tour="sales-new"><Plus size={16} /> New Sale</button>
       </div>
 
       {isOffline && <OfflineBanner label="sales list" />}

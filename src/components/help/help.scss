@@ -1,0 +1,143 @@
+@use '../../styles/variables' as *;
+
+// Help: the ? button, the side panel, first-visit tips and the setup card.
+// Same white surfaces and single blue accent as the rest of the app.
+
+.help-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 32px; height: 32px; border-radius: $radius-full;
+  border: 1px solid $gray-200; background: $white; color: $gray-500;
+  cursor: pointer; transition: $transition-fast;
+  &:hover { color: $primary; border-color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+
+// ---- panel ----
+.help-overlay {
+  position: fixed; inset: 0; z-index: $z-modal;
+  background: rgba(15, 23, 42, 0.32);
+  display: flex; justify-content: flex-end;
+  animation: help-fade 160ms ease-out;
+}
+.help-panel {
+  width: min(420px, 100%); height: 100%;
+  display: flex; flex-direction: column;
+  background: $white; box-shadow: -12px 0 32px rgba(15, 23, 42, 0.12);
+  animation: help-slide 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+.help-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1.1rem 1.25rem; border-bottom: 1px solid $gray-200;
+  h2 { margin: 0; font-size: $font-size-lg; color: $gray-900; }
+}
+.help-body {
+  flex: 1; overflow-y: auto; padding: 1.25rem;
+  section { margin-top: 1.25rem; }
+  h3 { margin: 0 0 0.5rem; font-size: $font-size-sm; font-weight: 700; color: $gray-800; }
+}
+.help-intro { margin: 0; font-size: $font-size-base; line-height: 1.6; color: $gray-700; }
+.help-steps, .help-notes {
+  margin: 0; padding-left: 1.25rem;
+  font-size: $font-size-sm; line-height: 1.6; color: $gray-700;
+  li { margin-bottom: 0.45rem; padding-left: 0.15rem; }
+}
+.help-steps li::marker { color: $primary; font-weight: 700; }
+.help-notes li::marker { color: $gray-400; }
+.help-tour-btn { margin-top: 1.5rem; width: 100%; justify-content: center; }
+.help-foot {
+  padding: 1rem 1.25rem 1.25rem; border-top: 1px solid $gray-200; background: $gray-50;
+}
+.help-stuck { margin: 0 0 0.5rem; font-size: $font-size-sm; font-weight: 700; color: $gray-800; }
+.help-links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+.help-link {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  min-height: 38px; padding: 0.4rem 0.85rem;
+  border: 1px solid $gray-200; border-radius: $radius-full; background: $white;
+  font-size: $font-size-sm; font-weight: 600; color: $gray-700; text-decoration: none;
+  &:hover { border-color: $primary; color: $primary; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+.help-muted { font-size: $font-size-sm; color: $gray-500; }
+.help-switch {
+  display: flex; align-items: center; gap: 0.55rem; cursor: pointer;
+  font-size: $font-size-sm; color: $gray-600;
+  input { width: 17px; height: 17px; accent-color: $primary; flex-shrink: 0; }
+}
+
+// ---- first-visit tips ----
+.tour-layer { position: fixed; inset: 0; z-index: $z-toast; }
+.tour-spot {
+  position: fixed; border-radius: $radius;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.45), 0 0 0 3px $primary;
+  pointer-events: none;
+  transition: top 220ms ease-out, left 220ms ease-out, width 220ms ease-out, height 220ms ease-out;
+}
+.tour-card {
+  position: fixed; box-sizing: border-box;
+  padding: 1.1rem 1.2rem 1rem;
+  background: $white; border-radius: $radius-lg;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
+  outline: none;
+  animation: help-pop 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  h3 { margin: 0 0 0.35rem; font-size: $font-size-base; font-weight: 700; color: $gray-900; }
+}
+.tour-count { margin: 0 0 0.35rem; font-size: $font-size-xs; font-weight: 600; color: $primary; }
+.tour-body { margin: 0 0 1rem; font-size: $font-size-sm; line-height: 1.55; color: $gray-600; }
+.tour-actions { display: flex; align-items: center; gap: 0.4rem; }
+.tour-spacer { flex: 1; }
+
+// ---- setup checklist ----
+.setup-card {
+  margin-bottom: 1.25rem; padding: 1.15rem 1.25rem;
+  background: $white; border: 1px solid $gray-200; border-radius: $radius-lg;
+}
+.setup-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.85rem; }
+.setup-top h2 { margin: 0 0 0.2rem; font-size: $font-size-lg; color: $gray-900; }
+.setup-top p { margin: 0; font-size: $font-size-sm; color: $gray-500; }
+.setup-bar {
+  height: 6px; border-radius: $radius-full; background: $gray-100; overflow: hidden; margin-bottom: 0.75rem;
+  span { display: block; height: 100%; background: $primary; border-radius: inherit; transition: width 300ms ease-out; }
+}
+.setup-list { list-style: none; margin: 0; padding: 0; }
+.setup-item {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.65rem 0; border-top: 1px solid $gray-100;
+  &:first-child { border-top: 0; }
+}
+.setup-mark {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 24px; height: 24px; border-radius: $radius-full;
+  border: 2px solid $gray-300; color: $white;
+  &.is-done { background: #15803d; border-color: #15803d; }
+}
+.setup-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.setup-name { font-size: $font-size-sm; font-weight: 600; color: $gray-800; }
+.setup-item.is-done .setup-name { color: $gray-500; text-decoration: line-through; text-decoration-color: $gray-300; }
+.setup-why { font-size: $font-size-xs; color: $gray-500; line-height: 1.45; }
+
+@keyframes help-fade { from { opacity: 0; } }
+@keyframes help-slide { from { transform: translateX(24px); opacity: 0; } }
+@keyframes help-pop { from { transform: translateY(6px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .help-overlay, .help-panel, .tour-card { animation: none; }
+  .tour-spot { transition: none; }
+}
+@media (max-width: 560px) {
+  .setup-card { padding: 1rem; }
+  .setup-item { flex-wrap: wrap; align-items: flex-start; row-gap: 0.5rem; }
+  .setup-mark { margin-top: 0.1rem; }
+  .setup-text { flex: 1 1 calc(100% - 2.5rem); }
+  .setup-item .btn-secondary { margin-left: 2.25rem; }
+}
+
+.help-panel .close-btn, .setup-card .close-btn {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 34px; height: 34px; border: none; border-radius: $radius-sm;
+  background: none; color: $gray-400; cursor: pointer; transition: $transition-fast;
+  &:hover { color: $gray-800; background: $gray-100; }
+  &:focus-visible { outline: none; box-shadow: $ring; }
+}
+.setup-card .sr-only, .help-panel .sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+}

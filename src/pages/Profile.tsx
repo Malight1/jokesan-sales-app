@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { UserCircle, KeyRound, Check } from 'lucide-react';
+import { UserCircle, KeyRound, Check, HelpCircle } from 'lucide-react';
 import { profileApi } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useMutation } from '../lib/hooks';
 import { useToast } from '../lib/ToastContext';
 import ApprovalPinCard from '../components/ApprovalPinCard';
+import { useHelpState, writeHelp } from '../lib/helpState';
 
 const ROLE_LABEL: Record<string, string> = {
   admin: 'Admin — full access',
@@ -21,6 +22,7 @@ const ROLE_LABEL: Record<string, string> = {
 export default function Profile() {
   const { profile, tenant, refresh } = useAuth();
   const toast = useToast();
+  const help = useHelpState(profile?.id);
 
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [password, setPassword] = useState('');
@@ -124,6 +126,32 @@ export default function Profile() {
               {passMut.pending ? 'Changing…' : 'Change password'}
             </button>
           </form>
+        </div>
+
+        <div className="card">
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.5rem' }}>
+            <HelpCircle size={17} /> Help and tips
+          </h3>
+          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.55 }}>
+            Every page has a help button beside its title. Busy pages also show a few tips the first time you open them.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: '1rem', fontSize: '0.9rem' }}>
+            <input type="checkbox" checked={!help.off} onChange={e => writeHelp(profile?.id, { off: !e.target.checked })}
+                   style={{ width: 18, height: 18, accentColor: '#2563eb' }} />
+            Show tips the first time I open a page
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <button type="button" className="btn-secondary btn-sm"
+                    onClick={() => { writeHelp(profile?.id, { off: false, seen: [] }); toast.success('Tips will show again on each page.'); }}>
+              Show me around again
+            </button>
+            {profile?.role === 'admin' && help.checklistHidden && (
+              <button type="button" className="btn-secondary btn-sm"
+                      onClick={() => { writeHelp(profile?.id, { checklistHidden: false }); toast.success('The setup checklist is back on your dashboard.'); }}>
+                Show the setup checklist
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Admins, sales leads and accounts approve cashier returns (0054). */}

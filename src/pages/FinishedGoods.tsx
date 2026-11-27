@@ -241,7 +241,7 @@ export default function FinishedGoods() {
           <h1>{label(retail, 'Finished Goods', 'Products')}</h1>
           <p>{rows ? `${rows.length} products${manyBranches ? ` · showing ${myBranchName}` : ''}` : ' '}</p>
         </div>
-        {canEditStock && <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Product</button>}
+        {canEditStock && <button className="btn-primary" onClick={openCreate} data-tour="prod-add"><Plus size={16} /> Add Product</button>}
       </div>
 
       <DataTable

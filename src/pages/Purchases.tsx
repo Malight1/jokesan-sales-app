@@ -228,7 +228,7 @@ export default function Purchases() {
                tenant has no materials to order. Retail always buys through
                Quick Purchase, which does support products. */}
             {!retail && <button className="btn-secondary" onClick={() => setShowOrderModal(true)}><PackagePlus size={16} /> Order Stock</button>}
-            <button className="btn-primary" onClick={() => setBuying({ productId: null })}>
+            <button className="btn-primary" onClick={() => setBuying({ productId: null })} data-tour="purch-new">
               <Plus size={16} /> {label(retail, 'Quick Purchase', 'Buy Stock')}
             </button>
           </div>

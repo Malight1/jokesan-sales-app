@@ -196,7 +196,7 @@ export default function Customers() {
           <h1>Customers</h1>
           <p>{rows ? `${rows.length} ${rows.length === 1 ? 'customer' : 'customers'}` : ' '}</p>
         </div>
-        <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Add Customer</button>
+        <button className="btn-primary" onClick={openCreate} data-tour="cust-add"><Plus size={16} /> Add Customer</button>
       </div>
 
       {rows && rows.length > 0 && (
@@ -228,6 +228,7 @@ export default function Customers() {
       )}
 
       {isOffline && <OfflineBanner label="customer list" />}
+      <div data-tour="cust-list">
       <DataTable
         columns={columns}
         rows={rows}
@@ -242,6 +243,7 @@ export default function Customers() {
         rowActions={rowActions}
         emptyMessage="No customers yet. Add the people you sell to on credit, so you can see who owes you and remind them in one tap."
       />
+      </div>
 
       {viewing && (
         <CustomerAccountModal

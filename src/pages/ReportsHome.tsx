@@ -40,7 +40,8 @@ export default function ReportsHome() {
                 const Icon = ICONS[r.id];
                 const locked = !!r.feature && !hasFeature(tenant, r.feature);
                 return (
-                  <Link key={r.id} to={`/reports/${r.id}`} className={`rh-card${locked ? ' is-locked' : ''}`}>
+                  <Link key={r.id} to={`/reports/${r.id}`} className={`rh-card${locked ? ' is-locked' : ''}`}
+                        data-tour={r.id === 'pnl' ? 'rep-first' : r.id === 'accountant' ? 'rep-accountant' : undefined}>
                     <span className="rh-icon" aria-hidden="true"><Icon size={18} /></span>
                     <span className="rh-text">
                       <span className="rh-title">
